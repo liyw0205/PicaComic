@@ -25,10 +25,13 @@ if (flutterVersionName == null) {
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
-keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+def hasKeystoreProperties = keystorePropertiesFile.exists()
+if (hasKeystoreProperties) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
 
 android {
-    compileSdk flutter.compileSdkVersion
+    compileSdk 34
     ndkVersion "28.0.13004108"
 
     splits{
@@ -59,7 +62,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
         minSdkVersion flutter.minSdkVersion
-        targetSdk flutter.targetSdkVersion
+        targetSdk 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
@@ -67,23 +70,27 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
+            if (hasKeystoreProperties) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
         }
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
+            if (hasKeystoreProperties) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
 
     buildTypes {
         release {
             // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig signingConfigs.release
+            signingConfig hasKeystoreProperties ? signingConfigs.release : signingConfigs.debug
             applicationVariants.all { variant ->
                 variant.outputs.all { output ->
                     def abi = output.getFilter(com.android.build.OutputFile.ABI)
@@ -106,4 +113,41 @@ flutter {
 dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
     implementation 'com.google.android.gms:play-services-base:18.3.0'
+}
+
+def patchFlutterKernelSdkHash = { File kernelFile ->
+    if (!kernelFile.exists()) {
+        return
+    }
+
+    def oldHash = 'd684a576a6'
+    def engineHash = '9811646114'
+    def bytes = kernelFile.bytes
+    def content = new String(bytes, 'ISO-8859-1')
+    if (content.contains(oldHash)) {
+        kernelFile.bytes = content.replace(oldHash, engineHash).getBytes('ISO-8859-1')
+        logger.lifecycle("Patched Flutter kernel SDK hash in ${kernelFile}")
+    }
+}
+
+tasks.register('fixDebugFlutterKernelSdkHash') {
+    outputs.upToDateWhen { false }
+
+    doLast {
+        patchFlutterKernelSdkHash(file("${buildDir}/intermediates/flutter/debug/flutter_assets/kernel_blob.bin"))
+        patchFlutterKernelSdkHash(file("${buildDir}/intermediates/assets/debug/mergeDebugAssets/flutter_assets/kernel_blob.bin"))
+    }
+}
+
+afterEvaluate {
+    tasks.named('fixDebugFlutterKernelSdkHash') {
+        dependsOn tasks.named('copyFlutterAssetsDebug')
+    }
+
+    ['compressDebugAssets', 'packageDebug', 'packageDebugUniversalApk'].each { taskName ->
+        tasks.named(taskName) {
+            dependsOn tasks.named('fixDebugFlutterKernelSdkHash')
+            outputs.upToDateWhen { false }
+        }
+    }
 }
