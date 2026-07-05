@@ -58,8 +58,27 @@ jobs:
           ls -lh release
       - uses: actions/upload-artifact@v4
         with:
-          name: android-apks
-          path: release/*.apk
+          name: PicaComic-universal
+          path: |
+            release/PicaComic-*.apk
+            !release/PicaComic-*-arm64-v8a.apk
+            !release/PicaComic-*-armeabi-v7a.apk
+            !release/PicaComic-*-x86_64.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PicaComic-arm64-v8a
+          path: release/PicaComic-*-arm64-v8a.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PicaComic-armeabi-v7a
+          path: release/PicaComic-*-armeabi-v7a.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PicaComic-x86_64
+          path: release/PicaComic-*-x86_64.apk
           if-no-files-found: error
       - name: Upload APKs to GitHub Releases
         shell: bash
@@ -72,6 +91,10 @@ jobs:
           git tag -f "$tag" "$GITHUB_SHA"
           git push origin "refs/tags/${tag}" --force
           if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Automated Android build."
             gh release upload "$tag" release/*.apk --clobber
           else
             gh release create "$tag" release/*.apk \
