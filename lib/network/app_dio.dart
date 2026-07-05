@@ -28,6 +28,20 @@ class MyLogInterceptor implements Interceptor {
         err = err.copyWith(
             message: "Receive Timeout: "
                 "This indicates that the server is too busy to respond");
+      case DioExceptionType.sendTimeout:
+        err = err.copyWith(message: "Send Timeout");
+      case DioExceptionType.connectionError:
+        if (err.toString().contains("Connection reset by peer")) {
+          err = err.copyWith(
+              message: "Connection reset by peer: "
+                  "The proxy or remote server closed the connection.");
+        } else {
+          err = err.copyWith(message: "Connection Error: ${err.error}");
+        }
+      case DioExceptionType.badCertificate:
+        err = err.copyWith(message: "Bad Certificate");
+      case DioExceptionType.cancel:
+        err = err.copyWith(message: "Request Cancelled");
       case DioExceptionType.unknown:
         if (err.toString().contains("Connection terminated during handshake")) {
           err = err.copyWith(
@@ -39,8 +53,6 @@ class MyLogInterceptor implements Interceptor {
               message: "Connection reset by peer: "
                   "The error is unrelated to app, please check your network.");
         }
-      default:
-        {}
     }
     handler.next(err);
   }
