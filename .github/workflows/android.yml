@@ -19,8 +19,10 @@ jobs:
           channel: stable
           architecture: x64
       - run: flutter pub get
-      - run: flutter build apk --release --split-per-abi
+      - run: cd android && ./gradlew assembleRelease
+      - run: find build/app/outputs/apk -type f -name "*.apk" -print
       - uses: actions/upload-artifact@v4
         with:
           name: android-apks
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/apk/**/*.apk
+          if-no-files-found: error
