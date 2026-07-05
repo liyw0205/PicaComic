@@ -154,6 +154,8 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     ];
   }
 
+  Uri _proxyAvailableTarget() => Uri.https("example.com", "/");
+
   Future<int?> _measureProxyConnect(AppProxyConfig config) async {
     var stopwatch = Stopwatch()..start();
     Socket? socket;
@@ -170,25 +172,39 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     }
   }
 
-  Future<int?> _measureProxyRequest(AppProxyConfig config, Uri url) async {
+  Future<({int? ms, String? error})> _measureProxyRequest(
+    AppProxyConfig config,
+    Uri url,
+  ) async {
     var stopwatch = Stopwatch()..start();
     var overrides = ProxyHttpOverrides(config.proxyRule, config);
     var client = overrides.createHttpClient(null);
     try {
       var request =
-          await client.getUrl(url).timeout(const Duration(seconds: 8));
+          await client.headUrl(url).timeout(const Duration(seconds: 8));
       request.headers.set(HttpHeaders.userAgentHeader, webUA);
       request.headers.set(HttpHeaders.acceptHeader, "*/*");
       request.headers.set(HttpHeaders.connectionHeader, "close");
+      request.followRedirects = false;
       request.persistentConnection = false;
       var response = await request.close().timeout(const Duration(seconds: 8));
+      await response.drain().timeout(const Duration(seconds: 1));
       if (response.statusCode >= 200 && response.statusCode < 500) {
         stopwatch.stop();
-        return stopwatch.elapsedMilliseconds;
+        var elapsed = stopwatch.elapsedMilliseconds;
+        LogManager.addLog(LogLevel.info, "Network",
+            "Proxy test ${url.host}: ${response.statusCode}, ${elapsed}ms");
+        return (ms: elapsed, error: null);
       }
-      return null;
-    } catch (_) {
-      return null;
+      var message = "HTTP ${response.statusCode}";
+      LogManager.addLog(
+          LogLevel.warning, "Network", "Proxy test ${url.host}: $message");
+      return (ms: null, error: message);
+    } catch (e, s) {
+      var message = describeNetworkError(e);
+      LogManager.addLog(LogLevel.error, "Network",
+          "Proxy test ${url.host} failed\n$message\n$e\n$s");
+      return (ms: null, error: message);
     } finally {
       client.close(force: true);
     }
@@ -205,8 +221,23 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       availableResult = null;
     });
     try {
-      var ms = await _measureProxyConnect(config);
-      availableResult = ms == null ? "不可用".tl : "$ms ms";
+      var connectMs = await _measureProxyConnect(config);
+      if (connectMs == null) {
+        availableResult = "不可用".tl;
+      } else {
+        var request =
+            await _measureProxyRequest(config, _proxyAvailableTarget());
+        if (request.ms == null) {
+          availableResult = "端口可连，握手失败".tl;
+          LogManager.addLog(
+              LogLevel.warning,
+              "Network",
+              "Proxy TCP connect succeeded in ${connectMs}ms, "
+                  "but HTTPS probe failed: ${request.error ?? "unknown"}");
+        } else {
+          availableResult = "${request.ms} ms";
+        }
+      }
     } catch (e) {
       availableResult = "不可用".tl;
     }
@@ -230,19 +261,28 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     try {
       var samples = <int>[];
       var failed = <String>[];
+      var failedDetails = <String>[];
       for (var target in _proxyQualityTargets()) {
-        var ms = await _measureProxyRequest(config, target.value);
-        if (ms == null) {
+        var result = await _measureProxyRequest(config, target.value);
+        if (result.ms == null) {
           failed.add(target.key);
+          failedDetails.add(
+              "${target.key} (${target.value.host}): ${result.error ?? "unknown"}");
           continue;
         }
-        samples.add(ms);
+        samples.add(result.ms!);
       }
       if (samples.isEmpty) {
-        qualityResult = "不可用".tl;
+        qualityResult =
+            failed.isEmpty ? "不可用".tl : "${"不可用".tl}: ${failed.join(",")}";
       } else {
         var avg = samples.reduce((a, b) => a + b) ~/ samples.length;
-        qualityResult = failed.isEmpty ? "$avg ms" : "部分可用 $avg ms";
+        qualityResult =
+            failed.isEmpty ? "$avg ms" : "部分可用 $avg ms: ${failed.join(",")}";
+      }
+      if (failedDetails.isNotEmpty) {
+        LogManager.addLog(LogLevel.warning, "Network",
+            "Proxy quality test failed targets\n${failedDetails.join("\n")}");
       }
     } catch (e) {
       qualityResult = "不可用".tl;

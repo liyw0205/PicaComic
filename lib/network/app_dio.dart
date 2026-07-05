@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
@@ -7,7 +8,37 @@ import 'package:pica_comic/foundation/log.dart';
 import 'package:dio_http2_adapter/dio_http2_adapter.dart';
 import 'package:pica_comic/network/http_client.dart';
 import '../base.dart';
-import '../foundation/app.dart';
+
+String _networkErrorText(Object? error) {
+  var parts = <String>[];
+  if (error is DioException) {
+    if (error.message != null) parts.add(error.message!);
+    if (error.error != null) parts.add(error.error.toString());
+  }
+  if (error != null) parts.add(error.toString());
+  return parts.join("\n");
+}
+
+String describeNetworkError(Object? error) {
+  var text = _networkErrorText(error);
+  if (error is TimeoutException || text.contains("TimeoutException")) {
+    return "连接超时";
+  }
+  if (text.contains("Connection terminated during handshake") ||
+      text.contains("HandshakeException")) {
+    return "HTTPS 握手失败：代理端口可连接，但 TLS 握手被关闭，请检查代理类型（HTTP/SOCKS5）和代理规则。";
+  }
+  if (text.contains("Connection reset by peer")) {
+    return "连接被重置：代理或远端服务器关闭了连接。";
+  }
+  if (text.contains("Failed host lookup")) {
+    return "域名解析失败，请检查网络或代理规则。";
+  }
+  if (text.contains("Connection refused")) {
+    return "连接被拒绝，请检查代理地址和端口。";
+  }
+  return error.toString();
+}
 
 class MyLogInterceptor implements Interceptor {
   @override
@@ -31,27 +62,15 @@ class MyLogInterceptor implements Interceptor {
       case DioExceptionType.sendTimeout:
         err = err.copyWith(message: "Send Timeout");
       case DioExceptionType.connectionError:
-        if (err.toString().contains("Connection reset by peer")) {
-          err = err.copyWith(
-              message: "Connection reset by peer: "
-                  "The proxy or remote server closed the connection.");
-        } else {
-          err = err.copyWith(message: "Connection Error: ${err.error}");
-        }
+        err = err.copyWith(message: describeNetworkError(err));
       case DioExceptionType.badCertificate:
         err = err.copyWith(message: "Bad Certificate");
       case DioExceptionType.cancel:
         err = err.copyWith(message: "Request Cancelled");
       case DioExceptionType.unknown:
-        if (err.toString().contains("Connection terminated during handshake")) {
-          err = err.copyWith(
-              message: "Connection terminated during handshake: "
-                  "This may be caused by the firewall blocking the connection "
-                  "or your requests are too frequent.");
-        } else if (err.toString().contains("Connection reset by peer")) {
-          err = err.copyWith(
-              message: "Connection reset by peer: "
-                  "The error is unrelated to app, please check your network.");
+        var message = describeNetworkError(err);
+        if (message != err.toString()) {
+          err = err.copyWith(message: message);
         }
     }
     handler.next(err);
@@ -137,19 +156,6 @@ class AppHttpAdapter implements HttpClientAdapter {
     adapter?.close(force: force);
   }
 
-  /// 直接使用ip访问绕过sni
-  bool changeHost(RequestOptions options) {
-    var config = const JsonDecoder()
-        .convert(File("${App.dataPath}/rule.json").readAsStringSync());
-    if ((config["sni"] ?? []).contains(options.uri.host) &&
-        (config["rule"] ?? {})[options.uri.host] != null) {
-      options.path = options.path
-          .replaceFirst(options.uri.host, config["rule"][options.uri.host]!);
-      return true;
-    }
-    return false;
-  }
-
   @override
   Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? requestStream,
       Future<void>? cancelFuture) async {
@@ -184,41 +190,8 @@ class AppHttpAdapter implements HttpClientAdapter {
     var options = o.copyWith();
     LogManager.addLog(LogLevel.info, "Network",
         "${options.method} ${options.path}\nheaders:\n${options.headers.toString()}\ndata:${options.data}");
-    if (appdata.settings[58] == "0") {
-      return checkCookie(
-          await adapter!.fetch(options, requestStream, cancelFuture));
-    }
-    if (!changeHost(options)) {
-      return checkCookie(
-          await adapter!.fetch(options, requestStream, cancelFuture));
-    }
-    if (options.headers["host"] == null && options.headers["Host"] == null) {
-      options.headers["host"] = options.uri.host;
-    }
-    options.followRedirects = false;
-    var res = await adapter!.fetch(options, requestStream, cancelFuture);
-    while (res.statusCode < 400 && res.statusCode > 300) {
-      var location = res.headers["location"]!.first;
-      if (location.contains("http") && Uri.tryParse(location) != null) {
-        if (Uri.parse(location).host != o.uri.host) {
-          options.path = location;
-          changeHost(options);
-          res = await adapter!.fetch(options, requestStream, cancelFuture);
-        } else {
-          location = Uri.parse(location).path;
-          options.path = options.path.contains("https://")
-              ? "https://${options.uri.host}$location"
-              : "http://${options.uri.host}$location";
-          res = await adapter!.fetch(options, requestStream, cancelFuture);
-        }
-      } else {
-        options.path = options.path.contains("https://")
-            ? "https://${options.uri.host}$location"
-            : "http://${options.uri.host}$location";
-        res = await adapter!.fetch(options, requestStream, cancelFuture);
-      }
-    }
-    return checkCookie(res);
+    return checkCookie(
+        await adapter!.fetch(options, requestStream, cancelFuture));
   }
 
   /// 检查cookie是否合法, 去除无效cookie

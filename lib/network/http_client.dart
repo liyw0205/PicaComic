@@ -14,6 +14,7 @@ class AppProxyConfig {
     required this.port,
     this.username = "",
     this.password = "",
+    this.useHostRules = false,
   });
 
   final String scheme;
@@ -21,6 +22,7 @@ class AppProxyConfig {
   final int port;
   final String username;
   final String password;
+  final bool useHostRules;
 
   bool get isSocks5 => scheme == "socks5";
 
@@ -111,9 +113,8 @@ class AppProxyConfig {
   }
 }
 
-///获取系统设置中的代理, 仅windows,安卓有效
-Future<AppProxyConfig?> getProxyConfig() async {
-  if (appdata.settings[58] == "1") {
+AppProxyConfig? _getHostRulesProxyConfig() {
+  try {
     final file = File("${App.dataPath}/rule.json");
     var json = const JsonDecoder().convert(file.readAsStringSync());
     var port = json["port"] is int
@@ -124,16 +125,17 @@ Future<AppProxyConfig?> getProxyConfig() async {
       scheme: "http",
       host: InternetAddress.loopbackIPv4.address,
       port: port,
+      useHostRules: true,
     );
+  } catch (e, s) {
+    LogManager.addLog(
+        LogLevel.error, "Network", "Read host rules failed\n$e\n$s");
+    return null;
   }
+}
 
-  //手动设置的代理
-  if (appdata.settings[8].removeAllBlank == "") return null;
-  if (appdata.settings[8] != "0") {
-    return AppProxyConfig.tryParse(appdata.settings[8]);
-  }
-  //对于安卓, 将获取WIFI设置中的代理
-
+///获取系统设置中的代理, 仅windows,安卓有效
+Future<AppProxyConfig?> _getSystemProxyConfig() async {
   String res;
   if (!App.isLinux) {
     const channel = MethodChannel("com.github.pacalini.pica_comic/proxy");
@@ -161,6 +163,25 @@ Future<AppProxyConfig?> getProxyConfig() async {
   return AppProxyConfig.tryParse(res);
 }
 
+Future<AppProxyConfig?> getProxyConfig() async {
+  // 手动代理优先，避免已废弃的 Hosts 功能覆盖用户显式设置的代理。
+  if (appdata.settings[8].removeAllBlank != "" && appdata.settings[8] != "0") {
+    return AppProxyConfig.tryParse(appdata.settings[8]);
+  }
+
+  // 对于安卓, 将获取WIFI设置中的代理。
+  if (appdata.settings[8] == "0") {
+    var systemProxy = await _getSystemProxyConfig();
+    if (systemProxy != null) return systemProxy;
+  }
+
+  if (appdata.settings[58] == "1") {
+    return _getHostRulesProxyConfig();
+  }
+
+  return null;
+}
+
 Future<String?> getProxy() async {
   var proxy = await getProxyConfig();
   if (proxy == null) return null;
@@ -183,7 +204,9 @@ Future<void> setNetworkProxy() async {
     HttpOverrides.global = proxyHttpOverrides;
     Log.info("Network", "Set Proxy $proxy");
   } else if (proxyHttpOverrides!.proxy != proxy ||
-      proxyHttpOverrides!.proxyConfig?.uriString != proxyConfig?.uriString) {
+      proxyHttpOverrides!.proxyConfig?.uriString != proxyConfig?.uriString ||
+      proxyHttpOverrides!.proxyConfig?.useHostRules !=
+          proxyConfig?.useHostRules) {
     proxyHttpOverrides!.proxy = proxy;
     proxyHttpOverrides!.proxyConfig = proxyConfig;
     Log.info("Network", "Set Proxy $proxy");
