@@ -5,6 +5,8 @@ on:
     branches:
       - master
   workflow_dispatch: {}
+permissions:
+  contents: write
 jobs:
   Build_Android:
     runs-on: ubuntu-latest
@@ -20,9 +22,60 @@ jobs:
           architecture: x64
       - run: flutter pub get
       - run: cd android && ./gradlew assembleRelease
-      - run: find build/app/outputs/apk -type f -name "*.apk" -print
+      - name: Prepare APK files
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          mkdir -p release
+          find build/app/outputs/apk -type f -name "*.apk" -print
+
+          while IFS= read -r apk; do
+            name="$(basename "$apk")"
+            case "$name" in
+              *armeabi-v7a*)
+                cp "$apk" "release/PicaComic-${version}-armeabi-v7a.apk"
+                ;;
+              *arm64-v8a*)
+                cp "$apk" "release/PicaComic-${version}-arm64-v8a.apk"
+                ;;
+              *x86_64*)
+                cp "$apk" "release/PicaComic-${version}-x86_64.apk"
+                ;;
+              *universal*|app-release.apk)
+                cp "$apk" "release/PicaComic-${version}.apk"
+                ;;
+            esac
+          done < <(find build/app/outputs/apk -type f -name "*.apk")
+
+          for apk in \
+            "release/PicaComic-${version}-armeabi-v7a.apk" \
+            "release/PicaComic-${version}-arm64-v8a.apk" \
+            "release/PicaComic-${version}-x86_64.apk" \
+            "release/PicaComic-${version}.apk"; do
+            test -f "$apk"
+          done
+          ls -lh release
       - uses: actions/upload-artifact@v4
         with:
           name: android-apks
-          path: build/app/outputs/apk/**/*.apk
+          path: release/*.apk
           if-no-files-found: error
+      - name: Upload APKs to GitHub Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          tag="v${version}"
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/${tag}" --force
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/*.apk --clobber
+          else
+            gh release create "$tag" release/*.apk \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Automated Android build."
+          fi
