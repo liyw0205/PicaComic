@@ -150,7 +150,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
             : "https://exhentai.org/"),
       ),
       MapEntry("NH", Uri.parse("${NhentaiNetwork().baseUrl}/")),
-      const MapEntry("Hitomi", Uri.https("hitomi.la", "/")),
+      MapEntry("Hitomi", Uri.https("hitomi.la", "/")),
     ];
   }
 
