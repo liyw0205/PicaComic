@@ -12,14 +12,30 @@ if (localPropertiesFile.exists()) {
     }
 }
 
+def pubspecProperties = new Properties()
+def pubspecFile = rootProject.file('../pubspec.yaml')
+if (pubspecFile.exists()) {
+    def versionLine = pubspecFile.readLines('UTF-8').find { line ->
+        line.trim().startsWith('version:')
+    }
+    if (versionLine != null) {
+        def version = versionLine.split(':', 2)[1].trim()
+        def versionParts = version.split('\\+')
+        pubspecProperties.setProperty('flutter.versionName', versionParts[0])
+        if (versionParts.length > 1) {
+            pubspecProperties.setProperty('flutter.versionCode', versionParts[1])
+        }
+    }
+}
+
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
-    flutterVersionCode = '1'
+    flutterVersionCode = pubspecProperties.getProperty('flutter.versionCode', '1')
 }
 
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
-    flutterVersionName = '1.0'
+    flutterVersionName = pubspecProperties.getProperty('flutter.versionName', '1.0')
 }
 
 
