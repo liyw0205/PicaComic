@@ -41,84 +41,409 @@ void findUpdate(BuildContext context) {
   });
 }
 
-class ProxyController extends StateController {
-  bool value = appdata.settings[8] == "0";
-  late var controller =
-      TextEditingController(text: value ? "" : appdata.settings[8]);
+Future<void> setProxy(BuildContext context) {
+  return showDialog(
+      context: context, builder: (dialogContext) => const ProxySettingDialog());
 }
 
-void setProxy(BuildContext context) {
-  showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StateBuilder(
-            init: ProxyController(),
-            builder: (controller) {
-              return SimpleDialog(
-                title: Text("设置代理".tl),
-                children: [
-                  const SizedBox(
-                    width: 400,
-                  ),
-                  ListTile(
-                    title: Text("使用系统代理".tl),
-                    trailing: Switch(
-                      value: controller.value,
-                      onChanged: (value) {
-                        if (value == true) {
-                          controller.controller.text = "";
-                        }
-                        controller.value = !controller.value;
-                        controller.update();
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(15, 10, 15, 10),
-                    child: TextField(
-                      readOnly: controller.value,
-                      controller: controller.controller,
-                      decoration: InputDecoration(
+class ProxySettingDialog extends StatefulWidget {
+  const ProxySettingDialog({super.key});
+
+  @override
+  State<ProxySettingDialog> createState() => _ProxySettingDialogState();
+}
+
+class _ProxySettingDialogState extends State<ProxySettingDialog> {
+  late bool useSystemProxy;
+  var proxyType = 0;
+  var fullAddressEdited = false;
+  var testingAvailable = false;
+  var testingQuality = false;
+  String? availableResult;
+  String? qualityResult;
+
+  final fullAddressController = TextEditingController();
+  final hostController = TextEditingController();
+  final portController = TextEditingController();
+  final usernameController = TextEditingController();
+  final passwordController = TextEditingController();
+  @override
+  void initState() {
+    super.initState();
+    useSystemProxy = appdata.settings[8] == "0";
+    var config = AppProxyConfig.tryParse(appdata.settings[8]);
+    if (config != null) {
+      proxyType = config.isSocks5 ? 1 : 0;
+      hostController.text = config.host;
+      portController.text = config.port.toString();
+      usernameController.text = config.username;
+      passwordController.text = config.password;
+      fullAddressController.text = config.uriString;
+    }
+  }
+
+  @override
+  void dispose() {
+    fullAddressController.dispose();
+    hostController.dispose();
+    portController.dispose();
+    usernameController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  String get _scheme => proxyType == 1 ? "socks5" : "http";
+
+  void _composeFullAddress() {
+    fullAddressEdited = false;
+    var host = hostController.text.trim();
+    var port = portController.text.trim();
+    if (host.isEmpty && port.isEmpty) {
+      fullAddressController.text = "";
+      return;
+    }
+    var auth = "";
+    if (usernameController.text.isNotEmpty ||
+        passwordController.text.isNotEmpty) {
+      auth = "${Uri.encodeComponent(usernameController.text)}:"
+          "${Uri.encodeComponent(passwordController.text)}@";
+    }
+    fullAddressController.text =
+        "$_scheme://$auth$host${port.isEmpty ? "" : ":$port"}";
+  }
+
+  AppProxyConfig? _currentConfig() {
+    var fullAddress = fullAddressController.text.trim();
+    if (fullAddress.isNotEmpty) {
+      return AppProxyConfig.tryParse(fullAddress);
+    }
+    var host = hostController.text.trim();
+    var port = int.tryParse(portController.text.trim());
+    if (host.isEmpty || port == null || port <= 0 || port > 65535) {
+      return null;
+    }
+    return AppProxyConfig(
+      scheme: _scheme,
+      host: host,
+      port: port,
+      username: usernameController.text,
+      password: passwordController.text,
+    );
+  }
+
+  void _fillFieldsFromFullAddress() {
+    var config = AppProxyConfig.tryParse(fullAddressController.text);
+    if (config == null) return;
+    proxyType = config.isSocks5 ? 1 : 0;
+    hostController.text = config.host;
+    portController.text = config.port.toString();
+    usernameController.text = config.username;
+    passwordController.text = config.password;
+  }
+
+  List<MapEntry<String, Uri>> _proxyQualityTargets() {
+    return [
+      MapEntry(
+        "EH",
+        Uri.parse(appdata.settings[20] == "0"
+            ? "https://e-hentai.org/"
+            : "https://exhentai.org/"),
+      ),
+      MapEntry("NH", Uri.parse("${NhentaiNetwork().baseUrl}/")),
+      const MapEntry("Hitomi", Uri.https("hitomi.la", "/")),
+    ];
+  }
+
+  Future<int?> _measureProxyConnect(AppProxyConfig config) async {
+    var stopwatch = Stopwatch()..start();
+    Socket? socket;
+    try {
+      socket = await Socket.connect(
+        config.connectionHost,
+        config.port,
+        timeout: const Duration(seconds: 5),
+      );
+      stopwatch.stop();
+      return stopwatch.elapsedMilliseconds;
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  Future<int?> _measureProxyRequest(AppProxyConfig config, Uri url) async {
+    var stopwatch = Stopwatch()..start();
+    var overrides = ProxyHttpOverrides(config.proxyRule, config);
+    var client = overrides.createHttpClient(null);
+    try {
+      var request =
+          await client.getUrl(url).timeout(const Duration(seconds: 8));
+      request.headers.set(HttpHeaders.userAgentHeader, webUA);
+      request.headers.set(HttpHeaders.acceptHeader, "*/*");
+      var response = await request.close().timeout(const Duration(seconds: 8));
+      await response.drain().timeout(const Duration(seconds: 8));
+      if (response.statusCode >= 200 && response.statusCode < 500) {
+        stopwatch.stop();
+        return stopwatch.elapsedMilliseconds;
+      }
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> _testAvailable() async {
+    var config = _currentConfig();
+    if (config == null) {
+      showToast(message: "代理地址无效".tl);
+      return;
+    }
+    setState(() {
+      testingAvailable = true;
+      availableResult = null;
+    });
+    try {
+      var ms = await _measureProxyConnect(config);
+      availableResult = ms == null ? "不可用".tl : "$ms ms";
+    } catch (e) {
+      availableResult = "不可用".tl;
+    }
+    if (mounted) {
+      setState(() {
+        testingAvailable = false;
+      });
+    }
+  }
+
+  Future<void> _testQuality() async {
+    var config = _currentConfig();
+    if (config == null) {
+      showToast(message: "代理地址无效".tl);
+      return;
+    }
+    setState(() {
+      testingQuality = true;
+      qualityResult = null;
+    });
+    try {
+      var samples = <int>[];
+      var failed = <String>[];
+      for (var target in _proxyQualityTargets()) {
+        var ms = await _measureProxyRequest(config, target.value);
+        if (ms == null) {
+          failed.add(target.key);
+          continue;
+        }
+        samples.add(ms);
+      }
+      if (samples.isEmpty) {
+        qualityResult = "不可用".tl;
+      } else {
+        var avg = samples.reduce((a, b) => a + b) ~/ samples.length;
+        qualityResult = failed.isEmpty ? "$avg ms" : "部分可用 $avg ms";
+      }
+    } catch (e) {
+      qualityResult = "不可用".tl;
+    }
+    if (mounted) {
+      setState(() {
+        testingQuality = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (useSystemProxy) {
+      appdata.settings[8] = "0";
+    } else if (fullAddressController.text.trim().isEmpty) {
+      appdata.settings[8] = "";
+    } else {
+      var config = _currentConfig();
+      if (config == null) {
+        showToast(message: "代理地址无效".tl);
+        return;
+      }
+      appdata.settings[8] = config.uriString;
+    }
+    await appdata.updateSettings();
+    await setNetworkProxy();
+    if (mounted) App.back(context);
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    void Function(String)? onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        obscureText: obscureText,
+        readOnly: useSystemProxy,
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          border: const OutlineInputBorder(),
+          labelText: label,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text("设置代理".tl),
+      content: SizedBox(
+        width: 430,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text("使用系统代理".tl),
+                value: useSystemProxy,
+                onChanged: (value) {
+                  setState(() {
+                    useSystemProxy = value;
+                  });
+                },
+              ),
+              IgnorePointer(
+                ignoring: useSystemProxy,
+                child: Opacity(
+                  opacity: useSystemProxy ? 0.55 : 1,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<int>(
+                        value: proxyType,
+                        decoration: InputDecoration(
                           border: const OutlineInputBorder(),
-                          hintText: controller.value
-                              ? "使用系统代理时无法手动设置".tl
-                              : "设置代理, 例如127.0.0.1:7890".tl),
-                    ),
-                  ),
-                  if (!controller.value)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 10, 15, 10),
-                      child: Row(
+                          labelText: "代理类型".tl,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 0, child: Text("HTTP")),
+                          DropdownMenuItem(value: 1, child: Text("SOCKS5")),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            proxyType = value ?? 0;
+                            _composeFullAddress();
+                          });
+                        },
+                      ).paddingBottom(10),
+                      _buildTextField(
+                        controller: hostController,
+                        label: "地址".tl,
+                        onChanged: (_) => setState(_composeFullAddress),
+                      ),
+                      _buildTextField(
+                        controller: portController,
+                        label: "端口".tl,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(_composeFullAddress),
+                      ),
+                      _buildTextField(
+                        controller: usernameController,
+                        label: "用户名".tl,
+                        onChanged: (_) => setState(_composeFullAddress),
+                      ),
+                      _buildTextField(
+                        controller: passwordController,
+                        label: "密码".tl,
+                        obscureText: true,
+                        onChanged: (_) => setState(_composeFullAddress),
+                      ),
+                      _buildTextField(
+                        controller: fullAddressController,
+                        label: "完整地址".tl,
+                        onChanged: (_) {
+                          setState(() {
+                            fullAddressEdited = true;
+                          });
+                        },
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            TextButton.icon(
+                              onPressed:
+                                  testingAvailable ? null : _testAvailable,
+                              icon: testingAvailable
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.power_settings_new),
+                              label: Text(availableResult == null
+                                  ? "可用测试".tl
+                                  : "${"可用测试".tl}: $availableResult"),
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: testingQuality ? null : _testQuality,
+                              icon: testingQuality
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.speed),
+                              label: Text(qualityResult == null
+                                  ? "质量测试".tl
+                                  : "${"质量测试".tl}: $qualityResult"),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
                         children: [
-                          const Icon(
-                            Icons.info_outline,
-                            size: 20,
-                          ),
-                          Text("  ${"留空表示禁用网络代理".tl}")
+                          const Icon(Icons.info_outline, size: 18),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text("留空表示禁用网络代理".tl)),
                         ],
                       ),
-                    ),
-                  Center(
-                    child: FilledButton(
-                        onPressed: () {
-                          if (controller.value) {
-                            appdata.settings[8] = "0";
-                            appdata.writeData();
-                            setNetworkProxy();
-                            App.globalBack();
-                          } else {
-                            appdata.settings[8] = controller.controller.text;
-                            appdata.writeData();
-                            setNetworkProxy();
-                            App.globalBack();
-                          }
-                        },
-                        child: Text("确认".tl)),
-                  )
-                ],
-              );
-            });
-      });
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => App.back(context),
+          child: Text("取消".tl),
+        ),
+        TextButton(
+          onPressed: fullAddressEdited
+              ? () {
+                  setState(() {
+                    _fillFieldsFromFullAddress();
+                    fullAddressEdited = false;
+                  });
+                }
+              : null,
+          child: Text("解析".tl),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: Text("确认".tl),
+        ),
+      ],
+    );
+  }
 }
 
 void setDownloadFolder() async {
@@ -726,7 +1051,8 @@ void setCacheLimit() {
   const minSize = 16;
   bool isValid = true;
   final FocusNode focusNode = FocusNode();
-  final TextEditingController controller = TextEditingController(text: size.toString());
+  final TextEditingController controller =
+      TextEditingController(text: size.toString());
   showDialog(
     context: App.globalContext!,
     useSafeArea: false,
@@ -750,7 +1076,8 @@ void setCacheLimit() {
                 },
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
-                    borderSide: BorderSide(color: isValid ? Colors.grey : Colors.red),
+                    borderSide:
+                        BorderSide(color: isValid ? Colors.grey : Colors.red),
                   ),
                   suffix: const Text("MB"),
                   errorText: isValid ? null : "${"不能小于".tl} $minSize MB",
