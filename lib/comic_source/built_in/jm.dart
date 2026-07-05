@@ -177,7 +177,7 @@ final jm = ComicSource.named(
     ),
   ),
   account: AccountConfig.named(
-    registerWebsite: "https://18comic.vip/signup",
+    registerWebsite: "https://jmcomicgo.org",
     login: (account, pwd) async {
       var res = await jmNetwork.login(account, pwd);
       var a = <String>[account, pwd];

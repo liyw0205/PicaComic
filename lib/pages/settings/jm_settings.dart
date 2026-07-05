@@ -1,18 +1,17 @@
 part of pica_settings;
 
-class SetJmComicsOrderController extends StateController{
+class SetJmComicsOrderController extends StateController {
   int settingsOrder;
   SetJmComicsOrderController(this.settingsOrder);
   late String value = appdata.settings[settingsOrder];
 
-  void set(String v){
+  void set(String v) {
     value = v;
     appdata.settings[settingsOrder] = v;
     appdata.writeData();
     App.globalBack();
   }
 }
-
 
 class JmSettings extends StatefulWidget {
   const JmSettings(this.popUp, {Key? key}) : super(key: key);
@@ -21,17 +20,10 @@ class JmSettings extends StatefulWidget {
   @override
   State<JmSettings> createState() => _JmSettingsState();
 
-  static const builtInApiDomains = <String>[
-    "www.cdntwice.org",
-    "www.cdnsha.org",
-    "www.cdnaspa.cc",
-    "www.cdnntr.cc"
-  ];
-
   static void updateApiDomains([bool showLoading = false]) async {
     var title = "";
     var msg = "";
-    List<String> domains = builtInApiDomains;
+    List<String> domains = JmNetwork.builtInApiDomains;
     var controller = showLoading ? showLoadingDialog(App.globalContext!) : null;
     var res = await JmNetwork().getApiDomains();
     if (res.error) {
@@ -42,12 +34,16 @@ class JmSettings extends StatefulWidget {
       domains = res.data;
     }
     controller?.close();
-    for (String domain in domains) {
-        msg += "${"域名".tl}${domains.indexOf(domain) + 1}: $domain\n";
+    for (var i = 0; i < domains.length; i++) {
+      msg += "${"域名".tl}${i + 1}: ${domains[i]}\n";
     }
     msg = msg.trim();
     showConfirmDialog(App.globalContext!, title, msg, () async {
       appdata.appSettings.jmApiDomains = domains;
+      var index = int.tryParse(appdata.settings[17]) ?? 0;
+      if (index < 0 || index >= domains.length) {
+        appdata.settings[17] = "0";
+      }
       await updateAppVersionCode();
       JmNetwork().loginFromAppdata();
     });
@@ -81,6 +77,15 @@ class _JmSettingsState extends State<JmSettings> {
 
   @override
   Widget build(BuildContext context) {
+    var apiDomains = appdata.appSettings.jmApiDomains;
+    if (apiDomains.isEmpty) {
+      apiDomains = JmNetwork.builtInApiDomains;
+    }
+    var apiDomainIndex = int.tryParse(appdata.settings[17]) ?? 0;
+    if (apiDomainIndex < 0 || apiDomainIndex >= apiDomains.length) {
+      apiDomainIndex = 0;
+    }
+
     return Column(
       children: [
         ListTile(
@@ -92,7 +97,7 @@ class _JmSettingsState extends State<JmSettings> {
           subtitle: Text("登录时自动选择API域名".tl),
           trailing: Switch(
             value: autoSelectStream,
-            onChanged: (b){
+            onChanged: (b) {
               b ? appdata.settings[15] = "1" : appdata.settings[15] = "0";
               setState(() {
                 autoSelectStream = b;
@@ -110,11 +115,12 @@ class _JmSettingsState extends State<JmSettings> {
             child: Opacity(
               opacity: !autoSelectStream ? 1.0 : 0.5,
               child: Select(
-                initialValue: int.parse(appdata.settings[17]),
-                values: [
-                  "分流1".tl,"分流2".tl,"分流3".tl,"分流4".tl,
-                ],
-                onChange: (i){
+                initialValue: apiDomainIndex,
+                values: List.generate(
+                  apiDomains.length,
+                  (i) => "${"分流".tl}${i + 1}",
+                ),
+                onChange: (i) {
                   appdata.settings[17] = i.toString();
                   appdata.updateSettings();
                   JmNetwork().loginFromAppdata();
@@ -128,10 +134,11 @@ class _JmSettingsState extends State<JmSettings> {
           title: Text("图片分流".tl),
           trailing: Select(
             initialValue: int.parse(appdata.appSettings.jmImgUrlIndex),
-            values: [
-              "分流1".tl,"分流2".tl,"分流3".tl,"分流4".tl
-            ],
-            onChange: (i){
+            values: List.generate(
+              JmNetwork.builtInImgUrls.length,
+              (i) => "${"分流".tl}${i + 1}",
+            ),
+            onChange: (i) {
               appdata.settings[37] = i.toString();
               appdata.updateSettings();
               if (jm.isLogin) JmNetwork().updateImgUrl(i + 1);
@@ -144,10 +151,8 @@ class _JmSettingsState extends State<JmSettings> {
           trailing: Select(
             initialValue: int.parse(appdata.settings[42]),
             width: App.locale.languageCode == "en" ? 130 : 120,
-            values: [
-              "最新收藏".tl, "最新更新".tl
-            ],
-            onChange: (i){
+            values: ["最新收藏".tl, "最新更新".tl],
+            onChange: (i) {
               appdata.settings[42] = i.toString();
               appdata.updateSettings();
             },
@@ -166,7 +171,7 @@ class _JmSettingsState extends State<JmSettings> {
           onTap: () => JmSettings.daily(true),
           trailing: Switch(
             value: autoCheckIn,
-            onChanged: (b){
+            onChanged: (b) {
               b ? appdata.settings[88] = "1" : appdata.settings[88] = "0";
               setState(() {
                 autoCheckIn = b;

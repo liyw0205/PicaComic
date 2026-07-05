@@ -85,7 +85,7 @@ class Appdata {
     "0", //53 本地收藏添加位置(尾/首)
     "0", //54 阅读后移动本地收藏(否/尾/首)
     "1", //55 长按缩放
-    "https://18comic.vip", //56 jm domain
+    "https://jmcomicgo.org", //56 jm domain
     "1", //57 show page info in reader
     "0", //58 hosts
     "012345678", //59 explore page(废弃)
@@ -114,11 +114,11 @@ class Appdata {
     "111111", //82 内置漫画源启用状态,
     "1", //83 完全隐藏屏蔽的作品
     "0", //84 纯黑色模式
-    "www.cdntwice.org,www.cdnsha.org,www.cdnaspa.cc,www.cdnntr.cc", //85 jm api domains
-    "https://cdn-msp.jmapiproxy3.cc", //86 jm image url
+    "www.cdnhjk.net,www.cdngwc.cc,www.cdngwc.net,www.cdngwc.club,www.cdnutc.me", //85 jm api domains
+    "https://cdn-msp.jmapinodeudzn.net", //86 jm image url
     "gold-usergeneratedcontent.net", //87 hitomi cdn url
     "0", //88 jm auto checkin
-    "2.0.11", //89 jm app version
+    "2.0.26", //89 jm app version
   ];
 
   /// 隐式数据, 用于存储一些不需要用户设置的数据, 此数据通常为某些组件的状态, 此设置不应当被同步
@@ -189,6 +189,58 @@ class Appdata {
     if (settings[26].length < 2) {
       settings[26] += "0";
     }
+    if (_migrateExpiredDomains()) {
+      await updateSettings(false);
+    }
+  }
+
+  bool _migrateExpiredDomains() {
+    var changed = false;
+    const oldJmApiDomains = [
+      "www.cdntwice.org",
+      "www.cdnsha.org",
+      "www.cdnaspa.cc",
+      "www.cdnntr.cc",
+    ];
+    if (_sameDomains(settings[85], oldJmApiDomains)) {
+      settings[85] = JmNetwork.builtInApiDomains.join(",");
+      changed = true;
+    }
+    const oldJmImgUrls = {
+      "https://cdn-msp3.jmapiproxy1.cc",
+      "https://cdn-msp.jmapiproxy3.cc",
+      "https://cdn-msp3.jmapiproxy3.cc",
+    };
+    if (oldJmImgUrls.contains(settings[86].trim())) {
+      settings[86] = "https://cdn-msp.jmapinodeudzn.net";
+      changed = true;
+    }
+    if (settings[56] == "https://18comic.vip") {
+      settings[56] = "https://jmcomicgo.org";
+      changed = true;
+    }
+    if (settings[89] == "2.0.11") {
+      settings[89] = "2.0.26";
+      changed = true;
+    }
+    return changed;
+  }
+
+  bool _sameDomains(String value, List<String> domains) {
+    var current = value
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (current.length != domains.length) {
+      return false;
+    }
+    for (var i = 0; i < domains.length; i++) {
+      if (current[i] != domains[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> updateSettings([bool syncData = true]) async {
@@ -357,16 +409,23 @@ class _Settings {
         appdata.settings[82].setValueAt(enabled ? '1' : '0', index);
   }
 
-  List<String> get jmApiDomains => appdata.settings[85].split(',');
+  List<String> get jmApiDomains => appdata.settings[85]
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
 
   set jmApiDomains(List<String> domains) {
-    appdata.settings[85] = domains.join(',');
+    appdata.settings[85] =
+        domains.map((e) => e.trim()).where((e) => e.isNotEmpty).join(',');
   }
 
-  String get jmImgUrlIndex =>
-      int.parse(appdata.settings[37]) < 4
+  String get jmImgUrlIndex {
+    var index = int.tryParse(appdata.settings[37]) ?? 0;
+    return index >= 0 && index < JmNetwork.builtInImgUrls.length
         ? appdata.settings[37]
         : "0";
+  }
 
   List<String> get explorePages => appdata.settings[77].split(',');
 
