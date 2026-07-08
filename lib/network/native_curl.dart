@@ -26,13 +26,25 @@ class NativeCurlHttpClient {
     if (!App.isAndroid) return false;
     if (proxyHttpOverrides?.proxyConfig == null) return false;
     final host = options.uri.host.toLowerCase();
-    return host == "e-hentai.org" ||
-        host == "exhentai.org" ||
-        host == "api.e-hentai.org" ||
-        host == "forums.e-hentai.org" ||
-        host == "nhentai.net" ||
-        host == "hitomi.la" ||
-        host.startsWith("ltn.");
+    return _hostMatches(host, "e-hentai.org") ||
+        _hostMatches(host, "exhentai.org") ||
+        _hostMatches(host, "ehgt.org") ||
+        _hostMatches(host, "nhentai.net") ||
+        _hostMatches(host, "hitomi.la") ||
+        _hostMatches(host, "gold-usergeneratedcontent.net") ||
+        _isHitomiCdnHost(host);
+  }
+
+  static bool _hostMatches(String host, String domain) {
+    return host == domain || host.endsWith(".$domain");
+  }
+
+  static bool _isHitomiCdnHost(String host) {
+    return host.startsWith("ltn.") ||
+        host.startsWith("atn.") ||
+        host.startsWith("btn.") ||
+        host.startsWith("w1.") ||
+        host.startsWith("w2.");
   }
 
   static Future<ResponseBody> fetchUri(

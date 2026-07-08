@@ -14,6 +14,7 @@ import 'package:pica_comic/tools/time.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
+import '../http_client.dart';
 import 'models.dart';
 import 'package:html/parser.dart';
 
@@ -40,6 +41,13 @@ class NhentaiNetwork {
   String baseUrl = "https://nhentai.net";
 
   late Dio dio;
+
+  Future<void> _ensureReady() async {
+    if (cookieJar == null) {
+      await init();
+    }
+    await setNetworkProxy();
+  }
 
   Future<void> init() async {
     cookieJar = SingleInstanceCookieJar.instance;
@@ -129,6 +137,7 @@ class NhentaiNetwork {
   }
 
   Future<bool> refreshAuthTokens() async {
+    await _ensureReady();
     final refreshToken = _decodeCookieValue(refreshTokenCookie);
     if (refreshToken == null) {
       return false;
@@ -195,9 +204,7 @@ class NhentaiNetwork {
   }
 
   Future<Res<bool>> validateLogin() async {
-    if (cookieJar == null) {
-      await init();
-    }
+    await _ensureReady();
     if (_authorizationHeader() == null && !await refreshAuthTokens()) {
       logged = false;
       return const Res(null, errorMessage: "missing auth token");
@@ -208,9 +215,7 @@ class NhentaiNetwork {
   }
 
   Future<Res<String>> get(String url) async {
-    if (cookieJar == null) {
-      await init();
-    }
+    await _ensureReady();
     try {
       var res =
           await dio.get<String>(url, options: Options(followRedirects: false));
@@ -228,9 +233,7 @@ class NhentaiNetwork {
 
   Future<Res<String>> post(String url, dynamic data,
       [Map<String, String>? headers]) async {
-    if (cookieJar == null) {
-      await init();
-    }
+    await _ensureReady();
     try {
       var res = await dio.post<String>(url,
           data: data, options: Options(headers: headers));
@@ -241,9 +244,7 @@ class NhentaiNetwork {
   }
 
   Future<Res<dynamic>> _apiGet(String url) async {
-    if (cookieJar == null) {
-      await init();
-    }
+    await _ensureReady();
     try {
       final res = await dio.get(
         url,
@@ -264,9 +265,7 @@ class NhentaiNetwork {
     String url, {
     dynamic data,
   }) async {
-    if (cookieJar == null) {
-      await init();
-    }
+    await _ensureReady();
     try {
       final res = await dio.request(
         url,

@@ -107,6 +107,140 @@ class _AppWebviewState extends State<AppWebview> {
 
   int _webviewKey = 0;
 
+  late Future<void> _proxyFuture;
+
+  String? _proxySignature;
+
+  @override
+  void initState() {
+    super.initState();
+    _proxyFuture = _applyProxyOverride();
+  }
+
+  @override
+  void didUpdateWidget(covariant AppWebview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final signature = _currentProxySignature();
+    if (signature != _proxySignature) {
+      _proxyFuture = _applyProxyOverride();
+      controller = null;
+      _progress = 0;
+      _webviewKey++;
+    }
+  }
+
+  String? _currentProxySignature() {
+    final config = proxyHttpOverrides?.proxyConfig;
+    if (config == null) return null;
+    return "${config.uriString}|${config.useHostRules}";
+  }
+
+  String _webviewProxyUrl(AppProxyConfig config) {
+    return "${config.isSocks5 ? "socks" : "http"}://${config.hostPort}";
+  }
+
+  Future<void> _applyProxyOverride() async {
+    if (!App.isAndroid) return;
+    await setNetworkProxy();
+    _proxySignature = _currentProxySignature();
+    try {
+      final supported = await WebViewFeature.isFeatureSupported(
+          WebViewFeature.PROXY_OVERRIDE);
+      if (!supported) return;
+      final proxyController = ProxyController.instance();
+      final config = proxyHttpOverrides?.proxyConfig;
+      if (config == null) {
+        await proxyController.clearProxyOverride();
+        return;
+      }
+      await proxyController.setProxyOverride(
+        settings: ProxySettings(
+          proxyRules: [ProxyRule(url: _webviewProxyUrl(config))],
+        ),
+      );
+    } catch (e) {
+      debugPrint("[AppWebview] set proxy override failed: $e");
+    }
+  }
+
+  HttpAuthResponse? _handleHttpAuthRequest(
+      HttpAuthenticationChallenge challenge) {
+    final config = proxyHttpOverrides?.proxyConfig;
+    if (config?.hasAuth != true) return null;
+    final authHost = challenge.protectionSpace.host.toLowerCase();
+    if (authHost != config!.connectionHost.toLowerCase()) return null;
+    return HttpAuthResponse(
+      action: HttpAuthResponseAction.PROCEED,
+      username: config.username,
+      password: config.password,
+      permanentPersistence: true,
+    );
+  }
+
+  Widget _buildWebviewBody() {
+    Widget body = InAppWebView(
+      key: ValueKey(_webviewKey),
+      initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
+      initialSettings: InAppWebViewSettings(
+        useHybridComposition: false,
+        useOnRenderProcessGone: true,
+        sharedCookiesEnabled: true,
+        thirdPartyCookiesEnabled: true,
+      ),
+      onTitleChanged: (c, t) {
+        if (mounted) {
+          setState(() {
+            title = t ?? "Webview";
+          });
+        }
+        final webviewController = controller;
+        if (webviewController != null) {
+          widget.onTitleChange?.call(title, webviewController);
+        }
+      },
+      shouldOverrideUrlLoading: (c, r) async {
+        var res =
+            widget.onNavigation?.call(r.request.url?.toString() ?? "") ?? false;
+        if (res) {
+          return NavigationActionPolicy.CANCEL;
+        } else {
+          return NavigationActionPolicy.ALLOW;
+        }
+      },
+      onWebViewCreated: (c) {
+        controller = c;
+        widget.onStarted?.call(c);
+      },
+      onReceivedHttpAuthRequest: (c, challenge) async =>
+          _handleHttpAuthRequest(challenge),
+      onRenderProcessGone: (c, detail) {
+        if (!mounted) return;
+        controller = null;
+        showToast(message: "WebView 渲染进程已重启".tl);
+        setState(() {
+          _progress = 0;
+          _webviewKey++;
+        });
+      },
+      onProgressChanged: (c, p) {
+        if (mounted) {
+          setState(() {
+            _progress = p / 100;
+          });
+        }
+      },
+    );
+
+    return Stack(
+      children: [
+        Positioned.fill(child: body),
+        if (_progress < 1.0)
+          const Positioned.fill(
+              child: Center(child: CircularProgressIndicator()))
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     bool useCustomAppBar = !UiMode.m1(context) && !widget.singlePage;
@@ -187,64 +321,14 @@ class _AppWebviewState extends State<AppWebview> {
       )
     ];
 
-    Widget body = InAppWebView(
-      key: ValueKey(_webviewKey),
-      initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
-      initialSettings: InAppWebViewSettings(
-        useHybridComposition: false,
-        useOnRenderProcessGone: true,
-        sharedCookiesEnabled: true,
-        thirdPartyCookiesEnabled: true,
-      ),
-      onTitleChanged: (c, t) {
-        if (mounted) {
-          setState(() {
-            title = t ?? "Webview";
-          });
+    Widget body = FutureBuilder<void>(
+      future: _proxyFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
         }
-        final webviewController = controller;
-        if (webviewController != null) {
-          widget.onTitleChange?.call(title, webviewController);
-        }
+        return _buildWebviewBody();
       },
-      shouldOverrideUrlLoading: (c, r) async {
-        var res =
-            widget.onNavigation?.call(r.request.url?.toString() ?? "") ?? false;
-        if (res) {
-          return NavigationActionPolicy.CANCEL;
-        } else {
-          return NavigationActionPolicy.ALLOW;
-        }
-      },
-      onWebViewCreated: (c) {
-        controller = c;
-        widget.onStarted?.call(c);
-      },
-      onRenderProcessGone: (c, detail) {
-        if (!mounted) return;
-        controller = null;
-        showToast(message: "WebView 渲染进程已重启".tl);
-        setState(() {
-          _progress = 0;
-          _webviewKey++;
-        });
-      },
-      onProgressChanged: (c, p) {
-        if (mounted) {
-          setState(() {
-            _progress = p / 100;
-          });
-        }
-      },
-    );
-
-    body = Stack(
-      children: [
-        Positioned.fill(child: body),
-        if (_progress < 1.0)
-          const Positioned.fill(
-              child: Center(child: CircularProgressIndicator()))
-      ],
     );
 
     if (useCustomAppBar) {

@@ -28,6 +28,7 @@ typedef struct {
     jclass array_list_class;
     jmethodID array_list_init;
     jmethodID array_list_add;
+    jmethodID map_get;
     jmethodID map_put;
 } HeaderMapContext;
 
@@ -42,7 +43,7 @@ static void buffer_free(Buffer *buffer) {
 
 static int buffer_append(Buffer *buffer, const char *data, size_t length) {
     if (length == 0) return 1;
-    if (buffer->length + length > 16 * 1024 * 1024) return 0;
+    if (buffer->length + length > 64 * 1024 * 1024) return 0;
     if (buffer->length + length + 1 > buffer->capacity) {
         size_t new_capacity = buffer->capacity == 0 ? 8192 : buffer->capacity;
         while (new_capacity < buffer->length + length + 1) {
@@ -167,9 +168,13 @@ static int add_header_to_java_map(const char *line, HeaderMapContext *context) {
     JNIEnv *env = context->env;
     jstring jkey = (*env)->NewStringUTF(env, key);
     jstring jvalue = (*env)->NewStringUTF(env, value);
-    jobject list = (*env)->NewObject(env, context->array_list_class, context->array_list_init);
+    jobject list = (*env)->CallObjectMethod(env, context->map, context->map_get, jkey);
+    if (list == NULL) {
+        list = (*env)->NewObject(env, context->array_list_class, context->array_list_init);
+        jobject previous = (*env)->CallObjectMethod(env, context->map, context->map_put, jkey, list);
+        if (previous != NULL) (*env)->DeleteLocalRef(env, previous);
+    }
     (*env)->CallBooleanMethod(env, list, context->array_list_add, jvalue);
-    (*env)->CallObjectMethod(env, context->map, context->map_put, jkey, list);
     (*env)->DeleteLocalRef(env, list);
     (*env)->DeleteLocalRef(env, jvalue);
     (*env)->DeleteLocalRef(env, jkey);
@@ -184,6 +189,8 @@ static jobject headers_to_java_map(JNIEnv *env, HeaderList *headers) {
         .env = env,
         .map = map,
         .array_list_class = (*env)->FindClass(env, "java/util/ArrayList"),
+        .map_get = (*env)->GetMethodID(env, map_class, "get",
+                                       "(Ljava/lang/Object;)Ljava/lang/Object;"),
         .map_put = (*env)->GetMethodID(env, map_class, "put",
                                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"),
     };
@@ -300,6 +307,7 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
         curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long)timeout_ms);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
