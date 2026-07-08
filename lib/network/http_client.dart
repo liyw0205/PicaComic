@@ -163,6 +163,8 @@ Future<AppProxyConfig?> _getSystemProxyConfig() async {
   return AppProxyConfig.tryParse(res);
 }
 
+Future<AppProxyConfig?> getSystemProxyConfig() => _getSystemProxyConfig();
+
 Future<AppProxyConfig?> getProxyConfig() async {
   // 手动代理优先，避免已废弃的 Hosts 功能覆盖用户显式设置的代理。
   if (appdata.settings[8].removeAllBlank != "" && appdata.settings[8] != "0") {

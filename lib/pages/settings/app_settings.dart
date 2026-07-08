@@ -54,7 +54,7 @@ class ProxySettingDialog extends StatefulWidget {
 }
 
 class _ProxySettingDialogState extends State<ProxySettingDialog> {
-  late bool useSystemProxy;
+  late bool useNetworkProxy;
   var proxyType = 0;
   var fullAddressEdited = false;
   var testingAvailable = false;
@@ -70,7 +70,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   @override
   void initState() {
     super.initState();
-    useSystemProxy = appdata.settings[8] == "0";
+    useNetworkProxy = appdata.settings[8] != "0";
     var config = AppProxyConfig.tryParse(appdata.settings[8]);
     if (config != null) {
       proxyType = config.isSocks5 ? 1 : 0;
@@ -154,7 +154,16 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     ];
   }
 
-  Uri _proxyAvailableTarget() => Uri.https("example.com", "/");
+  Uri _proxyAvailableTarget() => Uri.http("cp.cloudflare.com", "/generate_204");
+
+  Future<AppProxyConfig?> _testConfig() {
+    if (!useNetworkProxy) return getSystemProxyConfig();
+    return Future.value(_currentConfig());
+  }
+
+  void _showInvalidTestProxy() {
+    showToast(message: useNetworkProxy ? "代理地址无效".tl : "未检测到系统代理".tl);
+  }
 
   Future<int?> _measureProxyConnect(AppProxyConfig config) async {
     var stopwatch = Stopwatch()..start();
@@ -214,9 +223,9 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 
   Future<void> _testAvailable() async {
-    var config = _currentConfig();
+    var config = await _testConfig();
     if (config == null) {
-      showToast(message: "代理地址无效".tl);
+      _showInvalidTestProxy();
       return;
     }
     setState(() {
@@ -231,12 +240,12 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
         var request =
             await _measureProxyRequest(config, _proxyAvailableTarget());
         if (request.ms == null) {
-          availableResult = "端口可连，握手失败".tl;
+          availableResult = "端口可连，请求失败".tl;
           LogManager.addLog(
               LogLevel.warning,
               "Network",
               "Proxy TCP connect succeeded in ${connectMs}ms, "
-                  "but HTTPS probe failed: ${request.error ?? "unknown"}");
+                  "but HTTP probe failed: ${request.error ?? "unknown"}");
         } else {
           availableResult = "${request.ms} ms";
         }
@@ -252,9 +261,9 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 
   Future<void> _testQuality() async {
-    var config = _currentConfig();
+    var config = await _testConfig();
     if (config == null) {
-      showToast(message: "代理地址无效".tl);
+      _showInvalidTestProxy();
       return;
     }
     setState(() {
@@ -298,7 +307,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 
   Future<void> _save() async {
-    if (useSystemProxy) {
+    if (!useNetworkProxy) {
       appdata.settings[8] = "0";
     } else if (fullAddressController.text.trim().isEmpty) {
       appdata.settings[8] = "";
@@ -328,7 +337,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
-        readOnly: useSystemProxy,
+        readOnly: !useNetworkProxy,
         onChanged: onChanged,
         decoration: InputDecoration(
           border: const OutlineInputBorder(),
@@ -350,18 +359,19 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
             children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text("使用系统代理".tl),
-                value: useSystemProxy,
+                title: Text("使用网络代理".tl),
+                subtitle: Text(useNetworkProxy ? "使用下方代理配置".tl : "使用系统代理".tl),
+                value: useNetworkProxy,
                 onChanged: (value) {
                   setState(() {
-                    useSystemProxy = value;
+                    useNetworkProxy = value;
                   });
                 },
               ),
               IgnorePointer(
-                ignoring: useSystemProxy,
+                ignoring: !useNetworkProxy,
                 child: Opacity(
-                  opacity: useSystemProxy ? 0.55 : 1,
+                  opacity: useNetworkProxy ? 1 : 0.55,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -413,45 +423,6 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
                           });
                         },
                       ),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            TextButton.icon(
-                              onPressed:
-                                  testingAvailable ? null : _testAvailable,
-                              icon: testingAvailable
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.power_settings_new),
-                              label: Text(availableResult == null
-                                  ? "可用测试".tl
-                                  : "${"可用测试".tl}: $availableResult"),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              onPressed: testingQuality ? null : _testQuality,
-                              icon: testingQuality
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.speed),
-                              label: Text(qualityResult == null
-                                  ? "质量测试".tl
-                                  : "${"质量测试".tl}: $qualityResult"),
-                            ),
-                          ],
-                        ),
-                      ),
                       Row(
                         children: [
                           const Icon(Icons.info_outline, size: 18),
@@ -461,6 +432,42 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
                       ),
                     ],
                   ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: testingAvailable ? null : _testAvailable,
+                      icon: testingAvailable
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.power_settings_new),
+                      label: Text(availableResult == null
+                          ? "可用测试".tl
+                          : "${"可用测试".tl}: $availableResult"),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: testingQuality ? null : _testQuality,
+                      icon: testingQuality
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.speed),
+                      label: Text(qualityResult == null
+                          ? "质量测试".tl
+                          : "${"质量测试".tl}: $qualityResult"),
+                    ),
+                  ],
                 ),
               ),
             ],
