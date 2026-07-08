@@ -35,26 +35,53 @@ class NativeCurlHttpClient {
         host.startsWith("ltn.");
   }
 
+  static Future<ResponseBody> fetchUri(
+    AppProxyConfig config,
+    Uri uri, {
+    String method = "GET",
+    Map<String, String>? headers,
+    Uint8List? body,
+    Duration timeout = const Duration(seconds: 15),
+    int attempts = 3,
+  }) async {
+    final options = RequestOptions(
+      path: uri.toString(),
+      method: method,
+      headers: headers,
+      connectTimeout: timeout,
+      sendTimeout: timeout,
+      receiveTimeout: timeout,
+    );
+    return _fetchWithProxy(
+      options,
+      body,
+      _curlProxy(config),
+      attempts: attempts,
+    );
+  }
+
   static Future<ResponseBody> fetch(
     RequestOptions options,
     Uint8List? body,
   ) async {
     final proxy = _curlProxy(proxyHttpOverrides!.proxyConfig!);
-    final timeout = _timeoutMs(options);
-    final headers = <String, String>{};
-    for (final entry in options.headers.entries) {
-      if (entry.value == null) continue;
-      headers[entry.key] = entry.value.toString();
-    }
+    return _fetchWithProxy(options, body, proxy);
+  }
 
+  static Future<ResponseBody> _fetchWithProxy(
+    RequestOptions options,
+    Uint8List? body,
+    String proxy, {
+    int attempts = 3,
+  }) async {
     final result = await _channel.invokeMapMethod<String, dynamic>("fetch", {
       "method": options.method,
       "url": options.uri.toString(),
       "proxy": proxy,
-      "headers": headers,
+      "headers": _headersToStringMap(options.headers),
       "body": body,
-      "timeoutMs": timeout,
-      "attempts": 3,
+      "timeoutMs": _timeoutMs(options),
+      "attempts": attempts,
     });
 
     if (result == null) {
@@ -80,13 +107,36 @@ class NativeCurlHttpClient {
       (result["statusCode"] as int?) ?? 0,
       headers: _parseHeaders(result["headers"]),
     );
-    final attempts = result["attempts"];
+    final usedAttempts = result["attempts"];
     LogManager.addLog(
         LogLevel.info,
         "Network",
         "Native curl ${options.method} ${options.uri} ${responseBody.statusCode}"
-            "${attempts == null ? "" : " attempts=$attempts"}");
+            "${usedAttempts == null ? "" : " attempts=$usedAttempts"}");
     return responseBody;
+  }
+
+  static Map<String, String> _headersToStringMap(Map<String, dynamic> raw) {
+    final headers = <String, String>{};
+    for (final entry in raw.entries) {
+      final value = _headerValueToString(entry.value);
+      if (value != null && value.isNotEmpty) {
+        headers[entry.key] = value;
+      }
+    }
+    return headers;
+  }
+
+  static String? _headerValueToString(Object? value) {
+    if (value == null) return null;
+    if (value is Iterable) {
+      return value
+          .where((item) => item != null)
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .join(", ");
+    }
+    return value.toString().trim();
   }
 
   static Future<Uint8List?> readBody(Stream<Uint8List>? stream) async {

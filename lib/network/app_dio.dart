@@ -225,8 +225,8 @@ class AppHttpAdapter implements HttpClientAdapter {
         return checkCookie(await NativeCurlHttpClient.fetch(options, body));
       } catch (e) {
         LogManager.addLog(LogLevel.error, "Network",
-            "Native curl failed, fallback to Dio\n${options.method} ${options.uri}\n$e");
-        requestStream = body == null ? null : Stream.value(body);
+            "Native curl failed\n${options.method} ${options.uri}\n$e");
+        rethrow;
       }
     }
     return checkCookie(

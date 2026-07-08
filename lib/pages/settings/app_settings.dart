@@ -48,62 +48,6 @@ Future<void> setProxy(BuildContext context) {
 
 const _proxyProbeTimeout = Duration(seconds: 8);
 
-class _SocketByteReader {
-  _SocketByteReader(Socket socket) {
-    _subscription = socket.listen(
-      (data) {
-        _buffer.addAll(data);
-        _wake();
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        _error = error;
-        _stackTrace = stackTrace;
-        _wake();
-      },
-      onDone: () {
-        _closed = true;
-        _wake();
-      },
-      cancelOnError: true,
-    );
-  }
-
-  final _buffer = <int>[];
-  final _waiters = <Completer<void>>[];
-  late final StreamSubscription<List<int>> _subscription;
-  Object? _error;
-  StackTrace? _stackTrace;
-  var _closed = false;
-
-  Future<List<int>> read(int count) async {
-    while (_buffer.length < count) {
-      if (_error != null) {
-        Error.throwWithStackTrace(_error!, _stackTrace ?? StackTrace.current);
-      }
-      if (_closed) {
-        throw const SocketException(
-            "Connection closed before enough data was received");
-      }
-      var completer = Completer<void>();
-      _waiters.add(completer);
-      await completer.future;
-    }
-    var result = List<int>.of(_buffer.take(count));
-    _buffer.removeRange(0, count);
-    return result;
-  }
-
-  void _wake() {
-    var waiters = List<Completer<void>>.of(_waiters);
-    _waiters.clear();
-    for (var waiter in waiters) {
-      if (!waiter.isCompleted) waiter.complete();
-    }
-  }
-
-  Future<void> cancel() => _subscription.cancel();
-}
-
 class ProxySettingDialog extends StatefulWidget {
   const ProxySettingDialog({super.key});
 
@@ -212,7 +156,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     ];
   }
 
-  Uri _proxyAvailableTarget() => Uri.http("www.gstatic.com", "/generate_204");
+  Uri _proxyAvailableTarget() => _proxyQualityTargets().first.value;
 
   Future<AppProxyConfig?> _testConfig() {
     if (!useNetworkProxy) return getSystemProxyConfig();
@@ -244,6 +188,39 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     Uri url,
   ) async {
     var stopwatch = Stopwatch()..start();
+    if (App.isAndroid && await NativeCurlHttpClient.isAvailable) {
+      try {
+        var response = await NativeCurlHttpClient.fetchUri(
+          config,
+          url,
+          headers: {
+            HttpHeaders.userAgentHeader: webUA,
+            HttpHeaders.acceptHeader: "*/*",
+            HttpHeaders.acceptLanguageHeader: "zh-CN,zh;q=0.9,en;q=0.8",
+            HttpHeaders.connectionHeader: "close",
+            HttpHeaders.rangeHeader: "bytes=0-0",
+          },
+          timeout: _proxyProbeTimeout,
+        );
+        if (response.statusCode >= 200 && response.statusCode < 500) {
+          stopwatch.stop();
+          var elapsed = stopwatch.elapsedMilliseconds;
+          LogManager.addLog(LogLevel.info, "Network",
+              "Proxy native test ${url.host}: ${response.statusCode}, ${elapsed}ms");
+          return (ms: elapsed, error: null);
+        }
+        var message = "HTTP ${response.statusCode}";
+        LogManager.addLog(LogLevel.warning, "Network",
+            "Proxy native test ${url.host}: $message");
+        return (ms: null, error: message);
+      } catch (e, s) {
+        var message = describeNetworkError(e);
+        LogManager.addLog(LogLevel.error, "Network",
+            "Proxy native test ${url.host} failed\n$message\n$e\n$s");
+        return (ms: null, error: message);
+      }
+    }
+
     var overrides = ProxyHttpOverrides(config.proxyRule, config);
     var client = overrides.createHttpClient(null);
     try {
@@ -277,179 +254,6 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       return (ms: null, error: message);
     } finally {
       client.close(force: true);
-    }
-  }
-
-  Future<void> _writeAndFlush(Socket socket, List<int> data) async {
-    socket.add(data);
-    await socket.flush().timeout(_proxyProbeTimeout);
-  }
-
-  Future<void> _socks5Connect(
-    Socket socket,
-    _SocketByteReader reader,
-    AppProxyConfig config,
-    String targetHost,
-    int targetPort,
-  ) async {
-    var methods = config.hasAuth ? [0x02] : [0x00];
-    await _writeAndFlush(socket, [0x05, methods.length, ...methods]);
-
-    var selected = await reader.read(2).timeout(_proxyProbeTimeout);
-    if (selected[0] != 0x05) {
-      throw SocketException("Unsupported SOCKS version: ${selected[0]}");
-    }
-    if (selected[1] == 0xff) {
-      throw const SocketException("SOCKS5 authentication method rejected");
-    }
-    if (config.hasAuth && selected[1] != 0x02) {
-      throw SocketException("Unexpected SOCKS5 auth method: ${selected[1]}");
-    }
-
-    if (selected[1] == 0x02) {
-      var username = utf8.encode(config.username);
-      var password = utf8.encode(config.password);
-      if (username.length > 255 || password.length > 255) {
-        throw const SocketException("SOCKS5 username/password is too long");
-      }
-      await _writeAndFlush(socket, [
-        0x01,
-        username.length,
-        ...username,
-        password.length,
-        ...password,
-      ]);
-      var auth = await reader.read(2).timeout(_proxyProbeTimeout);
-      if (auth[0] != 0x01 || auth[1] != 0x00) {
-        throw const SocketException("SOCKS5 authentication failed");
-      }
-    } else if (selected[1] != 0x00) {
-      throw SocketException("Unsupported SOCKS5 auth method: ${selected[1]}");
-    }
-
-    var host = utf8.encode(targetHost);
-    if (host.length > 255) {
-      throw const SocketException("SOCKS5 target host is too long");
-    }
-    await _writeAndFlush(socket, [
-      0x05,
-      0x01,
-      0x00,
-      0x03,
-      host.length,
-      ...host,
-      (targetPort & 0xff00) >> 8,
-      targetPort & 0x00ff,
-    ]);
-
-    var response = await reader.read(4).timeout(_proxyProbeTimeout);
-    if (response[0] != 0x05) {
-      throw SocketException("Unsupported SOCKS response: ${response[0]}");
-    }
-    if (response[1] != 0x00) {
-      throw SocketException("SOCKS5 connect failed: ${response[1]}");
-    }
-
-    switch (response[3]) {
-      case 0x01:
-        await reader.read(4).timeout(_proxyProbeTimeout);
-      case 0x03:
-        var length = await reader.read(1).timeout(_proxyProbeTimeout);
-        await reader.read(length[0]).timeout(_proxyProbeTimeout);
-      case 0x04:
-        await reader.read(16).timeout(_proxyProbeTimeout);
-      default:
-        throw SocketException(
-            "Unsupported SOCKS5 address type: ${response[3]}");
-    }
-    await reader.read(2).timeout(_proxyProbeTimeout);
-  }
-
-  Future<String> _readHttpProxyHeaders(_SocketByteReader reader) async {
-    var bytes = <int>[];
-    while (bytes.length < 8192) {
-      bytes.addAll(await reader.read(1).timeout(_proxyProbeTimeout));
-      var length = bytes.length;
-      if (length >= 4 &&
-          bytes[length - 4] == 13 &&
-          bytes[length - 3] == 10 &&
-          bytes[length - 2] == 13 &&
-          bytes[length - 1] == 10) {
-        return utf8.decode(bytes, allowMalformed: true);
-      }
-    }
-    throw const SocketException("HTTP proxy response headers are too large");
-  }
-
-  Future<void> _httpConnect(
-    Socket socket,
-    _SocketByteReader reader,
-    AppProxyConfig config,
-    String targetHost,
-    int targetPort,
-  ) async {
-    var connectHost = targetHost.contains(":") ? "[$targetHost]" : targetHost;
-    var auth = "";
-    if (config.hasAuth) {
-      var token =
-          base64Encode(utf8.encode("${config.username}:${config.password}"));
-      auth = "Proxy-Authorization: Basic $token\r\n";
-    }
-    await _writeAndFlush(
-      socket,
-      utf8.encode(
-        "CONNECT $connectHost:$targetPort HTTP/1.1\r\n"
-        "Host: $connectHost:$targetPort\r\n"
-        "Proxy-Connection: close\r\n"
-        "User-Agent: $webUA\r\n"
-        "$auth"
-        "\r\n",
-      ),
-    );
-    var headers = await _readHttpProxyHeaders(reader);
-    var statusLine = headers.split("\r\n").first;
-    var parts = statusLine.split(" ");
-    var status = parts.length > 1 ? int.tryParse(parts[1]) : null;
-    if (status == null || status < 200 || status >= 300) {
-      throw SocketException("HTTP CONNECT failed: $statusLine");
-    }
-  }
-
-  Future<({int? ms, String? error})> _measureProxyTunnel(
-    AppProxyConfig config,
-    Uri url,
-  ) async {
-    var stopwatch = Stopwatch()..start();
-    Socket? socket;
-    _SocketByteReader? reader;
-    try {
-      var targetHost = url.host;
-      var targetPort =
-          url.hasPort ? url.port : (url.isScheme("http") ? 80 : 443);
-      socket = await Socket.connect(
-        config.connectionHost,
-        config.port,
-        timeout: const Duration(seconds: 5),
-      );
-      reader = _SocketByteReader(socket);
-      if (config.isSocks5) {
-        await _socks5Connect(socket, reader, config, targetHost, targetPort);
-      } else {
-        await _httpConnect(socket, reader, config, targetHost, targetPort);
-      }
-      stopwatch.stop();
-      var elapsed = stopwatch.elapsedMilliseconds;
-      LogManager.addLog(
-          LogLevel.info, "Network", "Proxy tunnel ${url.host}: ${elapsed}ms");
-      return (ms: elapsed, error: null);
-    } catch (e, s) {
-      var message = describeNetworkError(e);
-      LogManager.addLog(LogLevel.error, "Network",
-          "Proxy tunnel ${url.host} failed\n$message\n$e\n$s");
-      return (ms: null, error: message);
-    } finally {
-      await reader?.cancel();
-      socket?.destroy();
     }
   }
 
@@ -506,7 +310,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       var failed = <String>[];
       var failedDetails = <String>[];
       for (var target in _proxyQualityTargets()) {
-        var result = await _measureProxyTunnel(config, target.value);
+        var result = await _measureProxyRequest(config, target.value);
         if (result.ms == null) {
           failed.add(target.key);
           failedDetails.add(
@@ -525,7 +329,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       }
       if (failedDetails.isNotEmpty) {
         LogManager.addLog(LogLevel.warning, "Network",
-            "Proxy quality tunnel failed targets\n${failedDetails.join("\n")}");
+            "Proxy quality request failed targets\n${failedDetails.join("\n")}");
       }
     } catch (e) {
       qualityResult = "不可用".tl;
