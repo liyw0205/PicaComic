@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:dio_http2_adapter/dio_http2_adapter.dart';
 import 'package:pica_comic/network/http_client.dart';
+import 'package:pica_comic/network/native_curl.dart';
 import '../base.dart';
 
 String _networkErrorText(Object? error) {
@@ -217,6 +218,17 @@ class AppHttpAdapter implements HttpClientAdapter {
     var options = o.copyWith();
     LogManager.addLog(LogLevel.info, "Network",
         "${options.method} ${options.path}\nheaders:\n${options.headers.toString()}\ndata:${options.data}");
+    if (NativeCurlHttpClient.shouldHandle(options) &&
+        await NativeCurlHttpClient.isAvailable) {
+      final body = await NativeCurlHttpClient.readBody(requestStream);
+      try {
+        return checkCookie(await NativeCurlHttpClient.fetch(options, body));
+      } catch (e) {
+        LogManager.addLog(LogLevel.error, "Network",
+            "Native curl failed, fallback to Dio\n${options.method} ${options.uri}\n$e");
+        requestStream = body == null ? null : Stream.value(body);
+      }
+    }
     return checkCookie(
         await adapter!.fetch(options, requestStream, cancelFuture));
   }

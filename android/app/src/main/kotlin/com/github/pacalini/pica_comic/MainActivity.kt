@@ -15,10 +15,12 @@ import android.os.Environment
 import android.Manifest
 import androidx.core.content.ContextCompat
 import com.google.android.gms.common.GoogleApiAvailability
+import java.util.concurrent.Executors
 
 class MainActivity: FlutterFragmentActivity() {
     var volumeListen = VolumeListen()
     var listening = false
+    private val nativeCurlExecutor = Executors.newCachedThreadPool()
 
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -58,6 +60,26 @@ class MainActivity: FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/proxy").setMethodCallHandler{
                 _, res ->
             res.success(getProxy())
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/native_curl").setMethodCallHandler{
+                call, res ->
+            when (call.method) {
+                "available" -> res.success(NativeCurl.isAvailable())
+                "fetch" -> {
+                    val arguments = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                    nativeCurlExecutor.execute {
+                        try {
+                            val result = NativeCurl.fetch(arguments)
+                            runOnUiThread { res.success(result) }
+                        } catch (e: Throwable) {
+                            runOnUiThread {
+                                res.error("native_curl_error", e.message, e.stackTraceToString())
+                            }
+                        }
+                    }
+                }
+                else -> res.notImplemented()
+            }
         }
         //保持屏幕常亮
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/keepScreenOn").setMethodCallHandler{
@@ -119,6 +141,11 @@ class MainActivity: FlutterFragmentActivity() {
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onDestroy() {
+        nativeCurlExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun getDeviceInfo(): String{
