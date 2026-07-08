@@ -16,7 +16,7 @@ import '../http_client.dart';
 ///
 /// 响应头中 Content-Range 指明数据范围, 此函数用subData形式返回此值
 Future<Res<List<int>>> fetchComicData(String url, int start, {int? maxLength, int? endData, String? ref}) async{
-  await getProxy();
+  await setNetworkProxy();
   try{
     var end = start + 100 - 1;
     if(endData != null){

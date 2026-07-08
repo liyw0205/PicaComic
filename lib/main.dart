@@ -38,7 +38,7 @@ void main(List<String> args) {
           "${details.exception}\n${details.stack}");
     };
     notFirstUse = appdata.firstUse[3] == "1";
-    setNetworkProxy();
+    await setNetworkProxy();
     runApp(const MyApp());
     if (App.isDesktop) {
       await windowManager.ensureInitialized();
@@ -107,7 +107,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         // ignore
       }
     }
-    setNetworkProxy();
+    unawaited(setNetworkProxy());
     scheduleMicrotask(() {
       if (state == AppLifecycleState.hidden && enableAuth) {
         if (!AuthPage.lock && appdata.settings[13] == "1") {

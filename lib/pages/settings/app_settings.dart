@@ -181,14 +181,17 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     var client = overrides.createHttpClient(null);
     try {
       var request =
-          await client.headUrl(url).timeout(const Duration(seconds: 8));
+          await client.getUrl(url).timeout(const Duration(seconds: 8));
       request.headers.set(HttpHeaders.userAgentHeader, webUA);
       request.headers.set(HttpHeaders.acceptHeader, "*/*");
+      request.headers
+          .set(HttpHeaders.acceptLanguageHeader, "zh-CN,zh;q=0.9,en;q=0.8");
       request.headers.set(HttpHeaders.connectionHeader, "close");
+      request.headers.set(HttpHeaders.rangeHeader, "bytes=0-0");
       request.followRedirects = false;
       request.persistentConnection = false;
       var response = await request.close().timeout(const Duration(seconds: 8));
-      await response.drain().timeout(const Duration(seconds: 1));
+      await response.take(1).drain().timeout(const Duration(seconds: 1));
       if (response.statusCode >= 200 && response.statusCode < 500) {
         stopwatch.stop();
         var elapsed = stopwatch.elapsedMilliseconds;

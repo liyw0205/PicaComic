@@ -123,7 +123,7 @@ class HiNetwork{
 
   ///搜索Hitomi
   Future<Res<List<int>>> search(String keyword) async{
-    await getProxy();
+    await setNetworkProxy();
     appdata.searchHistory.remove(keyword);
     appdata.searchHistory.add(keyword);
     appdata.writeHistory();

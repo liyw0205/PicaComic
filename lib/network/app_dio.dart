@@ -130,25 +130,47 @@ class MyLogInterceptor implements Interceptor {
 
 class AppHttpAdapter implements HttpClientAdapter {
   HttpClientAdapter? adapter;
+  String? _adapterProxySignature;
 
   final bool http2;
 
   AppHttpAdapter(this.http2);
 
+  static String _proxySignature() {
+    final overrides = proxyHttpOverrides;
+    final config = overrides?.proxyConfig;
+    return [
+      overrides?.proxy ?? "",
+      config?.uriString ?? "",
+      config?.useHostRules == true ? "1" : "0",
+      appdata.settings[58],
+    ].join("|");
+  }
+
+  static HttpClientAdapter _createIoAdapter() {
+    return IOHttpClientAdapter(
+      createHttpClient: () {
+        final overrides = proxyHttpOverrides;
+        return overrides?.createHttpClient(null) ?? HttpClient();
+      },
+    );
+  }
+
   static Future<HttpClientAdapter> createAdapter(bool http2) async {
-    return http2
+    final proxyConfig = proxyHttpOverrides?.proxyConfig;
+    return http2 && proxyConfig?.isSocks5 != true
         ? Http2Adapter(
             ConnectionManager(
               idleTimeout: const Duration(seconds: 15),
               onClientCreate: (_, config) {
-                var proxyUri = proxyHttpOverrides?.proxyConfig?.http2ProxyUri;
+                var proxyUri = proxyConfig?.http2ProxyUri;
                 if (proxyUri != null && appdata.settings[58] != "1") {
                   config.proxy = proxyUri;
                 }
               },
             ),
           )
-        : IOHttpClientAdapter();
+        : _createIoAdapter();
   }
 
   @override
@@ -159,7 +181,12 @@ class AppHttpAdapter implements HttpClientAdapter {
   @override
   Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? requestStream,
       Future<void>? cancelFuture) async {
-    adapter ??= await createAdapter(http2);
+    final proxySignature = _proxySignature();
+    if (adapter == null || _adapterProxySignature != proxySignature) {
+      adapter?.close(force: true);
+      adapter = await createAdapter(http2);
+      _adapterProxySignature = proxySignature;
+    }
     int retry = 0;
     while (true) {
       try {
