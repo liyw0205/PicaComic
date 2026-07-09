@@ -79,6 +79,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   bool forceRebuild = false;
 
+  Timer? _proxyRefreshTimer;
+
   OverlayEntry? hideContentOverlay;
 
   void hideContent() {
@@ -145,12 +147,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     listenMouseSideButtonToBack();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WidgetsBinding.instance.addObserver(this);
+    _proxyRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (vpnAutoSwitchEnabled) {
+        unawaited(setNetworkProxy());
+      }
+    });
     notifications.init();
     if (appdata.settings[12] == "1") {
       blockScreenshot();
     }
     PaintingBinding.instance.imageCache.maximumSizeBytes = 200 * 1024 * 1024;
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    _proxyRefreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override

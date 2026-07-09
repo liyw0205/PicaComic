@@ -13,6 +13,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
 import android.Manifest
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
 import com.google.android.gms.common.GoogleApiAvailability
 import java.util.concurrent.Executors
@@ -58,8 +61,12 @@ class MainActivity: FlutterFragmentActivity() {
         }
         //获取http代理
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/proxy").setMethodCallHandler{
-                _, res ->
-            res.success(getProxy())
+                call, res ->
+            when (call.method) {
+                "getProxy" -> res.success(getProxy())
+                "isVpnActive" -> res.success(isVpnActive())
+                else -> res.notImplemented()
+            }
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/native_curl").setMethodCallHandler{
                 call, res ->
@@ -160,6 +167,23 @@ class MainActivity: FlutterFragmentActivity() {
             "$host:$port"
         }else{
             "No Proxy"
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun isVpnActive(): Boolean {
+        return try {
+            val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                manager.allNetworks.any { network ->
+                    manager.getNetworkCapabilities(network)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+            } else {
+                false
+            }
+        } catch (_: Throwable) {
+            false
         }
     }
 }

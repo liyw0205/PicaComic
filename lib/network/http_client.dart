@@ -7,6 +7,13 @@ import 'package:socks5_proxy/socks_client.dart';
 import '../base.dart';
 import '../foundation/app.dart';
 
+const int networkProxySettingIndex = 8;
+const int rememberedProxySettingIndex = 90;
+const int vpnAutoSwitchSettingIndex = 91;
+
+bool get vpnAutoSwitchEnabled =>
+    appdata.settings[vpnAutoSwitchSettingIndex] == "1";
+
 class AppProxyConfig {
   AppProxyConfig({
     required this.scheme,
@@ -165,14 +172,44 @@ Future<AppProxyConfig?> _getSystemProxyConfig() async {
 
 Future<AppProxyConfig?> getSystemProxyConfig() => _getSystemProxyConfig();
 
+Future<bool> isVpnActive() async {
+  if (!App.isAndroid) return false;
+  const channel = MethodChannel("com.github.pacalini.pica_comic/proxy");
+  try {
+    return await channel.invokeMethod<bool>("isVpnActive") == true;
+  } catch (_) {
+    return _hasVpnNetworkInterface();
+  }
+}
+
+Future<bool> _hasVpnNetworkInterface() async {
+  try {
+    var interfaces = await NetworkInterface.list();
+    return interfaces.any((interface) {
+      var name = interface.name.toLowerCase();
+      return name.startsWith("tun") ||
+          name.startsWith("ppp") ||
+          name.startsWith("ipsec") ||
+          name.startsWith("wg");
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<AppProxyConfig?> getProxyConfig() async {
+  if (vpnAutoSwitchEnabled && await isVpnActive()) {
+    return null;
+  }
+
   // 手动代理优先，避免已废弃的 Hosts 功能覆盖用户显式设置的代理。
-  if (appdata.settings[8].removeAllBlank != "" && appdata.settings[8] != "0") {
-    return AppProxyConfig.tryParse(appdata.settings[8]);
+  if (appdata.settings[networkProxySettingIndex].removeAllBlank != "" &&
+      appdata.settings[networkProxySettingIndex] != "0") {
+    return AppProxyConfig.tryParse(appdata.settings[networkProxySettingIndex]);
   }
 
   // 对于安卓, 将获取WIFI设置中的代理。
-  if (appdata.settings[8] == "0") {
+  if (appdata.settings[networkProxySettingIndex] == "0") {
     var systemProxy = await _getSystemProxyConfig();
     if (systemProxy != null) return systemProxy;
   }

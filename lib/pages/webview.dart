@@ -98,7 +98,7 @@ enum _AppWebviewMenuAction {
   extractCookie,
 }
 
-class _AppWebviewState extends State<AppWebview> {
+class _AppWebviewState extends State<AppWebview> with WidgetsBindingObserver {
   InAppWebViewController? controller;
 
   String title = "Webview";
@@ -111,10 +111,18 @@ class _AppWebviewState extends State<AppWebview> {
 
   String? _proxySignature;
 
+  Timer? _proxyRefreshTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _proxyFuture = _applyProxyOverride();
+    _proxyRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (vpnAutoSwitchEnabled) {
+        unawaited(_refreshProxyOverride(rebuildOnChange: true));
+      }
+    });
   }
 
   @override
@@ -127,6 +135,20 @@ class _AppWebviewState extends State<AppWebview> {
       _progress = 0;
       _webviewKey++;
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshProxyOverride(rebuildOnChange: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    _proxyRefreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   String? _currentProxySignature() {
@@ -161,6 +183,19 @@ class _AppWebviewState extends State<AppWebview> {
     } catch (e) {
       debugPrint("[AppWebview] set proxy override failed: $e");
     }
+  }
+
+  Future<void> _refreshProxyOverride({required bool rebuildOnChange}) async {
+    final oldSignature = _proxySignature;
+    await _applyProxyOverride();
+    if (!mounted || !rebuildOnChange || oldSignature == _proxySignature) {
+      return;
+    }
+    setState(() {
+      controller = null;
+      _progress = 0;
+      _webviewKey++;
+    });
   }
 
   HttpAuthResponse? _handleHttpAuthRequest(

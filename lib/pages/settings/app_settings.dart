@@ -47,8 +47,6 @@ Future<void> setProxy(BuildContext context) {
 }
 
 const _proxyProbeTimeout = Duration(seconds: 8);
-const _networkProxySettingIndex = 8;
-const _rememberedProxySettingIndex = 90;
 
 class ProxySettingDialog extends StatefulWidget {
   const ProxySettingDialog({super.key});
@@ -74,11 +72,11 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   @override
   void initState() {
     super.initState();
-    var currentProxy = appdata.settings[_networkProxySettingIndex].trim();
+    var currentProxy = appdata.settings[networkProxySettingIndex].trim();
     useNetworkProxy = currentProxy.isNotEmpty && currentProxy != "0";
     var config = AppProxyConfig.tryParse(currentProxy);
     config ??=
-        AppProxyConfig.tryParse(appdata.settings[_rememberedProxySettingIndex]);
+        AppProxyConfig.tryParse(appdata.settings[rememberedProxySettingIndex]);
     if (config != null) {
       _applyConfigToFields(config);
     } else if (useNetworkProxy) {
@@ -109,7 +107,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
 
   void _rememberConfig(AppProxyConfig? config) {
     if (config != null) {
-      appdata.settings[_rememberedProxySettingIndex] = config.uriString;
+      appdata.settings[rememberedProxySettingIndex] = config.uriString;
     }
   }
 
@@ -358,15 +356,15 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     var config = _currentConfig();
     _rememberConfig(config);
     if (!useNetworkProxy) {
-      appdata.settings[_networkProxySettingIndex] = "0";
+      appdata.settings[networkProxySettingIndex] = "0";
     } else if (fullAddressController.text.trim().isEmpty) {
-      appdata.settings[_networkProxySettingIndex] = "";
+      appdata.settings[networkProxySettingIndex] = "";
     } else {
       if (config == null) {
         showToast(message: "代理地址无效".tl);
         return;
       }
-      appdata.settings[_networkProxySettingIndex] = config.uriString;
+      appdata.settings[networkProxySettingIndex] = config.uriString;
     }
     await appdata.updateSettings();
     await setNetworkProxy();

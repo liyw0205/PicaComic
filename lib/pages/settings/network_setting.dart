@@ -13,12 +13,12 @@ class _NetworkSettingsState extends State<NetworkSettings> {
 
   String _rememberedProxyText() {
     var config =
-        AppProxyConfig.tryParse(appdata.settings[_rememberedProxySettingIndex]);
+        AppProxyConfig.tryParse(appdata.settings[rememberedProxySettingIndex]);
     return config == null ? "" : " · ${"已记住".tl} ${_formatProxyConfig(config)}";
   }
 
   String _proxySubtitle() {
-    var currentProxy = appdata.settings[_networkProxySettingIndex].trim();
+    var currentProxy = appdata.settings[networkProxySettingIndex].trim();
     if (currentProxy == "0") return "${"使用系统代理".tl}${_rememberedProxyText()}";
     if (currentProxy.isEmpty) return "${"禁用".tl}${_rememberedProxyText()}";
     var config = AppProxyConfig.tryParse(currentProxy);
@@ -46,6 +46,21 @@ class _NetworkSettingsState extends State<NetworkSettings> {
               if (mounted) setState(() {});
             });
           },
+        ),
+        ListTile(
+          leading: const Icon(Icons.vpn_key),
+          title: Text("VPN自动切换".tl),
+          subtitle: Text("检测到 VPN 时自动关闭代理，断开后恢复".tl),
+          trailing: Switch(
+            value: appdata.settings[vpnAutoSwitchSettingIndex] == "1",
+            onChanged: (value) {
+              setState(() {
+                appdata.settings[vpnAutoSwitchSettingIndex] = value ? "1" : "0";
+              });
+              appdata.updateSettings();
+              setNetworkProxy();
+            },
+          ),
         ),
         ListTile(
           title: Row(

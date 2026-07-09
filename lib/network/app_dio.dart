@@ -182,6 +182,7 @@ class AppHttpAdapter implements HttpClientAdapter {
   @override
   Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? requestStream,
       Future<void>? cancelFuture) async {
+    await setNetworkProxy();
     final proxySignature = _proxySignature();
     if (adapter == null || _adapterProxySignature != proxySignature) {
       adapter?.close(force: true);
