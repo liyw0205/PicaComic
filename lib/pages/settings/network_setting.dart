@@ -8,12 +8,22 @@ class NetworkSettings extends StatefulWidget {
 }
 
 class _NetworkSettingsState extends State<NetworkSettings> {
+  String _formatProxyConfig(AppProxyConfig config) =>
+      "${config.isSocks5 ? "SOCKS5" : "HTTP"} ${config.hostPort}";
+
+  String _rememberedProxyText() {
+    var config =
+        AppProxyConfig.tryParse(appdata.settings[_rememberedProxySettingIndex]);
+    return config == null ? "" : " · ${"已记住".tl} ${_formatProxyConfig(config)}";
+  }
+
   String _proxySubtitle() {
-    if (appdata.settings[8] == "0") return "使用系统代理".tl;
-    if (appdata.settings[8].trim().isEmpty) return "禁用".tl;
-    var config = AppProxyConfig.tryParse(appdata.settings[8]);
-    if (config == null) return appdata.settings[8];
-    return "${config.isSocks5 ? "SOCKS5" : "HTTP"} ${config.hostPort}";
+    var currentProxy = appdata.settings[_networkProxySettingIndex].trim();
+    if (currentProxy == "0") return "${"使用系统代理".tl}${_rememberedProxyText()}";
+    if (currentProxy.isEmpty) return "${"禁用".tl}${_rememberedProxyText()}";
+    var config = AppProxyConfig.tryParse(currentProxy);
+    if (config == null) return currentProxy;
+    return _formatProxyConfig(config);
   }
 
   @override

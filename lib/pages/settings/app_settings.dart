@@ -47,6 +47,8 @@ Future<void> setProxy(BuildContext context) {
 }
 
 const _proxyProbeTimeout = Duration(seconds: 8);
+const _networkProxySettingIndex = 8;
+const _rememberedProxySettingIndex = 90;
 
 class ProxySettingDialog extends StatefulWidget {
   const ProxySettingDialog({super.key});
@@ -72,15 +74,15 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   @override
   void initState() {
     super.initState();
-    useNetworkProxy = appdata.settings[8] != "0";
-    var config = AppProxyConfig.tryParse(appdata.settings[8]);
+    var currentProxy = appdata.settings[_networkProxySettingIndex].trim();
+    useNetworkProxy = currentProxy.isNotEmpty && currentProxy != "0";
+    var config = AppProxyConfig.tryParse(currentProxy);
+    config ??=
+        AppProxyConfig.tryParse(appdata.settings[_rememberedProxySettingIndex]);
     if (config != null) {
-      proxyType = config.isSocks5 ? 1 : 0;
-      hostController.text = config.host;
-      portController.text = config.port.toString();
-      usernameController.text = config.username;
-      passwordController.text = config.password;
-      fullAddressController.text = config.uriString;
+      _applyConfigToFields(config);
+    } else if (useNetworkProxy) {
+      fullAddressController.text = currentProxy;
     }
   }
 
@@ -95,6 +97,21 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 
   String get _scheme => proxyType == 1 ? "socks5" : "http";
+
+  void _applyConfigToFields(AppProxyConfig config) {
+    proxyType = config.isSocks5 ? 1 : 0;
+    hostController.text = config.host;
+    portController.text = config.port.toString();
+    usernameController.text = config.username;
+    passwordController.text = config.password;
+    fullAddressController.text = config.uriString;
+  }
+
+  void _rememberConfig(AppProxyConfig? config) {
+    if (config != null) {
+      appdata.settings[_rememberedProxySettingIndex] = config.uriString;
+    }
+  }
 
   void _composeFullAddress() {
     fullAddressEdited = false;
@@ -136,11 +153,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   void _fillFieldsFromFullAddress() {
     var config = AppProxyConfig.tryParse(fullAddressController.text);
     if (config == null) return;
-    proxyType = config.isSocks5 ? 1 : 0;
-    hostController.text = config.host;
-    portController.text = config.port.toString();
-    usernameController.text = config.username;
-    passwordController.text = config.password;
+    _applyConfigToFields(config);
   }
 
   List<MapEntry<String, Uri>> _proxyQualityTargets() {
@@ -342,17 +355,18 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 
   Future<void> _save() async {
+    var config = _currentConfig();
+    _rememberConfig(config);
     if (!useNetworkProxy) {
-      appdata.settings[8] = "0";
+      appdata.settings[_networkProxySettingIndex] = "0";
     } else if (fullAddressController.text.trim().isEmpty) {
-      appdata.settings[8] = "";
+      appdata.settings[_networkProxySettingIndex] = "";
     } else {
-      var config = _currentConfig();
       if (config == null) {
         showToast(message: "代理地址无效".tl);
         return;
       }
-      appdata.settings[8] = config.uriString;
+      appdata.settings[_networkProxySettingIndex] = config.uriString;
     }
     await appdata.updateSettings();
     await setNetworkProxy();
@@ -395,7 +409,8 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text("使用网络代理".tl),
-                subtitle: Text(useNetworkProxy ? "使用下方代理配置".tl : "使用系统代理".tl),
+                subtitle:
+                    Text(useNetworkProxy ? "使用下方代理配置".tl : "使用系统代理，保留配置".tl),
                 value: useNetworkProxy,
                 onChanged: (value) {
                   setState(() {
@@ -462,7 +477,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
                         children: [
                           const Icon(Icons.info_outline, size: 18),
                           const SizedBox(width: 6),
-                          Expanded(child: Text("留空表示禁用网络代理".tl)),
+                          Expanded(child: Text("留空表示禁用网络代理；关闭开关会保留当前配置".tl)),
                         ],
                       ),
                     ],
