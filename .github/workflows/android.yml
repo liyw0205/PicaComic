@@ -19,6 +19,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: "3.44.0"
           architecture: x64
       - run: flutter pub get
       - name: Test nhentai metadata
