@@ -21,6 +21,8 @@ jobs:
           channel: stable
           architecture: x64
       - run: flutter pub get
+      - name: Test nhentai metadata
+        run: flutter test --no-pub test/nhentai_page_count_test.dart
       - run: cd android && ./gradlew assembleRelease
       - name: Prepare APK files
         shell: bash

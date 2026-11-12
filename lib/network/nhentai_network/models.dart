@@ -13,8 +13,10 @@ class NhentaiComicBrief extends BaseComic{
   final String lang;
   @override
   final List<String> tags;
+  final int? pages;
 
-  const NhentaiComicBrief(this.title, this.cover, this.id, this.lang, this.tags);
+  const NhentaiComicBrief(this.title, this.cover, this.id, this.lang, this.tags,
+      [this.pages]);
 
   @override
   String get description => lang;

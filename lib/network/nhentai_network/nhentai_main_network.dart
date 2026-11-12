@@ -300,11 +300,12 @@ class NhentaiNetwork {
     var id = comicDom.querySelector("a")!.attributes["href"]!.nums;
     var lang = "Unknown";
     var tags = comicDom.attributes["data-tags"] ?? "";
-    if (tags.contains("12227")) {
+    final tagIds = tags.split(" ").where((tag) => tag.isNotEmpty).toSet();
+    if (tagIds.contains("12227")) {
       lang = "English";
-    } else if (tags.contains("6346")) {
+    } else if (tagIds.contains("6346")) {
       lang = "日本語";
-    } else if (tags.contains("29963")) {
+    } else if (tagIds.contains("29963")) {
       lang = "中文";
     }
     var tagsRes = <String>[];
@@ -313,7 +314,8 @@ class NhentaiNetwork {
         tagsRes.add(nhentaiTags[tag]!);
       }
     }
-    return NhentaiComicBrief(name, img, id, lang, tagsRes);
+    final pages = int.tryParse(comicDom.attributes["data-pages"] ?? "");
+    return NhentaiComicBrief(name, img, id, lang, tagsRes, pages);
   }
 
   Map<String, dynamic>? _asMap(dynamic value) {
@@ -527,6 +529,24 @@ class NhentaiNetwork {
     return "Unknown";
   }
 
+  String _readLangFromTagIds(dynamic value) {
+    final ids = value is List
+        ? value.map((item) => item.toString()).toSet()
+        : value is String
+            ? value.split(RegExp(r"\s+")).toSet()
+            : const <String>{};
+    if (ids.contains("29963")) {
+      return "中文";
+    }
+    if (ids.contains("6346")) {
+      return "日本語";
+    }
+    if (ids.contains("12227")) {
+      return "English";
+    }
+    return "Unknown";
+  }
+
   NhentaiComicBrief? _parseApiComic(dynamic raw) {
     var gallery = _asMap(raw);
     if (gallery == null) {
@@ -549,8 +569,12 @@ class NhentaiNetwork {
             _extensionFromImage(gallery["thumbnail"], thumbnailPath));
     final tagGroups = _readTagGroups(gallery);
     final tags = tagGroups.values.expand((e) => e).toList();
-    return NhentaiComicBrief(
-        title, cover, id.toString(), _readLang(tagGroups), tags);
+    final language = tagGroups.containsKey("Languages")
+        ? _readLang(tagGroups)
+        : _readLangFromTagIds(gallery["tag_ids"]);
+    final pageCount = _readInt(gallery["num_pages"]);
+    return NhentaiComicBrief(title, cover, id.toString(), language, tags,
+        pageCount > 0 ? pageCount : null);
   }
 
   List<NhentaiComicBrief> _parseApiComicList(dynamic payload) {
@@ -610,6 +634,14 @@ class NhentaiNetwork {
         NhentaiSort.popularMonth => "popular-month",
         NhentaiSort.popularAll => "popular",
       };
+
+  String? _configuredLanguage() {
+    final index = int.tryParse(appdata.settings[69]) ?? 0;
+    if (index < 1 || index > 3) {
+      return null;
+    }
+    return const ["chinese", "english", "japanese"][index - 1];
+  }
 
   NhentaiComic? _parseApiComicInfo(dynamic payload, String originalId) {
     final root = _asMap(payload);
@@ -731,8 +763,13 @@ class NhentaiNetwork {
   }
 
   Future<Res<NhentaiHomePageData>> getHomePage([int? page]) async {
-    final apiUrl = Uri.parse("$baseUrl/api/v2/galleries").replace(
+    final language = _configuredLanguage();
+    final apiUrl = Uri.parse(language == null
+            ? "$baseUrl/api/v2/galleries"
+            : "$baseUrl/api/v2/search")
+        .replace(
       queryParameters: {
+        if (language != null) "query": "language:$language",
         if (page != null && page != 1) "page": page.toString(),
       },
     ).toString();
@@ -743,7 +780,12 @@ class NhentaiNetwork {
     }
 
     var url = baseUrl;
-    if (page != null && page != 1) {
+    if (language != null) {
+      url = "$baseUrl/search?q=${Uri.encodeComponent("language:$language")}";
+      if (page != null && page != 1) {
+        url += "&page=$page";
+      }
+    } else if (page != null && page != 1) {
       url = "$url?page=$page";
     }
     var res = await get(url);
@@ -753,14 +795,16 @@ class NhentaiNetwork {
     try {
       var document = parse(res.data);
       List<Element> popularDoms;
-      if (url == baseUrl) {
+      if (language == null && url == baseUrl) {
         popularDoms = document.querySelectorAll(
             "div.container.index-container.index-popular > div.gallery");
       } else {
         popularDoms = const [];
       }
-      var latest = document
-          .querySelectorAll("div.container.index-container > div.gallery");
+      var latest = language == null
+          ? document
+              .querySelectorAll("div.container.index-container > div.gallery")
+          : document.querySelectorAll("div.gallery");
 
       return Res(NhentaiHomePageData(
         removeNullValue(List.generate(
@@ -776,8 +820,15 @@ class NhentaiNetwork {
 
   Future<Res<bool>> loadMoreHomePageData(NhentaiHomePageData data) async {
     final nextPage = data.page + 1;
-    final apiUrl = Uri.parse("$baseUrl/api/v2/galleries").replace(
-      queryParameters: {"page": nextPage.toString()},
+    final language = _configuredLanguage();
+    final apiUrl = Uri.parse(language == null
+            ? "$baseUrl/api/v2/galleries"
+            : "$baseUrl/api/v2/search")
+        .replace(
+      queryParameters: {
+        if (language != null) "query": "language:$language",
+        "page": nextPage.toString(),
+      },
     ).toString();
     final apiRes = await _apiGet(apiUrl);
     if (apiRes.success && _findApiList(apiRes.data) != null) {
@@ -786,7 +837,10 @@ class NhentaiNetwork {
       return const Res(true);
     }
 
-    var res = await get("$baseUrl?page=${data.page + 1}");
+    final fallbackUrl = language == null
+        ? "$baseUrl?page=${data.page + 1}"
+        : "$baseUrl/search?q=${Uri.encodeComponent("language:$language")}&page=$nextPage";
+    var res = await get(fallbackUrl);
     if (res.error) {
       return Res.fromErrorRes(res);
     }

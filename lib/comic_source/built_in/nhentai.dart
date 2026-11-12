@@ -113,14 +113,12 @@ final nhentai = ComicSource.named(
           return Res.fromErrorRes(res);
         }
         if (index == 1) {
-          return Res(<Object>[
-            ExplorePagePart(
-              "Popular",
-              res.data.popular,
-              null,
-            ),
-            res.data.latest,
-          ], subData: 20000);
+          final parts = <Object>[];
+          if (res.data.popular.isNotEmpty) {
+            parts.add(ExplorePagePart("Popular", res.data.popular, null));
+          }
+          parts.add(res.data.latest);
+          return Res(parts, subData: 20000);
         } else {
           return Res([res.data.latest], subData: 20000);
         }
@@ -163,6 +161,18 @@ class _NhentaiComicTile extends ComicTile {
 
   @override
   String get description => comic.lang;
+
+  @override
+  Widget? buildSubDescription(BuildContext context) {
+    final pages = comic.pages;
+    if (pages == null || pages <= 0) {
+      return null;
+    }
+    return Text(
+      "${pages}P",
+      style: const TextStyle(fontSize: 12.0),
+    );
+  }
 
   @override
   Widget get image => AnimatedImage(
