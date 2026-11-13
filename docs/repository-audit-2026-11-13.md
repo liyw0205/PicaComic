@@ -3,14 +3,14 @@
 日期：2026-11-13。基线：`master`，HEAD `631954f0`，版本 `4.2.17+4217`。
 
 本报告审查当前工作区，包括上一轮未提交的修复；不是只审查 HEAD。
-本报告随修复继续更新。当前工作区包含审查前已存在的功能改动及本轮修复；当前版本已提升至 `4.2.18+4218`，提交与推送待完成。
+本报告随修复继续更新。当前版本为 `4.2.18+4218`，代码与 CI 依赖修复已推送到 `master`。
 用户原有未跟踪的 `tool/` 保持原状，不纳入建议提交。
 
 ## 结论
 
 初审发现发布可追溯性、下载完成判定、任务生命周期和列表分页方面的明确缺陷；修复过程中还定位并修正了版本比较的 Dart 类型错误。
-关键代码修复已落地；通过 Debian proot 中与 Flutter engine 匹配的 Linux runner，全量 Flutter tests 97 项通过，全仓 analyze 为 0 error、0 warning、149 info，Native curl 6 项通过。
-Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；Android APK 构建、设备验收、签名一致性和 CI 发布流程仍未验证。仓库未列出 repository-level Actions secrets，因此本轮不推送签名 Release tag；先推 master 由 CI 构建 debug artifact。部分独立 `dart run` FFI 脚本也会触发当前 Dart FFI transformer 崩溃，不能将其误记为通过。
+关键代码修复已落地；通过 Debian proot 中与 Flutter engine 匹配的 Linux runner，全量 Flutter tests 97 项通过，全仓 analyze 为 0 error、0 warning、149 info，Native curl 6 项通过。GitHub Actions 对 `master` 的 Android debug 构建、artifact 上传亦已成功。
+Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设备验收与升级一致性仍未验证。仓库未列出 repository-level Actions secrets，因此本轮未推送签名 Release tag；CI artifact 是 7 天保留的 debug APK。部分独立 `dart run` FFI 脚本也会触发当前 Dart FFI transformer 崩溃，不能将其误记为通过。
 
 以下缺陷由当前代码路径确认；除验证章节明确列出的回归外，尚未在设备上逐项复现。
 本轮重点覆盖网络、搜索、图片、下载、缓存、更新与工作流，不构成所有功能的穷尽审计。
@@ -158,7 +158,7 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；Android APK 构建、
 
 | 项目 | 现状与方案 | 验收 |
 | --- | --- | --- |
-| Android CI | `.github/workflows/android.yml` 配置全量 `flutter analyze`、`flutter test`、Native curl 回归；master 构建 debug，版本 tag 构建签名 release，复核远端 tag、校验 APK 证书指纹并生成 SHA256SUMS。Gradle 声明 armeabi-v7a/arm64-v8a/x86_64 与 universal APK，工作流按产物名称分类；YAML 和 shell 语法已验证。工作流尚未由 GitHub Actions 实跑，本机 runner 不兼容不能证明 CI 结果。 | 配置签名与预期证书指纹 secrets、保护 `v*` tag；干净 GitHub runner 上分析、测试、各 ABI debug/release 构建与签名均通过；确认 armeabi-v7a 产物实际存在；失败时不能发布。 |
+| Android CI | `.github/workflows/android.yml` 配置全量 `flutter analyze`、`flutter test`、Native curl 回归；master 构建 debug，版本 tag 构建签名 release，复核远端 tag、校验 APK 证书指纹并生成 SHA256SUMS。真实 Actions run `43371123167` 的 analyze、97 项测试、Native curl 6 项、Android debug 构建和 artifact 上传均成功；首次运行发现 Ubuntu runner 缺少 libcurl 开发包，现已在 workflow 安装。Release 签名仍待 secrets。 | 配置签名与预期证书指纹 secrets、保护 `v*` tag；干净 GitHub runner 上各 ABI release 构建与签名通过；确认 armeabi-v7a 产物实际存在；失败时不能发布。 |
 | iOS 工作流 | `.github/workflows/ios_simulator.yml` 已升级 upload-artifact@v4，并固定 Flutter 3.44.0、Xcode 16.4。 | 模拟器构建和产物上传成功；保留可追溯运行结果。 |
 | 图片内存 | 通用、EH、Hitomi、JM、自定义图片流已改用 `BytesBuilder`，减少逐块扩容复制；EH 已校验图片通过完成进度标记避免 wrapper 对同一 bytes 再完整解码；native curl 仍全量缓冲并限制 64 MiB；`BaseImageProvider` 的原始字节缓存仍独立存在，坏图清理、LRU 次序与容量维护已修复。重复持有与流式落盘仍需基准测试决定。 | 固定图片集比较峰值 RSS、首字节与完成时间；大图片明确区分资源大小限制和连接错误；不取消安全上限。 |
 | 内存缓存预算 | `BaseImageProvider` 原始字节缓存现为 50 MiB 容量受限 LRU，命中会更新次序，替换及解码失败会修正计数；Flutter `ImageCache`、磁盘缓存、网络缓冲和 native curl 缓冲各自独立，尚无整机总预算基线。 | 用固定阅读/下载场景测峰值 RSS；明确总预算、单项上限及大图淘汰行为，不因单缓存达标就假设总内存受控。 |
@@ -169,11 +169,11 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；Android APK 构建、
 
 ## 实施顺序
 
-1. **代码修复与本地回归**：R01-R14 对应代码修复和专项测试已落地，并补齐 ZIP symlink、EH 取链取消、下载封面取消/队列竞态、空 Release 摘要及 Hitomi 非正 ID 回归；全量 Flutter tests 97 项、Native curl 6 项通过，analyze 为 0 error、0 warning、149 info。版本已提升至 `4.2.18+4218`，正在提交推送。
+1. **代码修复与本地回归**：R01-R14 对应代码修复和专项测试已落地，并补齐 ZIP symlink、EH 取链取消、下载封面取消/队列竞态、空 Release 摘要及 Hitomi 非正 ID 回归；全量 Flutter tests 97 项、Native curl 6 项通过，analyze 为 0 error、0 warning、149 info。版本 `4.2.18+4218` 已推送至 `master`。
 2. **发布前置验收**：在 GitHub 配置既有 keystore 与证书指纹 secrets、保护 `v*` tag；用干净 Ubuntu runner 验证 APK 的四种产物和签名，并由真实 Actions 执行发布流程。不能用本机 Termux 构建失败替代这些结果。
 3. **设备验收**：核对旧 APK 证书并验证覆盖升级和数据保留；实机检查语言切换、多页阅读、代理/TLS、下载暂停恢复及 EH 图片/归档取消。
 4. **性能与依赖治理**：先建立图片和整机内存基线，再决定流式落盘、缓存预算及依赖固定；不凭感觉引入大规模重构或升级。
-5. **交付**：本轮先推 master 获取 CI debug APK artifact；签名 Release tag 等既有 keystore 与证书指纹 secrets 配置并验收后再创建，不生成新密钥、不覆盖现有 tag。
+5. **交付**：master CI 已生成 debug APK artifact；签名 Release tag 等既有 keystore 与证书指纹 secrets 配置并验收后再创建，不生成新密钥、不覆盖现有 tag。
 
 ## 本轮验证
 
@@ -181,11 +181,11 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；Android APK 构建、
 - `flutter test --no-pub`：全量 97 项通过，覆盖本轮新增回归。测试通过 Debian proot 内与 Flutter engine revision 匹配的 Linux runner 执行；`LD_LIBRARY_PATH` 指向 Debian SQLite；因 proot 以 root 运行，权限拒绝子测例跳过，非 root CI 会运行该分支。Termux 原生 runner 仍因 SDK snapshot/impellerc 不匹配不可用。
 - `flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings`：退出码 0，0 error、0 warning、149 info。新增 `tool/` 中已有的 `avoid_print` 与其余 info 未修改。
 - `sh test/native_curl/run.sh`：6 项 JNI/C 回归通过。复核修正了 POST body 用例的假阳性：服务端线程只记录校验结果并返回成功/失败响应，主线程断言请求次数、重试次数、curl/HTTP 状态、响应体及请求 body 校验结果。`git diff --check` 通过。
-- `.github/workflows/android.yml` 与 `ios_simulator.yml` 均通过 Ruby YAML 解析；提取所有 `run:` 块后逐块执行 `bash -n` 均通过。Release APK 重命名逻辑与 Gradle `splits.abi`/universal 配置一致；当前本机旧构建元数据未包含 armeabi-v7a，受 Termux APK 构建阻断影响，仍需以干净 Ubuntu Release 构建确认四种产物都生成。
+- `.github/workflows/android.yml` 与 `ios_simulator.yml` 均通过 Ruby YAML 解析；提取所有 `run:` 块后逐块执行 `bash -n` 均通过。Actions run `43371123167` 中 Android debug 构建与 artifact 上传成功；Release APK 重命名逻辑与 Gradle `splits.abi`/universal 配置一致。签名 Release 仍需干净 Ubuntu 构建确认四种产物及签名。
 - `flutter build apk --debug --no-pub`：首次失败于 `:app:processDebugResources`，Termux 下 Gradle 调用 Linux AAPT2 包装脚本被 `sh` 解析并报 `Syntax error: ")" unexpected`。再通过 `-Dorg.gradle.project.android.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2` 指向本机 AAPT2 后，构建继续到资源链接，但本机 AAPT2 无法读取当前 SDK 平台资源：对 API 36 `android.jar` 的 `dump resources` 以退出码 139 崩溃，对 API 35 报 `illegal map type 'string' (22)`。尚未产出 APK，不能视为应用构建通过。
 - 直接以 Linux `dart run` 编译涉及 FFI 的 `cache_manager_regression.dart` 仍会触发 Dart SDK `InvalidType` / `FunctionType` transformer 崩溃；Flutter test runner 中相同 CacheManager 回归已通过。Termux 原生 Flutter test 的 ICU / SDK hash 错误仍存在。
 - Gradle `:app:packageDebug --dry-run` 默认任务图成功且不包含 `fixDebugFlutterKernelSdkHash`；显式 opt-in 任务图包含该任务；`:app:assembleRelease --dry-run` 包含 `validateReleaseSigning`。这些只验证任务图，不是 APK 构建或 hash 实际改写验收。
-- 未执行完整 Android/iOS/Linux 构建，未触发 GitHub Actions 或发布；旧 APK 证书一致性及 Release secrets 未核验。
+- GitHub Actions run `43371123167` 成功，产出 master debug artifact；签名 Release tag 未触发，因为 repository-level Actions secrets 列表为空。旧 APK 证书一致性、既有 keystore secrets 与覆盖升级仍待仓库/设备验收。
 
 ## 既有改动状态
 
