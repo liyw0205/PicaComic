@@ -14,8 +14,15 @@ class CachedNetwork {
       {CacheExpiredTime expiredTime = CacheExpiredTime.short,
       CookieJarSql? cookieJar,
       bool log = true,
-      bool http2 = false}) async {
+      bool http2 = false,
+      CancelToken? cancelToken}) async {
     await setNetworkProxy();
+    if (cancelToken?.isCancelled ?? false) {
+      throw DioException(
+        requestOptions: RequestOptions(path: url),
+        type: DioExceptionType.cancel,
+      );
+    }
     var fileName = md5.convert(const Utf8Encoder().convert(url)).toString();
     if (fileName.length > 20) {
       fileName = fileName.substring(0, 21);
@@ -23,6 +30,12 @@ class CachedNetwork {
     final key = url;
     if (expiredTime != CacheExpiredTime.no) {
       var cache = await CacheManager().findCache(key);
+      if (cancelToken?.isCancelled ?? false) {
+        throw DioException(
+          requestOptions: RequestOptions(path: url),
+          type: DioExceptionType.cancel,
+        );
+      }
       if (cache != null) {
         var file = File(cache);
         return CachedNetworkRes(await file.readAsString(), 200, url);
@@ -34,15 +47,19 @@ class CachedNetwork {
       dio.interceptors.add(CookieManagerSql(cookieJar));
     }
 
-    var res = await dio.get<Uint8List>(url);
-    if (res.data == null && !url.contains("random")) {
-      throw Exception("Empty data");
+    try {
+      var res = await dio.get<Uint8List>(url, cancelToken: cancelToken);
+      if (res.data == null && !url.contains("random")) {
+        throw Exception("Empty data");
+      }
+      if (expiredTime != CacheExpiredTime.no) {
+        await CacheManager().writeCache(key, res.data!, expiredTime.time);
+      }
+      return CachedNetworkRes(utf8.decode(res.data!, allowMalformed: true),
+          res.statusCode, res.realUri.toString(), res.headers.map);
+    } finally {
+      dio.close(force: true);
     }
-    if (expiredTime != CacheExpiredTime.no) {
-      await CacheManager().writeCache(key, res.data!, expiredTime.time);
-    }
-    return CachedNetworkRes(utf8.decode(res.data!, allowMalformed: true),
-        res.statusCode, res.realUri.toString(), res.headers.map);
   }
 
   Future<void> delete(String url) async {

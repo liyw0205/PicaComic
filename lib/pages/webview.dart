@@ -9,6 +9,7 @@ import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/http_client.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -30,7 +31,8 @@ extension WebviewExtension on InAppWebViewController {
     try {
       await cookieManager.flush();
     } catch (e) {
-      debugPrint("[AppWebview] CookieManager.flush failed: $e");
+      debugPrint(
+          "[AppWebview] CookieManager.flush failed: ${safeNetworkError(e)}");
     }
     return cookieManager.getCookies(
       url: WebUri(_normalizeCookieUrl(url)),
@@ -181,7 +183,8 @@ class _AppWebviewState extends State<AppWebview> with WidgetsBindingObserver {
         ),
       );
     } catch (e) {
-      debugPrint("[AppWebview] set proxy override failed: $e");
+      debugPrint(
+          "[AppWebview] set proxy override failed: ${safeNetworkError(e)}");
     }
   }
 

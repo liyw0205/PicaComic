@@ -23,6 +23,7 @@ import 'package:pica_comic/main.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/pages/logs_page.dart';
+import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -36,6 +37,7 @@ import '../../network/http_client.dart';
 import '../../network/http_proxy.dart';
 import '../../network/jm_network/jm_network.dart';
 import '../../network/native_curl.dart';
+import '../../network/network_logging.dart';
 import '../../network/nhentai_network/nhentai_main_network.dart';
 import '../../network/update.dart';
 import '../../network/webdav.dart';
@@ -73,14 +75,23 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> implements PopEntry{
+class _SettingsPageState extends State<SettingsPage> implements PopEntry {
   int currentPage = -1;
 
   ColorScheme get colors => Theme.of(context).colorScheme;
 
   bool get enableTwoViews => !UiMode.m1(context);
 
-  final categories = <String>["浏览", "漫画源", "阅读", "外观", "本地收藏", "APP", "网络", "关于"];
+  final categories = <String>[
+    "浏览",
+    "漫画源",
+    "阅读",
+    "外观",
+    "本地收藏",
+    "APP",
+    "网络",
+    "关于"
+  ];
 
   final icons = <IconData>[
     Icons.explore,
@@ -297,8 +308,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
         decoration: BoxDecoration(
             color: selected ? colors.primaryContainer : null,
-            borderRadius: BorderRadius.circular(16)
-        ),
+            borderRadius: BorderRadius.circular(16)),
         child: Row(children: [
           Icon(icons[id]),
           const SizedBox(
@@ -407,9 +417,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
                   ),
                   InkWell(
                     borderRadius: const BorderRadius.all(Radius.circular(18)),
-                    onTap: () => showDialogMessage(
-                        context,
-                        "高刷新率模式".tl,
+                    onTap: () => showDialogMessage(context, "高刷新率模式".tl,
                         "${"尝试强制设置高刷新率".tl}\n${"可能不起作用".tl}"),
                     child: const Icon(
                       Icons.info_outline,
@@ -485,9 +493,10 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
         ListTile(
           leading: const Icon(Icons.sd_storage_outlined),
           title: Text("缓存大小限制".tl),
-          subtitle: Text('${bytesLengthToReadableSize(CacheManager().currentSize)}'
-                         ' / '
-                         '${bytesLengthToReadableSize(CacheManager().limitSize)}'),
+          subtitle:
+              Text('${bytesLengthToReadableSize(CacheManager().currentSize)}'
+                  ' / '
+                  '${bytesLengthToReadableSize(CacheManager().limitSize)}'),
           onTap: setCacheLimit,
           trailing: const Icon(Icons.arrow_right),
         ),
@@ -502,7 +511,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
           title: Text("清除缓存".tl),
           onTap: () {
             CacheManager().clear().then((value) {
-              if(mounted) {
+              if (mounted) {
                 setState(() {});
               }
             });
@@ -575,7 +584,8 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
           title: Text("下载并行".tl),
           leading: const Icon(Icons.download),
           trailing: Select(
-            initialValue: ["1", "2", "4", "6", "8", "16"].indexOf(appdata.settings[79]),
+            initialValue:
+                ["1", "2", "4", "6", "8", "16"].indexOf(appdata.settings[79]),
             values: const ["1", "2", "4", "6", "8", "16"],
             onChange: (value) {
               appdata.settings[79] = ["1", "2", "4", "6", "8", "16"][value];
@@ -583,22 +593,24 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
             },
           ),
         ),
-        if(App.isAndroid)
+        if (App.isAndroid)
           ListTile(
             title: Text("应用链接".tl),
             subtitle: Text("在系统设置中管理APP支持的链接".tl),
             leading: const Icon(Icons.link),
             trailing: const Icon(Icons.arrow_right),
-            onTap: (){
+            onTap: () {
               const MethodChannel("pica_comic/settings").invokeMethod("link");
             },
           ),
-        if(kDebugMode)
+        if (kDebugMode)
           const ListTile(
             title: Text("Debug"),
             onTap: debug,
           ),
-        Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
+        Padding(
+            padding:
+                EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
       ],
     );
   }
@@ -613,8 +625,8 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
             child: Container(
               width: 156,
               height: 156,
-              decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20)),
+              decoration:
+                  BoxDecoration(borderRadius: BorderRadius.circular(20)),
               child: const Image(
                 image: AssetImage("images/app_icon_no_bg.png"),
                 filterQuality: FilterQuality.medium,
@@ -660,7 +672,9 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry{
         //       mode: LaunchMode.externalApplication),
         //   trailing: const Icon(Icons.arrow_right),
         // ),
-        Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
+        Padding(
+            padding:
+                EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
       ],
     );
   }

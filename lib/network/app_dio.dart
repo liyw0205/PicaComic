@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -8,6 +7,7 @@ import 'package:pica_comic/foundation/log.dart';
 import 'package:dio_http2_adapter/dio_http2_adapter.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/native_curl.dart';
+import 'network_logging.dart';
 import '../base.dart';
 
 String _networkErrorText(Object? error) {
@@ -44,8 +44,11 @@ String describeNetworkError(Object? error) {
 class MyLogInterceptor implements Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    LogManager.addLog(LogLevel.error, "Network",
-        "${err.requestOptions.method} ${err.requestOptions.path}\n$err\n${err.response?.data.toString()}");
+    LogManager.addLog(
+        LogLevel.error,
+        "Network",
+        "${err.requestOptions.method} ${safeNetworkUrl(err.requestOptions.uri.toString())}\n"
+            "${err.type.name}, status:${err.response?.statusCode}, cause:${err.error.runtimeType}");
     switch (err.type) {
       case DioExceptionType.badResponse:
         var statusCode = err.response?.statusCode;
@@ -97,25 +100,14 @@ class MyLogInterceptor implements Interceptor {
   @override
   void onResponse(
       Response<dynamic> response, ResponseInterceptorHandler handler) {
-    var headers = response.headers.map.map((key, value) => MapEntry(
-        key.toLowerCase(), value.length == 1 ? value.first : value.toString()));
-    headers.remove("cookie");
-    String content;
-    if (response.data is List<int>) {
-      try {
-        content = utf8.decode(response.data, allowMalformed: false);
-      } catch (e) {
-        content = "<Bytes>\nlength:${response.data.length}";
-      }
-    } else {
-      content = response.data.toString();
-    }
+    final headers = safeNetworkHeaders(response.headers.map);
+    final content = networkPayloadSummary(response.data);
     LogManager.addLog(
         (response.statusCode != null && response.statusCode! < 400)
             ? LogLevel.info
             : LogLevel.error,
         "Network",
-        "Response ${response.realUri.toString()} ${response.statusCode}\n"
+        "Response ${safeNetworkUrl(response.realUri.toString())} ${response.statusCode}\n"
             "headers:\n$headers\n$content");
     handler.next(response);
   }
@@ -189,27 +181,41 @@ class AppHttpAdapter implements HttpClientAdapter {
       adapter = await createAdapter(http2);
       _adapterProxySignature = proxySignature;
     }
+    var cancelled = false;
+    cancelFuture?.then((_) => cancelled = true);
+    final canReplay = requestStream == null &&
+        const {'GET', 'HEAD'}.contains(o.method.toUpperCase());
     int retry = 0;
     while (true) {
+      if (cancelled) {
+        throw DioException(requestOptions: o, type: DioExceptionType.cancel);
+      }
       try {
         var res = await fetchOnce(o, requestStream, cancelFuture);
         return res;
       } catch (e) {
-        if (e is DioException) {
-          if (e.response?.statusCode != null) {
-            var code = e.response!.statusCode!;
-            if (code >= 400 && code < 500) {
-              rethrow;
-            }
-          }
+        if (cancelled) {
+          throw DioException(requestOptions: o, type: DioExceptionType.cancel);
         }
-        LogManager.addLog(LogLevel.error, "Network",
-            "${o.method} ${o.path}\n$e\nRetrying...");
-        retry++;
-        if (retry == 2) {
+        final transient = e is SocketException ||
+            e is HttpException ||
+            (e is DioException &&
+                e.error is! HandshakeException &&
+                const {
+                  DioExceptionType.connectionError,
+                  DioExceptionType.connectionTimeout,
+                  DioExceptionType.receiveTimeout,
+                }.contains(e.type));
+        if (!canReplay || !transient || cancelled || retry >= 1) {
           rethrow;
         }
-        await Future.delayed(const Duration(seconds: 1));
+        LogManager.addLog(LogLevel.error, "Network",
+            "${o.method} ${safeNetworkUrl(o.uri.toString())}\n${e.runtimeType}\nRetrying...");
+        retry++;
+        await Future.any([
+          Future<void>.delayed(const Duration(seconds: 1)),
+          if (cancelFuture != null) cancelFuture,
+        ]);
       }
     }
   }
@@ -217,16 +223,20 @@ class AppHttpAdapter implements HttpClientAdapter {
   Future<ResponseBody> fetchOnce(RequestOptions o,
       Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
     var options = o.copyWith();
-    LogManager.addLog(LogLevel.info, "Network",
-        "${options.method} ${options.path}\nheaders:\n${options.headers.toString()}\ndata:${options.data}");
+    LogManager.addLog(
+        LogLevel.info,
+        "Network",
+        "${options.method} ${safeNetworkUrl(options.uri.toString())}\nheaders:\n"
+            "${safeNetworkHeaders(options.headers)}\ndata:${networkPayloadSummary(options.data)}");
     if (NativeCurlHttpClient.shouldHandle(options) &&
         await NativeCurlHttpClient.isAvailable) {
       final body = await NativeCurlHttpClient.readBody(requestStream);
       try {
-        return checkCookie(await NativeCurlHttpClient.fetch(options, body));
+        return checkCookie(await NativeCurlHttpClient.fetch(options, body,
+            cancelFuture: cancelFuture));
       } catch (e) {
         LogManager.addLog(LogLevel.error, "Network",
-            "Native curl failed\n${options.method} ${options.uri}\n$e");
+            "Native curl failed\n${options.method} ${safeNetworkUrl(options.uri.toString())}\n${e.runtimeType}");
         rethrow;
       }
     }

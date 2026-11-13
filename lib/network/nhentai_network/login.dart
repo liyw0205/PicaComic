@@ -6,6 +6,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/pages/webview.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'
@@ -37,12 +38,13 @@ Future<Map<String, String>> _readMobileNhCookies(
     try {
       final cookies = await controller.getCookieList(url);
       debugPrint(
-          "$_nhLoginLogTag manual url=$url cookieNames=${cookies.map((e) => e.name).join(",")}");
+          "$_nhLoginLogTag manual url=${safeNetworkUrl(url)} cookieNames=${cookies.map((e) => e.name).join(",")}");
       for (final cookie in cookies) {
         res[cookie.name] = cookie.value.toString();
       }
     } catch (e) {
-      debugPrint("$_nhLoginLogTag manual getCookies failed url=$url error=$e");
+      debugPrint("$_nhLoginLogTag manual getCookies failed "
+          "url=${safeNetworkUrl(url)} error=${safeNetworkError(e)}");
     }
   }
   debugPrint("$_nhLoginLogTag manual mergedCookieNames=${res.keys.join(",")}");
@@ -161,10 +163,10 @@ Future<bool> _validateNhCookies(Map<String, String> cookies) async {
     NhentaiNetwork().logged = true;
     final res = await NhentaiNetwork().validateLogin();
     debugPrint("$_nhLoginLogTag validate success=${res.success} "
-        "error=${res.errorMessage ?? ""}");
+        "error=${res.errorMessage == null ? "" : safeNetworkError(res.errorMessage)}");
     return res.success;
   } catch (e, s) {
-    debugPrint("$_nhLoginLogTag validate failed: $e\n$s");
+    debugPrint("$_nhLoginLogTag validate failed: ${safeNetworkError(e)}\n$s");
     return false;
   } finally {
     cookieJar.deleteUri(uri);

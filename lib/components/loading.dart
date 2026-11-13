@@ -40,7 +40,8 @@ class NetworkError extends StatelessWidget {
           if (retry != null)
             if (cfe != null)
               FilledButton(
-                onPressed: () => passCloudflare(CloudflareException.fromString(message)!, retry!),
+                onPressed: () => passCloudflare(
+                    CloudflareException.fromString(message)!, retry!),
                 child: Text('继续'.tl),
               )
             else
@@ -190,7 +191,9 @@ abstract class MultiPageLoadingState<T extends StatefulWidget, S extends Object>
 
   int _page = 1;
 
-  int _maxPage = 1;
+  int? _maxPage;
+
+  int _requestGeneration = 0;
 
   Future<Res<List<S>>> loadData(int page);
 
@@ -202,21 +205,30 @@ abstract class MultiPageLoadingState<T extends StatefulWidget, S extends Object>
 
   bool get isFirstLoading => _isFirstLoading;
 
-  bool get haveNextPage => _page <= _maxPage;
+  // Unknown totals remain pageable until a response provides a final page.
+  bool get haveNextPage => _maxPage == null || _page <= _maxPage!;
 
   void nextPage() {
-    if (_page > _maxPage) return;
+    if (_maxPage != null && _page > _maxPage!) return;
     if (_isLoading) return;
+    final requestedPage = _page;
+    final generation = _requestGeneration;
     _isLoading = true;
-    loadData(_page).then((value) {
-      _isLoading = false;
-      if (mounted) {
+    unawaited(() async {
+      try {
+        final value = await loadData(requestedPage);
+        if (!mounted || generation != _requestGeneration) return;
         if (value.success) {
-          _page++;
+          _page = requestedPage + 1;
           if (value.subData is int) {
             _maxPage = value.subData as int;
           }
+          if (value.data.isEmpty) {
+            _maxPage =
+                value.subData is int ? value.subData as int : requestedPage;
+          }
           setState(() {
+            _isLoading = false;
             data!.addAll(value.data);
           });
         } else {
@@ -224,10 +236,15 @@ abstract class MultiPageLoadingState<T extends StatefulWidget, S extends Object>
           if (message.length > 20) {
             message = "${message.substring(0, 20)}...";
           }
+          setState(() => _isLoading = false);
           context.showMessage(message: message);
         }
+      } catch (_) {
+        if (!mounted || generation != _requestGeneration) return;
+        setState(() => _isLoading = false);
+        context.showMessage(message: "Network Error");
       }
-    });
+    }());
   }
 
   void reset() {
@@ -237,30 +254,45 @@ abstract class MultiPageLoadingState<T extends StatefulWidget, S extends Object>
       data = null;
       _error = null;
       _page = 1;
+      _maxPage = null;
     });
     firstLoad();
   }
 
   void firstLoad() {
+    final generation = ++_requestGeneration;
     Future.microtask(() {
-      loadData(_page).then((value) {
-        if (!mounted) return;
-        if (value.success) {
-          _page++;
-          if (value.subData is int) {
-            _maxPage = value.subData as int;
+      final requestedPage = _page;
+      () async {
+        try {
+          final value = await loadData(requestedPage);
+          if (!mounted || generation != _requestGeneration) return;
+          if (value.success) {
+            _page = requestedPage + 1;
+            if (value.subData is int) {
+              _maxPage = value.subData as int;
+            }
+            if (value.data.isEmpty) {
+              _maxPage = requestedPage;
+            }
+            setState(() {
+              _isFirstLoading = false;
+              data = value.data;
+            });
+          } else {
+            setState(() {
+              _isFirstLoading = false;
+              _error = value.errorMessage ?? "Network Error";
+            });
           }
+        } catch (_) {
+          if (!mounted || generation != _requestGeneration) return;
           setState(() {
             _isFirstLoading = false;
-            data = value.data;
-          });
-        } else {
-          setState(() {
-            _isFirstLoading = false;
-            _error = value.errorMessage!;
+            _error = "Network Error";
           });
         }
-      });
+      }();
     });
   }
 

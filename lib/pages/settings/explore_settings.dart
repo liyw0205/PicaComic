@@ -2,7 +2,7 @@ part of pica_settings;
 
 Widget buildExploreSettings(BuildContext context, bool popUp) {
   var searchSource = <String>[];
-  for(var source in ComicSource.sources){
+  for (var source in ComicSource.sources) {
     searchSource.add(source.key);
   }
 
@@ -24,14 +24,12 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
       NewPageSetting(
           title: "探索页面".tl,
           onTap: () => setExplorePages(context),
-          icon:  const Icon(Icons.explore_outlined)
-      ),
+          icon: const Icon(Icons.explore_outlined)),
       NewPageSetting(
           title: "分类页面".tl,
           onTap: () => showPopUpWidget(App.globalContext!,
               MultiPagesFilter("分类页面".tl, 67, categoryPages())),
-          icon:  const Icon(Icons.account_tree_outlined)
-      ),
+          icon: const Icon(Icons.account_tree_outlined)),
       SelectSettingWithAppdata(
         icon: const Icon(Icons.list),
         title: "漫画列表显示方式".tl,
@@ -40,10 +38,12 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
       ),
       NewPageSetting(
           title: "关键词屏蔽".tl,
-          onTap: () => showPopUpWidget(context,
-              BlockingKeywordPage(popUp: MediaQuery.of(context).size.width>600,)),
-          icon: const Icon(Icons.block)
-      ),
+          onTap: () => showPopUpWidget(
+              context,
+              BlockingKeywordPage(
+                popUp: MediaQuery.of(context).size.width > 600,
+              )),
+          icon: const Icon(Icons.block)),
       SwitchSetting(
         title: "完全隐藏屏蔽的作品".tl,
         settingsIndex: 83,
@@ -59,7 +59,8 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
         leading: const Icon(Icons.search),
         title: "默认搜索源".tl,
         values: searchSource,
-        initialValue: searchSource.indexOf(appdata.appSettings.initialSearchTarget),
+        initialValue:
+            searchSource.indexOf(appdata.appSettings.initialSearchTarget),
         onChanged: (i) {
           appdata.appSettings.initialSearchTarget = searchSource[i];
           appdata.updateSettings();
@@ -75,6 +76,11 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
         settingsIndex: 69,
         options: ["无".tl, "chinese", "english", "japanese"],
         icon: const Icon(Icons.translate),
+        onChanged: () {
+          SearchResultPage.updateDefaultLanguage(
+              int.tryParse(appdata.settings[69]) ?? 0);
+          MyApp.updater?.call();
+        },
       ),
       SettingsTitle("漫画块".tl),
       SelectSetting(
@@ -84,7 +90,7 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
         onChanged: (i) {
           var settings = appdata.settings[44].split(',');
           settings[0] = i.toString();
-          if(settings.length == 1){
+          if (settings.length == 1) {
             settings.add("1.0");
           }
           appdata.settings[44] = settings.join(',');
@@ -93,7 +99,7 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
         },
         values: ["详细".tl, "简略".tl],
       ),
-      StatefulBuilder(builder: (context, setState){
+      StatefulBuilder(builder: (context, setState) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: SizedBox(
@@ -101,7 +107,9 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
             height: 64,
             child: Row(
               children: [
-                const SizedBox(width: 16,),
+                const SizedBox(
+                  width: 16,
+                ),
                 const Icon(Icons.crop_free),
                 Expanded(
                   child: Stack(
@@ -110,9 +118,10 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                         top: 0,
                         left: 12,
                         right: 0,
-                        child: Text("漫画块大小".tl, style: const TextStyle(
-                            fontSize: 16
-                        ),),
+                        child: Text(
+                          "漫画块大小".tl,
+                          style: const TextStyle(fontSize: 16),
+                        ),
                       ),
                       Positioned(
                         left: -8,
@@ -122,20 +131,23 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                           max: 1.25,
                           min: 0.75,
                           divisions: 10,
-                          value: double.parse(appdata.settings[44].split(',').elementAtOrNull(1) ?? "1.00"),
+                          value: double.parse(appdata.settings[44]
+                                  .split(',')
+                                  .elementAtOrNull(1) ??
+                              "1.00"),
                           overlayColor: WidgetStateColor.resolveWith(
-                                  (states) => Colors.transparent),
-                          onChangeEnd: (v){
+                              (states) => Colors.transparent),
+                          onChangeEnd: (v) {
                             appdata.updateSettings();
                           },
                           onChanged: (v) {
                             var settings = appdata.settings[44].split(',');
-                            if(settings.length == 1){
+                            if (settings.length == 1) {
                               settings.add(v.toStringAsFixed(2));
                             } else {
                               settings[1] = v.toStringAsFixed(2);
                             }
-                            setState((){
+                            setState(() {
                               appdata.settings[44] = settings.join(',');
                             });
                           },
@@ -144,8 +156,11 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                     ],
                   ),
                 ),
-                Text(appdata.settings[44].split(',').elementAtOrNull(1) ?? "1.00"),
-                const SizedBox(width: 32,),
+                Text(appdata.settings[44].split(',').elementAtOrNull(1) ??
+                    "1.00"),
+                const SizedBox(
+                  width: 32,
+                ),
               ],
             ),
           ),
@@ -167,7 +182,7 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
         settingsIndex: 73,
         icon: const Icon(Icons.history_toggle_off),
       ),
-      StatefulBuilder(builder: (context, setState){
+      StatefulBuilder(builder: (context, setState) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: SizedBox(
@@ -175,7 +190,9 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
             height: 64,
             child: Row(
               children: [
-                const SizedBox(width: 16,),
+                const SizedBox(
+                  width: 16,
+                ),
                 const Icon(Icons.crop_free),
                 Expanded(
                   child: Stack(
@@ -184,9 +201,10 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                         top: 0,
                         left: 12,
                         right: 0,
-                        child: Text("图片收藏大小".tl, style: const TextStyle(
-                            fontSize: 16
-                        ),),
+                        child: Text(
+                          "图片收藏大小".tl,
+                          style: const TextStyle(fontSize: 16),
+                        ),
                       ),
                       Positioned(
                         left: -8,
@@ -198,12 +216,12 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                           divisions: 10,
                           value: double.parse(appdata.settings[74]),
                           overlayColor: WidgetStateColor.resolveWith(
-                                  (states) => Colors.transparent),
-                          onChangeEnd: (v){
+                              (states) => Colors.transparent),
+                          onChangeEnd: (v) {
                             appdata.updateSettings();
                           },
                           onChanged: (v) {
-                            setState((){
+                            setState(() {
                               appdata.settings[74] = v.toStringAsFixed(2);
                             });
                           },
@@ -213,29 +231,32 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
                   ),
                 ),
                 Text(appdata.settings[74]),
-                const SizedBox(width: 32,),
+                const SizedBox(
+                  width: 32,
+                ),
               ],
             ),
           ),
         );
       }),
-      Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
+      Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
     ],
   );
 }
 
-Map<String, String> categoryPages(){
+Map<String, String> categoryPages() {
   return {
-    for(var source in ComicSource.sources)
-      if(source.categoryData != null)
+    for (var source in ComicSource.sources)
+      if (source.categoryData != null)
         source.categoryData!.key: source.categoryData!.title.tl
   };
 }
 
-Map<String, String> networkFavorites(){
+Map<String, String> networkFavorites() {
   return {
-    for(var source in ComicSource.sources)
-      if(source.favoriteData != null)
-        source.key: source.favoriteData!.title.tl
+    for (var source in ComicSource.sources)
+      if (source.favoriteData != null) source.key: source.favoriteData!.title.tl
   };
 }

@@ -12,6 +12,8 @@ class ComicsPageLogic<T> extends StateController {
   ///错误信息, null表示没有错误
   String? message;
 
+  String? paginationError;
+
   /// 最大页数, 为null表示不知道或者无穷
   int? maxPage;
 
@@ -23,38 +25,49 @@ class ComicsPageLogic<T> extends StateController {
 
   bool showFloatingButton = true;
 
+  int _generation = 0;
+
   void get(Future<Res<List<T>>> Function(int) getComics) async {
     if (loadingData) return;
+    final generation = _generation;
+    final firstPage = comics == null;
+    final requestedPage = firstPage ? 1 : current;
     loadingData = true;
     Future.microtask(() => update());
-    if (comics == null) {
-      var res = await getComics(1);
-      if (res.error) {
-        message = res.errorMessage;
-      } else {
-        comics = res.data;
-        dividedComics = {};
-        dividedComics![1] = res.data;
-        if (res.subData is int) {
-          maxPage = res.subData;
+    try {
+      final res = await getComics(requestedPage);
+      if (generation != _generation) return;
+      if (firstPage) {
+        if (res.error) {
+          message = res.errorMessage;
+        } else {
+          comics = res.data;
+          dividedComics = {1: res.data};
+          maxPage = res.subData is int ? res.subData as int : null;
+          if (res.data.isEmpty) maxPage = 1;
         }
-        if (res.data.isEmpty) {
-          maxPage = 1;
+      } else {
+        if (res.error) {
+          paginationError = res.errorMessage ?? "Network Error";
+        } else {
+          dividedComics![requestedPage] = res.data;
+          paginationError = null;
         }
       }
-      loading = false;
-      loadingData = false;
-      update();
-    } else {
-      var res = await getComics(current);
-      if (res.error) {
-        message = res.errorMessage;
-      } else {
-        dividedComics![current] = res.data;
+    } catch (e) {
+      if (generation == _generation) {
+        if (firstPage) {
+          message = e.toString();
+        } else {
+          paginationError = e.toString();
+        }
       }
-      loading = false;
-      loadingData = false;
-      update();
+    } finally {
+      if (generation == _generation) {
+        loading = false;
+        loadingData = false;
+        update();
+      }
     }
   }
 
@@ -62,40 +75,67 @@ class ComicsPageLogic<T> extends StateController {
 
   void loadNextPage(Future<Res<List<T>>> Function(int) getComics) async {
     if (maxPage != null && current >= maxPage!) return;
+    if (paginationError != null) return;
     if (loadingData) return;
+    final generation = _generation;
+    final requestedPage = current + 1;
     loadingData = true;
     Future.microtask(() => update());
-    var res = await getComics(current + 1);
-    if (res.error) {
-      showToast(message: res.errorMessage!);
-    } else {
-      if (res.subData is int) {
-        maxPage = res.subData;
-      }
-      if (res.data.isEmpty) {
+    try {
+      final res = await getComics(requestedPage);
+      if (generation != _generation) return;
+      if (res.error) {
+        paginationError = res.errorMessage ?? "Network Error";
+      } else if (res.data.isEmpty) {
+        paginationError = null;
+        if (res.subData is int) maxPage = res.subData as int;
         _emptyPageCount++;
         if (_emptyPageCount > 3 && maxPage == null) {
-          // 某些漫画源不会返回总页数, 而app的网络代码会根据用户设置进行屏蔽操作
-          // 空页面既可能是因为没有更多页面, 也可能是因为被屏蔽了
-          // 如果连续3次加载空页面, 则认为已经加载完毕
-          maxPage = current;
+          // Filtering can make a valid page empty; stop only after repeated empty pages.
+          maxPage = requestedPage;
         }
-        // 等待一会儿再加载, 避免因为某些错误导致无限加载
-        await Future.delayed(const Duration(seconds: 1));
+        current = requestedPage;
       } else {
+        paginationError = null;
         _emptyPageCount = 0;
+        if (res.subData is int) maxPage = res.subData as int;
         comics!.addAll(res.data);
+        current = requestedPage;
+      }
+    } catch (e) {
+      if (generation == _generation) paginationError = e.toString();
+    } finally {
+      if (generation == _generation) {
+        loadingData = false;
+        update();
       }
     }
-    current++;
-    loadingData = false;
-    update();
+  }
+
+  void retryNextPage(Future<Res<List<T>>> Function(int) getComics) {
+    if (paginationError == null) return;
+    paginationError = null;
+    loadNextPage(getComics);
+  }
+
+  void retryCurrentPage(Future<Res<List<T>>> Function(int) getComics) {
+    if (paginationError == null || loadingData) return;
+    paginationError = null;
+    loading = true;
+    get(getComics);
   }
 
   @override
   void refresh() {
+    _generation++;
     loading = true;
     comics = null;
+    dividedComics = null;
+    current = 1;
+    maxPage = null;
+    _emptyPageCount = 0;
+    paginationError = null;
+    loadingData = false;
     message = null;
     update();
   }
@@ -168,6 +208,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
         builder: (logic) {
           if (logic.dividedComics?[logic.current] == null &&
               logic.message == null &&
+              logic.paginationError == null &&
               appdata.settings[25] != "0") {
             logic.loading = true;
           }
@@ -195,6 +236,14 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                   withAppbar: title != null,
                 ))
               ],
+            );
+          } else if (appdata.settings[25] != "0" &&
+              logic.dividedComics?[logic.current] == null &&
+              logic.paginationError != null) {
+            return NetworkError(
+              message: logic.paginationError!,
+              retry: () => logic.retryCurrentPage(getComics),
+              withAppbar: title != null,
             );
           } else {
             if (appdata.settings[25] == "0") {
@@ -246,6 +295,16 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                       logic.loadingData)
                     const SliverToBoxAdapter(
                       child: ListLoadingIndicator(),
+                    )
+                  else if (logic.paginationError != null)
+                    SliverToBoxAdapter(
+                      child: Center(
+                        child: TextButton.icon(
+                          onPressed: () => logic.retryNextPage(getComics),
+                          icon: const Icon(Icons.refresh),
+                          label: Text(logic.paginationError!),
+                        ),
+                      ),
                     )
                   else
                     const SliverToBoxAdapter(
@@ -569,8 +628,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
         children: [
           const Icon(Icons.search_off, size: 56),
           const SizedBox(height: 12),
-          Text("无匹配结果".tl,
-              style: Theme.of(context).textTheme.titleMedium),
+          Text("无匹配结果".tl, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
         ],
       ),
@@ -578,7 +636,8 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
   }
 
   Widget buildItem(BuildContext context, T item) {
-    return buildComicTile(context, item, sourceKey, addonMenuOptions: addonMenuOptions);
+    return buildComicTile(context, item, sourceKey,
+        addonMenuOptions: addonMenuOptions);
   }
 }
 
@@ -640,7 +699,7 @@ class _SliverGridComics extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverGrid(
       delegate: SliverChildBuilderDelegate(
-            (context, index) {
+        (context, index) {
           if (index == comics.length - 1) {
             onLastItemBuild?.call();
           }

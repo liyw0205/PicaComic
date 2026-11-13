@@ -9,6 +9,7 @@ import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:html/parser.dart';
 import 'package:pica_comic/pages/pre_search_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
@@ -36,13 +37,11 @@ class HtmangaNetwork {
     try {
       var res = await dio.get(
           url,
-          BaseOptions(headers: {
-            "User-Agent": webUA,
-            if (headers != null) ...headers
-          }),
+          BaseOptions(
+              headers: {"User-Agent": webUA, if (headers != null) ...headers}),
           cookieJar: SingleInstanceCookieJar.instance,
           expiredTime: cache ? CacheExpiredTime.short : CacheExpiredTime.no);
-      if(res.url.contains("users-login")){
+      if (res.url.contains("users-login")) {
         return Res(null, errorMessage: "未登录或登录到期".tl);
       }
       return Res(res.data);
@@ -83,7 +82,8 @@ class HtmangaNetwork {
   }
 
   ///登录
-  Future<Res<bool>> login(String account, String pwd, [bool saveData = true]) async {
+  Future<Res<bool>> login(String account, String pwd,
+      [bool saveData = true]) async {
     var res = await post("$baseUrl/users-check_login.html",
         "login_name=${Uri.encodeComponent(account)}&login_pass=${Uri.encodeComponent(pwd)}");
     if (res.error) {
@@ -154,13 +154,15 @@ class HtmangaNetwork {
       }
       return Res(HtHomePageData(comicsRes, titleRes));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyze", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyze", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "解析失败: $e");
     }
   }
 
   /// 获取给定漫画列表页面的漫画
-  Future<Res<List<HtComicBrief>>> getComicList(String url, int page, {bool searchPage = false}) async {
+  Future<Res<List<HtComicBrief>>> getComicList(String url, int page,
+      {bool searchPage = false}) async {
     if (page != 1) {
       if (url.contains("search")) {
         url = "$url&p=$page";
@@ -221,11 +223,14 @@ class HtmangaNetwork {
       }
       int pages;
       try {
-        if(searchPage){
-          var result = int.parse(document.querySelectorAll("p.result > b")[0].text.nums);
-          var comicsOnePage = document.querySelectorAll("div.grid div.gallary_wrap > ul.cc > li").length;
+        if (searchPage) {
+          var result =
+              int.parse(document.querySelectorAll("p.result > b")[0].text.nums);
+          var comicsOnePage = document
+              .querySelectorAll("div.grid div.gallary_wrap > ul.cc > li")
+              .length;
           pages = result ~/ comicsOnePage + 1;
-        }else{
+        } else {
           var pagesLink = document.querySelectorAll("div.f_left.paginator > a");
           pages = int.parse(pagesLink.last.text);
         }
@@ -234,7 +239,8 @@ class HtmangaNetwork {
       }
       return Res(comics, subData: pages);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -250,7 +256,8 @@ class HtmangaNetwork {
         .onError((error, stackTrace) => null);
     return getComicList(
         "$baseUrl/search/?q=${Uri.encodeComponent(keyword)}&f=_all&s=create_time_DESC&syn=yes",
-        page, searchPage: true);
+        page,
+        searchPage: true);
   }
 
   /// 获取漫画详情, subData为第一页的缩略图
@@ -291,11 +298,11 @@ class HtmangaNetwork {
       var photosDom = document.querySelectorAll("div.pic_box.tb > a > img");
       var photos = List<String>.generate(photosDom.length,
           (index) => "https:${photosDom[index].attributes["src"]!}");
-      return Res(
-          HtComicInfo(id, coverPath, name, category, pages, tags, description,
-              uploader, avatar, uploadNum, photos));
+      return Res(HtComicInfo(id, coverPath, name, category, pages, tags,
+          description, uploader, avatar, uploadNum, photos));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -312,7 +319,8 @@ class HtmangaNetwork {
           (index) => "https:${photosDom[index].attributes["src"]!}");
       return Res(photos);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -330,7 +338,8 @@ class HtmangaNetwork {
       }
       return Res(images);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -339,9 +348,7 @@ class HtmangaNetwork {
   ///
   /// 返回Map, 值为收藏夹名，键为ID
   Future<Res<Map<String, String>>> getFolders() async {
-    var res = await get(
-        "$baseUrl/users-addfav-id-210814.html",
-        cache: false);
+    var res = await get("$baseUrl/users-addfav-id-210814.html", cache: false);
     if (res.error) {
       return Res(null, errorMessage: res.errorMessage);
     }
@@ -354,7 +361,8 @@ class HtmangaNetwork {
       }
       return Res(data);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -438,7 +446,8 @@ class HtmangaNetwork {
       }
       return Res(comics, subData: pages);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }

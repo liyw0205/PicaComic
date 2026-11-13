@@ -9,6 +9,7 @@ import '../../base.dart';
 import '../../foundation/app.dart';
 import '../../foundation/log.dart';
 import '../app_dio.dart';
+import '../network_logging.dart';
 import '../res.dart';
 import 'models.dart';
 
@@ -77,7 +78,8 @@ class PicacgNetwork {
       }
       return Res(null, errorMessage: message);
     } catch (e, stack) {
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$stack");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$stack");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -136,7 +138,8 @@ class PicacgNetwork {
       }
       return Res(null, errorMessage: message);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -251,7 +254,8 @@ class PicacgNetwork {
       }
       return Res(c);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -269,7 +273,8 @@ class PicacgNetwork {
           convert.jsonDecode(res.toString()) as Map<String, dynamic>;
       return jsonResponse["addresses"][0];
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return null;
     }
   }
@@ -326,7 +331,8 @@ class PicacgNetwork {
       }
       return Res(comics, subData: pages);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -399,7 +405,8 @@ class PicacgNetwork {
           recommendationRes.data);
       return Res(ci);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -424,7 +431,8 @@ class PicacgNetwork {
         }
       }
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$s\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
     return Res(eps.reversed.toList());
@@ -552,7 +560,8 @@ class PicacgNetwork {
       }
       return Res(comics, subData: pages);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -581,7 +590,7 @@ class PicacgNetwork {
               tags,
               pages: res["data"]["comics"][i]["pagesCount"]);
           comics.add(si);
-        }  finally {}
+        } finally {}
       }
     } else {
       return Res.fromErrorRes(response);
@@ -636,7 +645,7 @@ class PicacgNetwork {
           pages: res["data"]["comics"][i]["pagesCount"],
         );
         comics.add(si);
-      }  finally {}
+      } finally {}
     }
     return Res(comics, subData: 1);
   }
@@ -816,7 +825,7 @@ class PicacgNetwork {
             tags,
           );
           comics.add(si);
-        }  finally {}
+        } finally {}
       }
     } else {
       return Res.fromErrorRes(response);
@@ -852,7 +861,7 @@ class PicacgNetwork {
           //出现错误跳过
         }
       }
-    }  finally {}
+    } finally {}
     try {
       for (int i = 0; i < res["data"]["collections"][1]["comics"].length; i++) {
         try {
@@ -870,7 +879,7 @@ class PicacgNetwork {
           comics[1].add(si);
         } finally {}
       }
-    }  finally {}
+    } finally {}
     return Res(comics);
   }
 
@@ -952,7 +961,8 @@ class PicacgNetwork {
     } on DioException catch (e) {
       return Res(null, errorMessage: e.toString());
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }

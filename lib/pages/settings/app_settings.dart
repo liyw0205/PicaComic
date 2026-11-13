@@ -227,7 +227,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       } catch (e, s) {
         var message = describeNetworkError(e);
         LogManager.addLog(LogLevel.error, "Network",
-            "Proxy native test ${url.host} failed\n$message\n$e\n$s");
+            "Proxy native test ${url.host} failed\n${safeNetworkError(e)}\n$s");
         return (ms: null, error: message);
       }
     }
@@ -261,7 +261,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
     } catch (e, s) {
       var message = describeNetworkError(e);
       LogManager.addLog(LogLevel.error, "Network",
-          "Proxy test ${url.host} failed\n$message\n$e\n$s");
+          "Proxy test ${url.host} failed\n${safeNetworkError(e)}\n$s");
       return (ms: null, error: message);
     } finally {
       client.close(force: true);

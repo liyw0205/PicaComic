@@ -13,6 +13,7 @@ import 'package:pica_comic/tools/translations.dart';
 import '../base.dart';
 import 'app_dio.dart';
 import 'download.dart';
+import 'network_logging.dart';
 
 abstract class DownloadedItem {
   ///漫画源
@@ -112,6 +113,8 @@ abstract class DownloadingItem with _TransferSpeedMixin {
 
   int _downloadingEp = 0;
 
+  CancelToken? _coverCancelToken;
+
   /// index of downloading episode
   ///
   /// Attention, this is used for array indexing, so it starts with 0
@@ -127,14 +130,19 @@ abstract class DownloadingItem with _TransferSpeedMixin {
   DownloadingItem(this.onFinish, this.onError, this.updateInfo, this.id,
       {required this.type});
 
-  Future<void> downloadCover() async {
+  Future<void> downloadCover({
+    bool Function()? shouldContinue,
+    CancelToken? cancelToken,
+  }) async {
     var file = File("$path/cover.jpg");
     if (file.existsSync()) {
       return;
     }
     var dio = logDio();
     var res = await dio.get<Uint8List>(cover,
+        cancelToken: cancelToken,
         options: Options(responseType: ResponseType.bytes, headers: headers));
+    if (shouldContinue != null && !shouldContinue()) return;
     if (file.existsSync()) {
       file.deleteSync();
     }
@@ -143,32 +151,41 @@ abstract class DownloadingItem with _TransferSpeedMixin {
   }
 
   /// retry when error
-  Future<void> retry() async {
+  Future<void> retry([int? failedRun]) async {
+    final run = failedRun ?? _runtimeKey;
     _retryTimes++;
     if (_retryTimes > 4) {
       onError?.call();
       _retryTimes = 0;
     } else {
-      await Future.delayed(Duration(seconds: 2 << _retryTimes));
+      await waitBeforeRetry(Duration(seconds: 2 << _retryTimes));
+      if (run != _runtimeKey ||
+          !identical(DownloadManager().downloading.firstOrNull, this) ||
+          !DownloadManager().isDownloading) {
+        return;
+      }
       start();
     }
   }
 
+  @visibleForTesting
+  Future<void> waitBeforeRetry(Duration duration) => Future.delayed(duration);
+
   @mustCallSuper
   FutureOr<void> onStart() {
     if (directory == null) {
-      if(DownloadManager().isExists(id)) {
+      if (DownloadManager().isExists(id)) {
         directory = DownloadManager().getDirectory(id);
       } else {
-      directory = findValidDirectoryName(DownloadManager().path!, title);
-      Directory(path).createSync(recursive: true);
+        directory = findValidDirectoryName(DownloadManager().path!, title);
+        Directory(path).createSync(recursive: true);
       }
     }
   }
 
   final _downloading = <String, _ImageDownloadWrapper>{};
 
-  void _addDownloading(String link, int ep, int index) {
+  void _addDownloading(String link, int ep, int index, int run) {
     var downloadTo = '';
     var basename = '';
     if (haveEps) {
@@ -186,20 +203,22 @@ abstract class DownloadingItem with _TransferSpeedMixin {
         basename,
         onData,
         () {
+          if (_runtimeKey != run) return;
           updateInfo?.call();
-          _scheduleTasks(ep, this.index);
+          _scheduleTasks(ep, this.index, run);
         },
       );
     }
   }
 
-  void _scheduleTasks(int ep, int index) {
+  void _scheduleTasks(int ep, int index, int run) {
+    if (_runtimeKey != run) return;
     var urls = links![ep]!;
     int downloading = 0;
     for (int i = index; i < urls.length; i++) {
       var task = _downloading["$ep$i"];
       if (task == null || task.error != null) {
-        _addDownloading(urls[i], ep, i);
+        _addDownloading(urls[i], ep, i, run);
         downloading++;
       } else if (!task.isFinished) {
         downloading++;
@@ -222,7 +241,20 @@ abstract class DownloadingItem with _TransferSpeedMixin {
 
       // get image links and cover
       links ??= await getLinks();
-      await downloadCover();
+      if (_runtimeKey != currentKey) return;
+      final coverCancelToken = CancelToken();
+      _coverCancelToken = coverCancelToken;
+      try {
+        await downloadCover(
+          shouldContinue: () => _runtimeKey == currentKey,
+          cancelToken: coverCancelToken,
+        );
+      } finally {
+        if (identical(_coverCancelToken, coverCancelToken)) {
+          _coverCancelToken = null;
+        }
+      }
+      if (_runtimeKey != currentKey) return;
       runRecorder();
 
       // download images
@@ -232,13 +264,14 @@ abstract class DownloadingItem with _TransferSpeedMixin {
         while (index < urls.length && currentKey == _runtimeKey) {
           notifications.sendProgressNotification(downloadedPages, totalPages,
               "下载中".tl, "${downloadManager.downloading.length} Tasks");
-          _scheduleTasks(ep, index);
+          _scheduleTasks(ep, index, currentKey);
           if (currentKey != _runtimeKey) return;
           var task = _downloading["$ep$index"];
           if (task == null) {
             throw Exception("Task not started");
           }
           await task.wait();
+          if (currentKey != _runtimeKey) return;
           if (task.error != null) {
             throw task.error!;
           }
@@ -248,6 +281,7 @@ abstract class DownloadingItem with _TransferSpeedMixin {
           _downloading.remove("$ep$index");
           index++;
           _downloadedNum++;
+          _retryTimes = 0;
           await updateInfo?.call();
         }
         if (currentKey != _runtimeKey) return;
@@ -257,57 +291,75 @@ abstract class DownloadingItem with _TransferSpeedMixin {
       }
 
       // finish downloading
-      if (DownloadManager().downloading.firstOrNull != this) return;
+      if (currentKey != _runtimeKey ||
+          !identical(DownloadManager().downloading.firstOrNull, this)) {
+        return;
+      }
+      currentKey = ++_runtimeKey;
+      await waitForFinishCleanup();
+      if (currentKey != _runtimeKey ||
+          !identical(DownloadManager().downloading.firstOrNull, this)) {
+        return;
+      }
       onFinish?.call();
-      _stopAllTasks();
     } catch (e, s) {
       if (currentKey != _runtimeKey) return;
-      LogManager.addLog(LogLevel.error, "Download", "$e\n$s");
-      retry();
+      LogManager.addLog(
+          LogLevel.error, "Download", "${safeNetworkError(e)}\n$s");
+      retry(currentKey);
     }
   }
 
-  void _stopAllTasks() {
-    var shouldRemove = <String>[];
-    for(var entry in _downloading.entries) {
-      if(!entry.value.isFinished) {
-        entry.value.cancel();
-        shouldRemove.add(entry.key);
+  Future<void> _stopAllTasks() async {
+    final tasks =
+        _downloading.entries.where((entry) => !entry.value.isFinished).toList();
+    await Future.wait(tasks.map((entry) => entry.value.cancel()));
+    for (final entry in tasks) {
+      if (identical(_downloading[entry.key], entry.value)) {
+        _downloading.remove(entry.key);
       }
     }
-    for(var key in shouldRemove) {
-      _downloading.remove(key);
-    }
+  }
+
+  @visibleForTesting
+  Future<void> waitForFinishCleanup() => _stopAllTasks();
+
+  void _cancelCoverRequest(String reason) {
+    final token = _coverCancelToken;
+    _coverCancelToken = null;
+    if (token != null && !token.isCancelled) token.cancel(reason);
   }
 
   /// pause downloading
-  void pause() {
+  Future<void> pause() async {
     _runtimeKey++;
+    _cancelCoverRequest('Download paused');
     stopRecorder();
     notifications.endProgress();
-    _stopAllTasks();
-    ImageManager.clearTasks();
+    await _stopAllTasks();
   }
 
   /// stop downloading
-  void stop() {
+  Future<void> stop() async {
     _runtimeKey++;
+    _cancelCoverRequest('Download stopped');
     stopRecorder();
-    _stopAllTasks();
+    await _stopAllTasks();
     notifications.endProgress();
     if (downloadManager.isExists(id)) {
-      if (links == null) return;
-      var comicPath = "$path/";
-      for (var ep in links!.keys.toList()) {
-        var directory = Directory(comicPath + ep.toString());
-        if (directory.existsSync()) {
-          directory.deleteSync(recursive: true);
+      if (links != null) {
+        var comicPath = "$path/";
+        for (var ep in links!.keys.toList()) {
+          var directory = Directory(comicPath + ep.toString());
+          if (await directory.exists()) {
+            await directory.delete(recursive: true);
+          }
         }
       }
     } else {
       var file = Directory(path);
-      if (file.existsSync()) {
-        file.delete(recursive: true);
+      if (await file.exists()) {
+        await file.delete(recursive: true);
       }
     }
   }
@@ -354,7 +406,7 @@ abstract class DownloadingItem with _TransferSpeedMixin {
       });
     }
     directory = map["directory"];
-    if(map["finishedTasks"] != null) {
+    if (map["finishedTasks"] != null) {
       var finishedTasks = List<String>.from(map["finishedTasks"]);
       for (var task in finishedTasks) {
         _downloading[task] = _ImageDownloadWrapper.finished();
@@ -410,8 +462,26 @@ abstract class DownloadingItem with _TransferSpeedMixin {
   }
 }
 
+@visibleForTesting
+Future<void> Function() createImageDownloadTaskCancelForTesting(
+  Stream<DownloadProgress> stream,
+  String path,
+  String fileBaseName, {
+  required Future<List<int>> Function(DownloadProgress) readData,
+}) {
+  final task = _ImageDownloadWrapper(
+    stream,
+    path,
+    fileBaseName,
+    null,
+    null,
+    readData: readData,
+  );
+  return task.cancel;
+}
+
 class _ImageDownloadWrapper {
-  final Stream<DownloadProgress> stream;
+  late final Stream<DownloadProgress> stream;
 
   final String path;
 
@@ -427,69 +497,116 @@ class _ImageDownloadWrapper {
 
   bool _canceled = false;
 
-  void cancel() {
-    _canceled = true;
+  Future<void> _listenFuture = Future<void>.value();
+
+  Future<void>? _cancelFuture;
+
+  final Object _taskOwner = Object();
+
+  StreamIterator<DownloadProgress>? _iterator;
+
+  final Future<List<int>> Function(DownloadProgress)? _readData;
+
+  Future<void> cancel() {
+    return _cancelFuture ??= () async {
+      if (_canceled) return;
+      _canceled = true;
+      ImageManager.cancelTasksForOwner(_taskOwner);
+      try {
+        await _iterator?.cancel();
+      } catch (_) {}
+      await _listenFuture;
+      _completeWaiters();
+    }();
   }
 
   _ImageDownloadWrapper(
-    this.stream,
+    Stream<DownloadProgress> stream,
     this.path,
     this.fileBaseName,
     this.onReceiveData,
-    this.onFinished,
-  ) {
-    listen();
+    this.onFinished, {
+    Future<List<int>> Function(DownloadProgress)? readData,
+  }) : _readData = readData {
+    this.stream = ImageManager.withTaskOwner(stream, _taskOwner);
+    _listenFuture = listen();
   }
 
-  _ImageDownloadWrapper.finished():
-    stream = const Stream.empty(),
-    path = "",
-    fileBaseName = "",
-    onReceiveData = null,
-    onFinished = null,
-    isFinished = true;
+  _ImageDownloadWrapper.finished()
+      : stream = const Stream.empty(),
+        path = "",
+        fileBaseName = "",
+        onReceiveData = null,
+        onFinished = null,
+        _readData = null,
+        isFinished = true;
 
-  void listen() async {
+  Future<void> listen() async {
+    final iterator = StreamIterator(stream);
+    _iterator = iterator;
+    var streamCompleted = false;
     try {
       var last = 0;
-      await for (var progress in stream) {
-        if(_canceled) {
-          for (var c in completers) {
-            c.complete(this);
-          }
-          return;
+      while (!_canceled) {
+        if (!await iterator.moveNext()) {
+          streamCompleted = true;
+          break;
         }
+        if (_canceled) break;
+        final progress = iterator.current;
         onReceiveData?.call(progress.currentBytes - last);
         last = progress.currentBytes;
         if (progress.finished) {
-          var data = progress.data ?? await progress.getFile().readAsBytes();
-          if (data.isNotEmpty){
-            var type = detectFileType(data);
-            var file = File("$path/$fileBaseName${type.ext}");
-            if (!await file.exists()) {
-              await file.create(recursive: true);
-            }
-            await file.writeAsBytes(data);
+          var data = progress.data ??
+              await (_readData?.call(progress) ??
+                  progress.getFile().readAsBytes());
+          if (_canceled) break;
+          if (!progress.imageValidated && !isValidImageData(data)) {
+            await ImageManager().delete(progress.cacheKey);
+            throw const FormatException('Downloaded data is not a valid image');
           }
+          var type = detectFileType(data);
+          var file = File("$path/$fileBaseName${type.ext}");
+          if (!await file.exists()) {
+            if (_canceled) break;
+            await file.create(recursive: true);
+          }
+          if (_canceled) break;
+          await file.writeAsBytes(data);
           isFinished = true;
         }
       }
     } catch (e) {
-      error = e;
+      if (!_canceled) error = e;
+    } finally {
+      if (!streamCompleted) {
+        try {
+          await iterator.cancel();
+        } catch (e) {
+          if (!_canceled) error ??= e;
+        }
+      }
+      _iterator = null;
     }
+    if (_canceled) return;
     if (!isFinished && error == null) {
       error = Exception("Failed to download image");
     }
     onFinished?.call();
-    for (var c in completers) {
-      c.complete(this);
+    _completeWaiters();
+  }
+
+  void _completeWaiters() {
+    for (final completer in completers) {
+      if (!completer.isCompleted) completer.complete(this);
     }
+    completers.clear();
   }
 
   var completers = <Completer<_ImageDownloadWrapper>>[];
 
   Future<_ImageDownloadWrapper> wait() {
-    if (isFinished) {
+    if (isFinished || _canceled) {
       return Future.value(this);
     }
     var completer = Completer<_ImageDownloadWrapper>();

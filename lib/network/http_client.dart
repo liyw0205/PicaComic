@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:socks5_proxy/socks_client.dart';
 import '../base.dart';
@@ -135,8 +136,8 @@ AppProxyConfig? _getHostRulesProxyConfig() {
       useHostRules: true,
     );
   } catch (e, s) {
-    LogManager.addLog(
-        LogLevel.error, "Network", "Read host rules failed\n$e\n$s");
+    LogManager.addLog(LogLevel.error, "Network",
+        "Read host rules failed\n${safeNetworkError(e)}\n$s");
     return null;
   }
 }
@@ -237,18 +238,20 @@ Future<void> setNetworkProxy() async {
   //Image加载使用的是Image.network()和CachedNetworkImage(), 均使用flutter内置http进行网络请求
   var proxyConfig = await getProxyConfig();
   var proxy = proxyConfig?.proxyRule;
+  final proxyLogValue =
+      proxyConfig == null ? "DIRECT" : safeNetworkUrl(proxyConfig.uriString);
 
   if (proxyHttpOverrides == null) {
     proxyHttpOverrides = ProxyHttpOverrides(proxy, proxyConfig);
     HttpOverrides.global = proxyHttpOverrides;
-    Log.info("Network", "Set Proxy $proxy");
+    Log.info("Network", "Set Proxy $proxyLogValue");
   } else if (proxyHttpOverrides!.proxy != proxy ||
       proxyHttpOverrides!.proxyConfig?.uriString != proxyConfig?.uriString ||
       proxyHttpOverrides!.proxyConfig?.useHostRules !=
           proxyConfig?.useHostRules) {
     proxyHttpOverrides!.proxy = proxy;
     proxyHttpOverrides!.proxyConfig = proxyConfig;
-    Log.info("Network", "Set Proxy $proxy");
+    Log.info("Network", "Set Proxy $proxyLogValue");
   }
 }
 
@@ -310,7 +313,6 @@ class ProxyHttpOverrides extends HttpOverrides {
       };
     }
     client.idleTimeout = const Duration(seconds: 100);
-    client.badCertificateCallback = _allowBadCertificate;
     return client;
   }
 
@@ -348,8 +350,6 @@ class ProxyHttpOverrides extends HttpOverrides {
           var secureSocket = await socket.secure(
             uri.host,
             context: context,
-            onBadCertificate: (cert) =>
-                _allowBadCertificate(cert, uri.host, uri.port),
           );
           activeSocket = secureSocket;
           return secureSocket;
@@ -360,16 +360,5 @@ class ProxyHttpOverrides extends HttpOverrides {
         activeSocket?.destroy();
       });
     };
-  }
-
-  bool _allowBadCertificate(X509Certificate cert, String host, int port) {
-    if (host.contains("cdn")) return true;
-    final ipv4RegExp = RegExp(
-        r'^((25[0-5]|2[0-4]\d|[0-1]?\d?\d)(\.(25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3})$');
-    if (ipv4RegExp.hasMatch(host)) {
-      // 允许ip访问
-      return true;
-    }
-    return false;
   }
 }

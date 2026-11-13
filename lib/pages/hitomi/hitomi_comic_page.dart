@@ -10,6 +10,7 @@ import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/hitomi_network/image.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/hitomi/hitomi_search.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
@@ -108,10 +109,12 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
         "Tags":
             List.generate(data!.tags.length, (index) => data!.tags[index].name),
         "Series": data!.parodys != null
-            ? List.generate(data!.parodys!.length, (index) => data!.parodys![index].name)
+            ? List.generate(
+                data!.parodys!.length, (index) => data!.parodys![index].name)
             : [],
         "Characters": data!.characters != null
-            ? List.generate(data!.characters!.length, (index) => data!.characters![index].name)
+            ? List.generate(data!.characters!.length,
+                (index) => data!.characters![index].name)
             : [],
       };
 
@@ -145,7 +148,7 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
     };
     if (categoryParam != null && tag != "N/A") {
       context.to(
-            () => SearchResultPage(
+        () => SearchResultPage(
           keyword: categoryParam,
           sourceKey: 'hitomi',
         ),
@@ -168,7 +171,8 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
           }
           return Res(images);
         } catch (e, s) {
-          LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+          LogManager.addLog(
+              LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
           return Res(null, errorMessage: e.toString());
         }
       }, 2);

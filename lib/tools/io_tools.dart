@@ -13,6 +13,7 @@ import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/network/download_model.dart';
@@ -121,7 +122,9 @@ Future<bool> exportPdf(String pdfPath) async {
     } else {
       final FileSaveLocation? result = await getSaveLocation(
         suggestedName: File(pdfPath).name,
-        acceptedTypeGroups: [const XTypeGroup(label: 'pdf', extensions: ['pdf'])],
+        acceptedTypeGroups: [
+          const XTypeGroup(label: 'pdf', extensions: ['pdf'])
+        ],
       );
 
       if (result != null) {
@@ -178,7 +181,7 @@ Future<bool> runningExportComic(ExportComicData data) async {
     zipFile.close();
     return true;
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     return false;
   }
 }
@@ -218,7 +221,7 @@ Future<bool> runningExportComics(List<ExportComicData> datas) async {
     zipFile.close();
     return true;
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     return false;
   }
 }
@@ -244,7 +247,7 @@ Future<void> copyDirectory(Directory source, Directory destination) async {
       }
     }
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     rethrow;
   }
 }
@@ -268,7 +271,7 @@ Future<void> moveDirectory(Directory source, Directory destination) async {
     }
     await source.deleteIgnoreError(recursive: true);
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     rethrow;
   }
 }
@@ -357,7 +360,7 @@ Future<String> exportDataToFile(bool includeDownload, String outPath) async {
       throw Exception(res);
     }
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     rethrow;
   }
   return outPath;
@@ -393,7 +396,7 @@ Future<bool> runExportData(bool includeDownload) async {
 
     dialog.close();
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
     return false;
   }
   return true;
@@ -421,7 +424,7 @@ Future<bool> importData([String? filePath]) async {
     }
   }
   SingleInstanceCookieJar.instance?.dispose();
-  DownloadManager().dispose();
+  await DownloadManager().dispose();
   String data = '';
   try {
     data = await compute<List<String>, String>((data) async {
@@ -479,7 +482,7 @@ Future<bool> importData([String? filePath]) async {
       (enableCheck ? "1" : "0")
     ]);
   } catch (e, s) {
-    Log.error("importData", "$e\n$s");
+    Log.error("importData", "${safeNetworkError(e)}\n$s");
     return false;
   } finally {
     await ComicSource.reload();

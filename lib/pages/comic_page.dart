@@ -19,6 +19,7 @@ import 'package:pica_comic/foundation/stack.dart' as stack;
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/favorites/local_favorites.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
@@ -575,7 +576,8 @@ class ThumbnailsData {
       current++;
       update();
     } else {
-      Log.error("Network", "Failed to load thumbnails: ${res.errorMessage}");
+      Log.error("Network",
+          "Failed to load thumbnails: ${safeNetworkError(res.errorMessage)}");
     }
     isGetting = false;
   }

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import '../foundation/app.dart';
+import '../foundation/log.dart';
+import 'network_logging.dart';
 
 class HttpProxyRequest {
   String host;
@@ -31,7 +33,7 @@ class _HttpProxyHandler {
             if (content.split(" ").first != "CONNECT") {
               client
                   .write("HTTP/1.1 400 Bad Request\nContent-Type: text/plain\n"
-                  "Content-Length: 29\n\nBad Request: Invalid Request");
+                      "Content-Length: 29\n\nBad Request: Invalid Request");
               client.flush();
               client.close();
               return;
@@ -105,22 +107,22 @@ class HttpProxyServer {
   ServerSocket? socket;
 
   void run() {
-    runZonedGuarded(() async{
+    runZonedGuarded(() async {
       socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
       socket?.listen((event) => _HttpProxyHandler().handle(event, handler));
-    }, (error, stack) async{
-      print(error);
-      print(stack);
+    }, (error, stack) async {
+      LogManager.addLog(LogLevel.error, "Network Proxy",
+          "${safeNetworkError(error)}\n$stack");
     });
   }
 
-  void close(){
+  void close() {
     socket?.close();
   }
 
   static Isolate? _server;
 
-  static void startServer() async{
+  static void startServer() async {
     _server?.kill();
     _server = await Isolate.spawn<String>((message) {
       final file = File("$message/rule.json");
@@ -136,13 +138,13 @@ class HttpProxyServer {
     }, App.dataPath);
   }
 
-  static void reload(){
+  static void reload() {
     startServer();
   }
 
-  static void createConfigFile(){
+  static void createConfigFile() {
     var file = File("${App.dataPath}/rule.json");
-    if(!file.existsSync()){
+    if (!file.existsSync()) {
       var rule = {
         "port": 7891,
         "rule": {
@@ -154,11 +156,7 @@ class HttpProxyServer {
           "exhentai.org": "178.175.129.254",
           "s.exhentai.org": "178.175.129.254"
         },
-        "sni": [
-          "e-hentai.org",
-          "exhentai.org",
-          "s.exhentai.org"
-        ]
+        "sni": ["e-hentai.org", "exhentai.org", "s.exhentai.org"]
       };
       var spaces = ' ' * 4;
       var encoder = JsonEncoder.withIndent(spaces);

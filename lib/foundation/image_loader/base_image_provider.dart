@@ -1,11 +1,11 @@
 import 'dart:async' show Future, StreamController, scheduleMicrotask;
-import 'dart:collection';
 import 'dart:convert';
 import 'dart:ui' as ui show Codec;
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
+import 'package:pica_comic/foundation/byte_lru_cache.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 
 abstract class BaseImageProvider<T extends BaseImageProvider<T>>
@@ -47,16 +47,14 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 
       while (data == null && !stop) {
         try {
-          if(_cache.containsKey(key.key)){
-            data = _cache[key.key];
+          final cached = _cache.get(key.key);
+          if (cached != null) {
+            data = cached;
           } else {
             data = await load(chunkEvents);
-            _checkCacheSize();
-            _cache[key.key] = data;
-            _cacheSize += data.length;
           }
         } catch (e) {
-          if(e.toString().contains("Maximum image loading limit reached")) {
+          if (e.toString().contains("Maximum image loading limit reached")) {
             rethrow;
           }
           if (e.toString().contains("Your IP address")) {
@@ -78,24 +76,30 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
         }
       }
 
-      if(stop) {
+      if (stop) {
         throw Exception("Image loading is stopped");
       }
 
-      if(data!.isEmpty) {
+      if (data!.isEmpty) {
         throw Exception("Empty image data");
       }
 
       try {
         final buffer = await ImmutableBuffer.fromUint8List(data);
-        return await decode(buffer);
+        final codec = await decode(buffer);
+        _cache.put(key.key, data);
+        return codec;
       } catch (e) {
-        await CacheManager().delete(this.key);
+        final cached = _cache.peek(key.key);
+        final hasConcurrentCache = cached != null && !identical(cached, data);
+        _cache.remove(key.key, onlyIfIdentical: data);
+        if (!hasConcurrentCache) await CacheManager().delete(this.key);
         Object error = e;
         if (data.length < 2 * 1024) {
           // data is too short, it's likely that the data is text, not image
           try {
-            var text = const Utf8Codec(allowMalformed: false).decoder.convert(data);
+            var text =
+                const Utf8Codec(allowMalformed: false).decoder.convert(data);
             error = Exception("Expected image data, but got text: $text");
           } catch (e) {
             // ignore
@@ -113,28 +117,14 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
     }
   }
 
-  static final _cache = LinkedHashMap<String, Uint8List>();
+  static final ByteLruCache _cache = ByteLruCache(limit: 50 * 1024 * 1024);
 
-  static var _cacheSize = 0;
-
-  static var _cacheSizeLimit = 50 * 1024 * 1024;
-
-  static void _checkCacheSize(){
-    while (_cacheSize > _cacheSizeLimit){
-      var firstKey = _cache.keys.first;
-      _cacheSize -= _cache[firstKey]!.length;
-      _cache.remove(firstKey);
-    }
-  }
-
-  static void clearCache(){
+  static void clearCache() {
     _cache.clear();
-    _cacheSize = 0;
   }
 
-  static void setCacheSizeLimit(int size){
-    _cacheSizeLimit = size;
-    _checkCacheSize();
+  static void setCacheSizeLimit(int size) {
+    _cache.limit = size;
   }
 
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents);

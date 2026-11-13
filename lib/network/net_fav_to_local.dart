@@ -10,6 +10,7 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/pages/favorites/network_to_local.dart';
 
@@ -68,7 +69,7 @@ Future<List<T>> getFavorites<T extends Object>(BuildContext context,
                       Future.microtask(() {
                         context.pop();
                         if (kDebugMode) {
-                          print(snapshot.error);
+                          print(safeNetworkError(snapshot.error));
                           print(snapshot.stackTrace);
                         }
                         showToast(message: snapshot.error.toString());

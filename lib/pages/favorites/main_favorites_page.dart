@@ -10,6 +10,7 @@ import "package:pica_comic/foundation/app.dart";
 import "package:pica_comic/foundation/local_favorites.dart";
 import "package:pica_comic/foundation/log.dart";
 import "package:pica_comic/network/download.dart";
+import "package:pica_comic/network/network_logging.dart";
 import "package:pica_comic/tools/translations.dart";
 
 import "../../network/net_fav_to_local.dart";
@@ -351,7 +352,9 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
                 color: Theme.of(context).colorScheme.secondary,
               ),
               const SizedBox(width: 8),
-              Text(data?.title != null ? data!.title.tl : "未知".tl,),
+              Text(
+                data?.title != null ? data!.title.tl : "未知".tl,
+              ),
             ],
           ),
         );
@@ -648,7 +651,7 @@ mixin class _LocalFavoritesManager {
     } catch (e, s) {
       controller.close();
       showToast(message: e.toString());
-      log("$e\n$s", "IO", LogLevel.error);
+      log("${safeNetworkError(e)}\n$s", "IO", LogLevel.error);
     }
   }
 
@@ -784,8 +787,9 @@ class _ComicsPageViewState extends StateWithController<ComicsPageView> {
                         folder,
                         () {
                           rebuild();
-                          if(widget.selectedComics.contains(comic)) {
-                            var c = StateController.find<FavoritesPageController>();
+                          if (widget.selectedComics.contains(comic)) {
+                            var c =
+                                StateController.find<FavoritesPageController>();
                             c.selectedComics.remove(comic);
                             c.update();
                           }

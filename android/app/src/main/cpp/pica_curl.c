@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 
 #ifdef PICA_USE_LIBCURL
 #include <curl/curl.h>
@@ -31,6 +32,38 @@ typedef struct {
     jmethodID map_get;
     jmethodID map_put;
 } HeaderMapContext;
+
+typedef struct {
+    JNIEnv *env;
+    jobject flag;
+    jmethodID get;
+} Cancellation;
+
+static int is_cancelled(Cancellation *cancellation) {
+    return cancellation->flag != NULL &&
+           (*cancellation->env)->CallBooleanMethod(cancellation->env,
+                                                   cancellation->flag,
+                                                   cancellation->get);
+}
+
+static int progress_callback(void *userdata, curl_off_t total, curl_off_t downloaded,
+                             curl_off_t upload_total, curl_off_t uploaded) {
+    (void)total;
+    (void)downloaded;
+    (void)upload_total;
+    (void)uploaded;
+    return is_cancelled((Cancellation *)userdata);
+}
+
+static int retryable(CURLcode code, long status) {
+    if (code == CURLE_OK) {
+        return status == 500 || status == 502 || status == 503 || status == 504;
+    }
+    return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_COULDNT_CONNECT || code == CURLE_OPERATION_TIMEDOUT ||
+           code == CURLE_SEND_ERROR || code == CURLE_RECV_ERROR ||
+           code == CURLE_GOT_NOTHING || code == CURLE_PARTIAL_FILE;
+}
 
 static void buffer_free(Buffer *buffer) {
     if (buffer->data != NULL) {
@@ -258,7 +291,8 @@ static struct curl_slist *headers_from_java_map(JNIEnv *env, jobject headers) {
 
 static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
                             jstring url_value, jstring proxy_value, jobject headers_value,
-                            jbyteArray body_value, jint timeout_ms, jint attempts) {
+                            jbyteArray body_value, jint timeout_ms, jint attempts,
+                            jobject cancelled) {
     (void)clazz;
     jobject result = new_hash_map(env);
     char *method = jstring_to_c(env, method_value);
@@ -285,12 +319,24 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
     HeaderList response_headers = {0};
     char error_buffer[CURL_ERROR_SIZE] = {0};
     int used_attempts = 0;
+    jclass flag_class = cancelled == NULL ? NULL : (*env)->GetObjectClass(env, cancelled);
+    Cancellation cancellation = {
+        .env = env,
+        .flag = cancelled,
+        .get = flag_class == NULL ? NULL : (*env)->GetMethodID(env, flag_class, "get", "()Z"),
+    };
 
     if (attempts <= 0) attempts = 1;
     if (attempts > 5) attempts = 5;
+    if ((strcasecmp(method, "GET") != 0 && strcasecmp(method, "HEAD") != 0) ||
+        body_length > 0) attempts = 1;
     if (timeout_ms <= 0) timeout_ms = 15000;
 
     for (int attempt = 0; attempt < attempts; attempt++) {
+        if (is_cancelled(&cancellation)) {
+            code = CURLE_ABORTED_BY_CALLBACK;
+            break;
+        }
         used_attempts = attempt + 1;
         buffer_free(&body);
         headers_clear(&response_headers);
@@ -315,12 +361,16 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_headers);
         curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_buffer);
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancellation);
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-        curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
-        if (attempt > 0) {
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-        }
+        curl_easy_setopt(curl, CURLOPT_CAPATH,
+                         access("/apex/com.android.conscrypt/cacerts", R_OK) == 0
+                             ? "/apex/com.android.conscrypt/cacerts"
+                             : "/system/etc/security/cacerts");
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         if (proxy != NULL && proxy[0] != '\0') {
             curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
         }
@@ -332,6 +382,8 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (void *)body_bytes);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_length);
+        } else if (strcasecmp(method, "HEAD") == 0) {
+            curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
         } else if (strcasecmp(method, "GET") != 0) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
             if (body_bytes != NULL && body_length > 0) {
@@ -345,7 +397,7 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
         curl_slist_free_all(request_headers);
         curl_easy_cleanup(curl);
 
-        if (code == CURLE_OK && status >= 200 && status < 500) {
+        if (!retryable(code, status)) {
             break;
         }
     }
@@ -375,6 +427,7 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
     }
     buffer_free(&body);
     headers_free(&response_headers);
+    if (flag_class != NULL) (*env)->DeleteLocalRef(env, flag_class);
     free(method);
     free(url);
     free(proxy);
@@ -399,7 +452,8 @@ static jobject new_hash_map(JNIEnv *env) {
 
 static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
                             jstring url_value, jstring proxy_value, jobject headers_value,
-                            jbyteArray body_value, jint timeout_ms, jint attempts) {
+                            jbyteArray body_value, jint timeout_ms, jint attempts,
+                            jobject cancelled) {
     (void)clazz;
     (void)method_value;
     (void)url_value;
@@ -408,6 +462,7 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
     (void)body_value;
     (void)timeout_ms;
     (void)attempts;
+    (void)cancelled;
     return new_hash_map(env);
 }
 
@@ -442,7 +497,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         },
         {
             "fetchNative",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;[BII)Ljava/util/Map;",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;[BIILjava/util/concurrent/atomic/AtomicBoolean;)Ljava/util/Map;",
             (void *)fetch_native,
         },
     };

@@ -8,6 +8,7 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/eh_network/get_gallery_id.dart';
@@ -237,7 +238,9 @@ class FavoriteItem {
 
   @override
   bool operator ==(Object other) {
-    return other is FavoriteItem && other.target == target && other.type == type;
+    return other is FavoriteItem &&
+        other.target == target &&
+        other.type == type;
   }
 
   @override
@@ -246,7 +249,7 @@ class FavoriteItem {
   @override
   String toString() {
     var s = "FavoriteItem: $name $author $coverPath $hashCode $tags";
-    if(s.length > 100) {
+    if (s.length > 100) {
       return s.substring(0, 100);
     }
     return s;
@@ -322,7 +325,7 @@ class LocalFavoritesManager {
     }
     tables.remove('folder_sync');
     tables.remove('folder_order');
-    if(tables.isEmpty)  return;
+    if (tables.isEmpty) return;
     var testTable = tables.first;
     // 检查type是否是主键
     var res = _db.select("""
@@ -431,7 +434,7 @@ class LocalFavoritesManager {
           }
         }
       } catch (e, s) {
-        LogManager.addLog(LogLevel.error, "IO", "$e\n$s");
+        LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
       } finally {
         file.deleteSync();
       }
@@ -477,7 +480,8 @@ class LocalFavoritesManager {
         if (!folderNames.contains(comic.folder)) {
           createFolder(comic.folder);
         }
-        if (!comicExists(comic.folder, comic.comic.target, comic.comic.type.key)) {
+        if (!comicExists(
+            comic.folder, comic.comic.target, comic.comic.type.key)) {
           addComic(comic.folder, comic.comic);
           LogManager.addLog(LogLevel.info, "LocalFavoritesManager",
               "add comic ${comic.comic.target} to ${comic.folder}");
@@ -905,7 +909,8 @@ class LocalFavoritesManager {
       }
       return (false, "");
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "IO", "Failed to load data.\n$e\n$s");
+      LogManager.addLog(LogLevel.error, "IO",
+          "Failed to load data.\n${safeNetworkError(e)}\n$s");
       return (true, e.toString());
     }
   }
@@ -985,6 +990,13 @@ class LocalFavoritesManager {
       update "$folder"
       set name = ?, author = ?, cover_path = ?, tags = ?
       where target == ? and type == ?;
-    """, [comic.name, comic.author, comic.coverPath, comic.tags.join(","), comic.target, comic.type.key]);
+    """, [
+      comic.name,
+      comic.author,
+      comic.coverPath,
+      comic.tags.join(","),
+      comic.target,
+      comic.type.key
+    ]);
   }
 }

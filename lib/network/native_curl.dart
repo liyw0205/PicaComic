@@ -7,12 +7,14 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
 
 import 'http_client.dart';
+import 'network_logging.dart';
 
 class NativeCurlHttpClient {
   static const _channel =
       MethodChannel("com.github.pacalini.pica_comic/native_curl");
 
   static Future<bool>? _availableFuture;
+  static int _requestSequence = 0;
 
   static Future<bool> get isAvailable {
     if (!App.isAndroid) return Future.value(false);
@@ -74,10 +76,12 @@ class NativeCurlHttpClient {
 
   static Future<ResponseBody> fetch(
     RequestOptions options,
-    Uint8List? body,
-  ) async {
+    Uint8List? body, {
+    Future<void>? cancelFuture,
+  }) async {
     final proxy = _curlProxy(proxyHttpOverrides!.proxyConfig!);
-    return _fetchWithProxy(options, body, proxy);
+    return _fetchWithProxy(options, body, proxy,
+        attempts: 1, cancelFuture: cancelFuture);
   }
 
   static Future<ResponseBody> _fetchWithProxy(
@@ -85,16 +89,42 @@ class NativeCurlHttpClient {
     Uint8List? body,
     String proxy, {
     int attempts = 3,
+    Future<void>? cancelFuture,
   }) async {
-    final result = await _channel.invokeMapMethod<String, dynamic>("fetch", {
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}-${_requestSequence++}';
+    var finished = false;
+    final pending = _channel.invokeMapMethod<String, dynamic>("fetch", {
+      "requestId": requestId,
       "method": options.method,
       "url": options.uri.toString(),
       "proxy": proxy,
       "headers": _headersToStringMap(options.headers),
       "body": body,
       "timeoutMs": _timeoutMs(options),
-      "attempts": attempts,
+      "attempts":
+          const {'GET', 'HEAD'}.contains(options.method.toUpperCase()) &&
+                  body == null
+              ? attempts
+              : 1,
     });
+    Map<String, dynamic>? result;
+    try {
+      result = await Future.any([
+        pending,
+        if (cancelFuture != null)
+          cancelFuture.then<Map<String, dynamic>?>((_) {
+            if (finished) return null;
+            unawaited(_channel
+                .invokeMethod<void>("cancel", requestId)
+                .catchError((Object _) {}));
+            throw DioException(
+                requestOptions: options, type: DioExceptionType.cancel);
+          }),
+      ]);
+    } finally {
+      finished = true;
+    }
 
     if (result == null) {
       throw DioException(
@@ -110,7 +140,11 @@ class NativeCurlHttpClient {
         requestOptions: options,
         error: error,
         message: error.toString(),
-        type: DioExceptionType.connectionError,
+        type: result["curlCode"] == 42
+            ? DioExceptionType.cancel
+            : const {51, 58, 60, 77, 83, 90, 91}.contains(result["curlCode"])
+                ? DioExceptionType.badCertificate
+                : DioExceptionType.connectionError,
       );
     }
 
@@ -123,7 +157,7 @@ class NativeCurlHttpClient {
     LogManager.addLog(
         LogLevel.info,
         "Network",
-        "Native curl ${options.method} ${options.uri} ${responseBody.statusCode}"
+        "Native curl ${options.method} ${safeNetworkUrl(options.uri.toString())} ${responseBody.statusCode}"
             "${usedAttempts == null ? "" : " attempts=$usedAttempts"}");
     return responseBody;
   }

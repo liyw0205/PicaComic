@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/foundation/log.dart';
@@ -19,76 +19,125 @@ import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
 import 'package:pica_comic/network/picacg_network/methods.dart';
 import 'package:pica_comic/network/picacg_network/picacg_download_model.dart';
+import 'package:pica_comic/network/network_logging.dart';
 
-class FavoriteDownloading extends DownloadingItem{
-  FavoriteDownloading(this.comic, super.whenFinish, super.onError,
-      super.updateInfo, super.id, {super.type = DownloadType.favorite});
+class FavoriteDownloading extends DownloadingItem {
+  FavoriteDownloading(
+      this.comic, super.whenFinish, super.onError, super.updateInfo, super.id,
+      {super.type = DownloadType.favorite,
+      @visibleForTesting Future<DownloadingItem> Function()? loadDownloadLogic})
+      : _loadDownloadLogicForTesting = loadDownloadLogic;
 
   FavoriteItem comic;
 
   late DownloadingItem downloadLogic;
+  int _startGeneration = 0;
+  final Future<DownloadingItem> Function()? _loadDownloadLogicForTesting;
+  Future<DownloadingItem>? _pendingDownloadLogic;
 
   @override
-  void start() async{
-    await onStart();
-    downloadLogic.start();
+  void start() async {
+    final generation = ++_startGeneration;
+    final manager = DownloadManager();
+    try {
+      await super.onStart();
+      if (!_isActiveStart(generation, manager)) {
+        return;
+      }
+      final logic = await _loadDownloadLogicOnce();
+      if (!_isActiveStart(generation, manager)) {
+        return;
+      }
+      logic.directory = directory;
+      downloadLogic = logic;
+      final removed = manager.downloading.removeFirst();
+      if (!identical(removed, this)) {
+        manager.downloading.addFirst(removed);
+        return;
+      }
+      manager.downloading.addFirst(logic);
+      logic.start();
+    } catch (e, s) {
+      if (!_isActiveStart(generation, manager)) return;
+      Log.error("Download", "${safeNetworkError(e)}\n$s");
+      onError?.call();
+    }
+  }
+
+  bool _isActiveStart(int generation, DownloadManager manager) =>
+      generation == _startGeneration &&
+      identical(manager.downloading.firstOrNull, this) &&
+      manager.isDownloading;
+
+  Future<DownloadingItem> _loadDownloadLogicOnce() {
+    final pending = _pendingDownloadLogic;
+    if (pending != null) return pending;
+
+    late final Future<DownloadingItem> request;
+    request = (_loadDownloadLogicForTesting?.call() ?? _loadDownloadLogic())
+        .whenComplete(() {
+      if (identical(_pendingDownloadLogic, request)) {
+        _pendingDownloadLogic = null;
+      }
+    });
+    _pendingDownloadLogic = request;
+    return request;
+  }
+
+  Future<DownloadingItem> _loadDownloadLogic() async {
+    switch (comic.type.key) {
+      case 0:
+        final comicItem = await PicacgNetwork().getComicInfo(comic.target);
+        return PicDownloadingItem(
+            comicItem.data,
+            List.generate(comicItem.data.eps.length, (index) => index),
+            onFinish,
+            onError,
+            updateInfo,
+            id);
+      case 1:
+        final gallery = await EhNetwork().getGalleryInfo(comic.target);
+        return EhDownloadingItem(
+            gallery.data, onFinish, onError, updateInfo, id, 0);
+      case 2:
+        final jmComic = await JmNetwork().getComicInfo(comic.target);
+        final downloadedEp =
+            List.generate(jmComic.data.epNames.length, (index) => index);
+        if (downloadedEp.isEmpty) downloadedEp.add(0);
+        return JmDownloadingItem(
+            jmComic.data, downloadedEp, onFinish, onError, updateInfo, id);
+      case 3:
+        final hitomiComic = await HiNetwork().getComicInfo(comic.target);
+        return HitomiDownloadingItem(hitomiComic.data, comic.coverPath,
+            comic.target, onFinish, onError, updateInfo, id);
+      case 4:
+        final htComic = await HtmangaNetwork().getComicInfo(comic.target);
+        return DownloadingHtComic(
+            htComic.data, onFinish, onError, updateInfo, id);
+      case 6:
+        final nhComic = await NhentaiNetwork().getComicInfo(comic.target);
+        return NhentaiDownloadingItem(
+            nhComic.data, onFinish, onError, updateInfo, id);
+      default:
+        final comicSource = comic.type.comicSource;
+        final comicInfoData = await comicSource.loadComicInfo!(comic.target);
+        final downloadedEp = List.generate(
+            comicInfoData.data.chapters?.length ?? 0, (index) => index);
+        return CustomDownloadingItem(comicInfoData.data, downloadedEp, onFinish,
+            onError, updateInfo, id);
+    }
   }
 
   @override
-  Future<void> onStart() async{
-    try {
-      switch(comic.type.key){
-        case 0: {
-          var comicItem = await PicacgNetwork().getComicInfo(comic.target);
-          downloadLogic = PicDownloadingItem(
-              comicItem.data, List.generate(comicItem.data.eps.length,
-                  (index) => index), onFinish, onError, updateInfo, id);
-        }
-        case 1: {
-          var gallery = await EhNetwork().getGalleryInfo(comic.target);
-          downloadLogic = EhDownloadingItem(gallery.data,
-              onFinish, onError, updateInfo, id, 0);
-        }
-        case 2: {
-          var jmComic = await JmNetwork().getComicInfo(comic.target);
-          var downloadedEp = List.generate(jmComic.data.epNames.length, (index) => index);
-          if(downloadedEp.isEmpty) {
-            downloadedEp.add(0);
-          }
-          downloadLogic = JmDownloadingItem(jmComic.data, downloadedEp,
-              onFinish, onError, updateInfo, id);
-        }
-        case 3: {
-          var hitomiComic = await HiNetwork().getComicInfo(comic.target);
-          downloadLogic = HitomiDownloadingItem(hitomiComic.data,
-              comic.coverPath, comic.target, onFinish, onError, updateInfo, id);
-        }
-        case 4: {
-          var htComic = await HtmangaNetwork().getComicInfo(comic.target);
-          downloadLogic = DownloadingHtComic(htComic.data, onFinish, onError, updateInfo, id);
-        }
-        case 6: {
-          var nhComic = await NhentaiNetwork().getComicInfo(comic.target);
-          downloadLogic = NhentaiDownloadingItem(nhComic.data, onFinish, onError, updateInfo, id);
-        }
-        default: {
-          var comicSource = comic.type.comicSource;
-          var comicInfoData = await comicSource.loadComicInfo!(comic.target);
-          var downloadedEp = List.generate(comicInfoData.data.chapters?.length ?? 0, (index) => index);
-          downloadLogic = CustomDownloadingItem(comicInfoData.data, downloadedEp,
-              onFinish, onError, updateInfo, id);
-        }
-      }
-    }
-    catch(e, s) {
-      Log.error("Download", "$e$s");
-      onError?.call();
-      return;
-    }
-    pause();
-    DownloadManager().downloading.removeFirst();
-    DownloadManager().downloading.addFirst(downloadLogic);
-    downloadLogic.start();
+  Future<void> pause() async {
+    _startGeneration++;
+    await super.pause();
+  }
+
+  @override
+  Future<void> stop() async {
+    _startGeneration++;
+    await super.stop();
   }
 
   @override
@@ -102,18 +151,17 @@ class FavoriteDownloading extends DownloadingItem{
 
   @override
   Map<String, dynamic> toMap() {
-    return {
-      "comic": comic.toJson(),
-      ...toBaseMap()
-    };
+    return {"comic": comic.toJson(), ...toBaseMap()};
   }
 
-  FavoriteDownloading.fromMap(Map<String, dynamic> json,
+  FavoriteDownloading.fromMap(
+      Map<String, dynamic> json,
       DownloadProgressCallback whenFinish,
       DownloadProgressCallback whenError,
       DownloadProgressCallbackAsync updateInfo,
       String id)
       : comic = FavoriteItem.fromJson(json["comic"]),
+        _loadDownloadLogicForTesting = null,
         super.fromMap(json, whenFinish, whenError, updateInfo);
 
   @override

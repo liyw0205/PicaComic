@@ -15,6 +15,8 @@ import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
+import '../network_logging.dart';
+import '../search_language.dart';
 import 'models.dart';
 import 'package:html/parser.dart';
 
@@ -164,8 +166,8 @@ class NhentaiNetwork {
       logged = _authorizationHeader() != null;
       return logged;
     } catch (e, s) {
-      LogManager.addLog(
-          LogLevel.error, "Nhentai Auth", "refresh failed: $e\n$s");
+      LogManager.addLog(LogLevel.error, "Nhentai Auth",
+          "refresh failed: ${safeNetworkError(e)}\n$s");
       return false;
     }
   }
@@ -610,11 +612,9 @@ class NhentaiNetwork {
     return null;
   }
 
-  int _apiPageCount(dynamic payload, List items) {
+  int? _apiPageCount(dynamic payload) {
     final map = _asMap(payload);
-    if (map == null) {
-      return 1;
-    }
+    if (map == null) return null;
     final pageCount = _readInt(map["num_pages"]);
     if (pageCount > 0) {
       return pageCount;
@@ -624,7 +624,7 @@ class NhentaiNetwork {
     if (total > 0 && perPage > 0) {
       return (total / perPage).ceil();
     }
-    return items.isEmpty ? 0 : 1;
+    return null;
   }
 
   String _sortApiValue(NhentaiSort sort) => switch (sort) {
@@ -774,9 +774,14 @@ class NhentaiNetwork {
       },
     ).toString();
     final apiRes = await _apiGet(apiUrl);
-    if (apiRes.success && _findApiList(apiRes.data) != null) {
-      return Res(
-          NhentaiHomePageData(const [], _parseApiComicList(apiRes.data)));
+    final apiItems = _findApiList(apiRes.dataOrNull);
+    if (apiRes.success && apiItems != null) {
+      return Res(NhentaiHomePageData(
+        const [],
+        _parseApiComicList(apiRes.data),
+        page: page ?? 1,
+        totalPages: _apiPageCount(apiRes.data),
+      ));
     }
 
     var url = baseUrl;
@@ -805,20 +810,36 @@ class NhentaiNetwork {
           ? document
               .querySelectorAll("div.container.index-container > div.gallery")
           : document.querySelectorAll("div.gallery");
+      final comics = removeNullValue(List.generate(
+          latest.length - popularDoms.length,
+          (index) => parseComic(latest[index + popularDoms.length])));
+      final lastPage = int.tryParse(document
+              .querySelector("section.pagination > a.last")
+              ?.attributes["href"]
+              ?.nums ??
+          "");
 
       return Res(NhentaiHomePageData(
         removeNullValue(List.generate(
             popularDoms.length, (index) => parseComic(popularDoms[index]))),
-        removeNullValue(List.generate(latest.length - popularDoms.length,
-            (index) => parseComic(latest[index + popularDoms.length]))),
+        comics,
+        page: page ?? 1,
+        totalPages: lastPage ??
+            (comics.isEmpty
+                ? (page != null && page > 1 ? page - 1 : page ?? 1)
+                : null),
       ));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
 
   Future<Res<bool>> loadMoreHomePageData(NhentaiHomePageData data) async {
+    if (data.totalPages != null && data.page >= data.totalPages!) {
+      return const Res(false);
+    }
     final nextPage = data.page + 1;
     final language = _configuredLanguage();
     final apiUrl = Uri.parse(language == null
@@ -831,8 +852,18 @@ class NhentaiNetwork {
       },
     ).toString();
     final apiRes = await _apiGet(apiUrl);
-    if (apiRes.success && _findApiList(apiRes.data) != null) {
-      data.latest.addAll(_parseApiComicList(apiRes.data));
+    final apiItems = _findApiList(apiRes.dataOrNull);
+    if (apiRes.success && apiItems != null) {
+      final comics = _parseApiComicList(apiRes.data);
+      final pageCount = _apiPageCount(apiRes.data);
+      if (comics.isEmpty) {
+        if (data.totalPages == null || data.totalPages! > data.page) {
+          data.totalPages = data.page;
+        }
+        return const Res(false);
+      }
+      if (pageCount != null) data.totalPages = pageCount;
+      data.latest.addAll(comics);
       data.page = nextPage;
       return const Res(true);
     }
@@ -849,14 +880,28 @@ class NhentaiNetwork {
 
       var latest = document.querySelectorAll("div.gallery");
 
-      data.latest.addAll(removeNullValue(
-          List.generate(latest.length, (index) => parseComic(latest[index]))));
+      final comics = removeNullValue(
+          List.generate(latest.length, (index) => parseComic(latest[index])));
+      final lastPage = int.tryParse(document
+              .querySelector("section.pagination > a.last")
+              ?.attributes["href"]
+              ?.nums ??
+          "");
+      if (comics.isEmpty) {
+        if (data.totalPages == null || data.totalPages! > data.page) {
+          data.totalPages = data.page;
+        }
+        return const Res(false);
+      }
+      if (lastPage != null) data.totalPages = lastPage;
+      data.latest.addAll(comics);
 
       data.page++;
 
       return const Res(true);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -868,6 +913,8 @@ class NhentaiNetwork {
     }
     appdata.searchHistory.add(keyword);
     appdata.writeHistory();
+    keyword = withDefaultSearchLanguage(
+        keyword, int.tryParse(appdata.settings[69]) ?? 0);
     final queryParameters = {
       "query": keyword,
       "page": page.toString(),
@@ -886,7 +933,7 @@ class NhentaiNetwork {
     if (apiRes.success && apiItems != null) {
       return Res(
         _parseApiComicList(apiRes.data),
-        subData: _apiPageCount(apiRes.data, apiItems),
+        subData: _apiPageCount(apiRes.data),
       );
     }
 
@@ -922,7 +969,8 @@ class NhentaiNetwork {
               comicDoms.length, (index) => parseComic(comicDoms[index]))),
           subData: lastPagination == null ? 1 : int.parse(lastPagination));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -1017,7 +1065,8 @@ class NhentaiNetwork {
       return Res(NhentaiComic(id, title, subTitle, cover, tags, favorite,
           thumbnails, recommendations, token));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -1039,7 +1088,8 @@ class NhentaiNetwork {
       }
       return Res(comments);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -1080,7 +1130,8 @@ class NhentaiNetwork {
 
       return Res(images);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -1102,7 +1153,7 @@ class NhentaiNetwork {
       logged = true;
       return Res(
         _parseApiComicList(apiRes.data),
-        subData: _apiPageCount(apiRes.data, apiItems),
+        subData: _apiPageCount(apiRes.data),
       );
     }
     if (apiRes.error) {
@@ -1125,7 +1176,8 @@ class NhentaiNetwork {
               comics.length, (index) => parseComic(comics[index]))),
           subData: lastPagination == null ? 1 : int.parse(lastPagination));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }
@@ -1178,7 +1230,7 @@ class NhentaiNetwork {
       if (apiRes.success && apiItems != null) {
         return Res(
           _parseApiComicList(apiRes.data),
-          subData: _apiPageCount(apiRes.data, apiItems),
+          subData: _apiPageCount(apiRes.data),
         );
       }
     }
@@ -1221,7 +1273,8 @@ class NhentaiNetwork {
               comicDoms.length, (index) => parseComic(comicDoms[index]))),
           subData: lastPagination == null ? 1 : int.parse(lastPagination));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analyse", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
   }

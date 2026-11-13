@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
@@ -9,6 +10,7 @@ import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/custom_download_model.dart';
 import 'package:pica_comic/network/download_model.dart';
 import 'package:pica_comic/network/eh_network/eh_download_model.dart';
@@ -47,6 +49,14 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///下载队列
   var downloading = Queue<DownloadingItem>();
+
+  final Set<DownloadingItem> _stopping = HashSet<DownloadingItem>.identity();
+
+  bool _startRequestedDuringStop = false;
+
+  bool _pauseRequestedDuringStop = false;
+
+  int _downloadControlGeneration = 0;
 
   ///是否正在下载
   bool isDownloading = false;
@@ -149,7 +159,7 @@ class DownloadManager with _DownloadDb implements Listenable {
         }
       } catch (e, s) {
         LogManager.addLog(LogLevel.error, "IO",
-            "Failed to read downloaded information\n$e\n$s");
+            "Failed to read downloaded information\n${safeNetworkError(e)}\n$s");
         file.deleteSync();
         await _saveInfo();
       }
@@ -177,9 +187,10 @@ class DownloadManager with _DownloadDb implements Listenable {
                   break;
                 } catch (e) {
                   i++;
-                  if(i > 20) {
+                  if (i > 20) {
                     // it seems that the error is unrelated to the directory name
-                    Log.error("IO", "Failed to rename directory: Trying rename ${entry.name} to ${comic.name}\n$e");
+                    Log.error("IO",
+                        "Failed to rename downloaded directory: ${safeNetworkError(e)}");
                     break;
                   }
                   directory = comic.name + i.toString();
@@ -198,9 +209,17 @@ class DownloadManager with _DownloadDb implements Listenable {
     }
   }
 
-  void dispose() {
+  Future<void> dispose() async {
     _runInit = false;
-    downloading.forEach((e) => e.stop());
+    isDownloading = false;
+    for (final item in downloading.toList()) {
+      try {
+        await item.stop();
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.error, "Download",
+            "Failed to stop download during dispose: ${safeNetworkError(e)}\n$s");
+      }
+    }
     downloading.clear();
     _db?.dispose();
     _db = null;
@@ -228,14 +247,32 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   /// move comic to first
-  void moveToFirst(DownloadingItem item) {
-    if (downloading.first == item) {
+  Future<void> moveToFirst(DownloadingItem item) async {
+    if (!downloading.any((queued) => identical(queued, item)) ||
+        identical(downloading.firstOrNull, item) ||
+        _stopping.isNotEmpty) {
       return;
     }
-    pause();
-    downloading.remove(item);
+    final wasDownloading = isDownloading;
+    if (wasDownloading) await pause();
+    if (_stopping.isNotEmpty ||
+        !downloading.any((queued) => identical(queued, item))) {
+      return;
+    }
+    _removeDownloadingIdentity(item);
     downloading.addFirst(item);
-    start();
+    if (wasDownloading) start();
+  }
+
+  bool _removeDownloadingIdentity(DownloadingItem item) {
+    final items = downloading.toList();
+    final index = items.indexWhere((queued) => identical(queued, item));
+    if (index < 0) return false;
+    items.removeAt(index);
+    downloading
+      ..clear()
+      ..addAll(items);
+    return true;
   }
 
   String generateId(String source, String id) {
@@ -250,28 +287,37 @@ class DownloadManager with _DownloadDb implements Listenable {
   ///当一个下载任务完成时, 调用此函数
   void _onFinish() async {
     var task = downloading.removeFirst();
+    final nextTask = downloading.firstOrNull;
+    final controlGeneration = _downloadControlGeneration;
     _addToDb(await task.toDownloadedItem(), task.directory!);
     await _saveInfo();
     StateController.findOrNull<DownloadPageLogic>()?.refresh();
-    if (downloading.isNotEmpty) {
-      //清除已完成的任务, 开始下一个任务
-      downloading.first.start();
-    } else {
-      //标记状态为未在下载
+    if (downloading.isEmpty) {
       isDownloading = false;
       notifications.endProgress();
+    } else if (isDownloading &&
+        controlGeneration == _downloadControlGeneration &&
+        (nextTask == null || identical(downloading.firstOrNull, nextTask))) {
+      downloading.first.start();
     }
   }
 
   ///暂停下载
-  void pause() {
+  Future<void> pause() async {
+    _downloadControlGeneration++;
     isDownloading = false;
-    downloading.first.pause();
+    final item = downloading.firstOrNull;
+    if (item != null && _stopping.contains(item)) {
+      _pauseRequestedDuringStop = true;
+      _startRequestedDuringStop = false;
+      return;
+    }
+    if (item != null) await item.pause();
   }
 
   ///出现错误时调用此函数
   void _onError() {
-    pause();
+    unawaited(pause());
     _error = true;
     notifications.sendNotification("下载出错".tl, "点击查看详情".tl);
     notifyListeners();
@@ -279,26 +325,56 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///开始或继续下载
   void start() {
-    _error = false;
     if (isDownloading) return;
-    downloading.first.start();
+    final item = downloading.firstOrNull;
+    if (item == null) return;
+    if (_stopping.contains(item)) {
+      _pauseRequestedDuringStop = false;
+      _startRequestedDuringStop = true;
+      return;
+    }
+    _downloadControlGeneration++;
+    _error = false;
     isDownloading = true;
+    item.start();
   }
 
   ///取消指定的下载
-  void cancel(String id) {
-    var index = 0;
-    for (var i in downloading) {
-      if (i.id == id) break;
-      index++;
+  Future<void> cancel(String id) async {
+    final item = downloading.cast<DownloadingItem?>().firstWhere(
+          (item) => item?.id == id,
+          orElse: () => null,
+        );
+    if (item == null) return;
+    if (_stopping.contains(item)) return;
+    final wasFirst = identical(downloading.firstOrNull, item);
+    final wasDownloading = isDownloading;
+
+    if (wasFirst) _downloadControlGeneration++;
+
+    if (wasFirst) {
+      _error = false;
+      isDownloading = false;
+      _stopping.add(item);
+      try {
+        await item.stop();
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.error, "Download",
+            "Failed to remove download: ${safeNetworkError(e)}\n$s");
+      } finally {
+        _removeDownloadingIdentity(item);
+        _stopping.remove(item);
+      }
+    } else {
+      _removeDownloadingIdentity(item);
     }
 
-    if (index == 0) {
-      _error = false;
-      downloading.first.stop();
-      downloading.removeFirst();
-    } else {
-      downloading.removeWhere((element) => element.id == id);
+    final shouldResume = wasFirst &&
+        !_pauseRequestedDuringStop &&
+        (wasDownloading || _startRequestedDuringStop);
+    if (wasFirst) {
+      _startRequestedDuringStop = false;
+      _pauseRequestedDuringStop = false;
     }
 
     notifyListeners();
@@ -306,10 +382,10 @@ class DownloadManager with _DownloadDb implements Listenable {
     if (downloading.isEmpty) {
       isDownloading = false;
       notifications.endProgress();
-    } else {
-      downloading.first.start();
+    } else if (shouldResume) {
+      start();
     }
-    _saveInfo();
+    await _saveInfo();
   }
 
   Future<DownloadedItem?> getComicOrNull(String id) async {
@@ -349,7 +425,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       _addToDb(comic, comic.directory ?? getDirectory(comic.id));
       return null;
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "IO", "$e/n$s");
+      LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
       return e.toString();
     }
   }
@@ -392,20 +468,20 @@ class DownloadManager with _DownloadDb implements Listenable {
     } else {
       downloadPath = "$path/${getDirectory(id)}/$ep/";
     }
-    var fileName  = _downloadedFileName["$id$ep$index"];
-    if(fileName != null) {
+    var fileName = _downloadedFileName["$id$ep$index"];
+    if (fileName != null) {
       return File(downloadPath + fileName);
     }
     await for (var file in Directory(downloadPath).list()) {
       var i = file.uri.pathSegments.last.replaceFirst(RegExp(r"\..+"), "");
-      if(i.isNum) {
-        if(_downloadedFileName.length > 2000) {
+      if (i.isNum) {
+        if (_downloadedFileName.length > 2000) {
           _downloadedFileName.remove(_downloadedFileName.keys.first);
         }
         _downloadedFileName["$id$ep$i"] = file.name;
       }
     }
-    if(_downloadedFileName["$id$ep$index"] == null) {
+    if (_downloadedFileName["$id$ep$index"] == null) {
       throw Exception("File not found");
     }
     return File(downloadPath + _downloadedFileName["$id$ep$index"]!);
@@ -460,10 +536,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(PicDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, comic.id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   ///添加E-Hentai下载
@@ -472,10 +545,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(
         EhDownloadingItem(gallery, _onFinish, _onError, _saveInfo, id, type));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   ///添加禁漫下载
@@ -483,10 +553,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(JmDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, "jm${comic.id}"));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   ///添加Hitomi下载
@@ -495,10 +562,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(HitomiDownloadingItem(
         comic, cover, link, _onFinish, _onError, _saveInfo, id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   ///添加绅士漫画下载
@@ -507,10 +571,7 @@ extension AddDownloadExt on DownloadManager {
     downloading
         .addLast(DownloadingHtComic(comic, _onFinish, _onError, _saveInfo, id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   void addNhentaiDownload(NhentaiComic comic) {
@@ -518,10 +579,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(
         NhentaiDownloadingItem(comic, _onFinish, _onError, _saveInfo, id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   void addCustomDownload(ComicInfoData comic, List<int> downloadEps) {
@@ -529,10 +587,7 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(CustomDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 
   void addFavoriteDownload(FavoriteItem comic) {
@@ -548,14 +603,12 @@ extension AddDownloadExt on DownloadManager {
     downloading.addLast(
         FavoriteDownloading(comic, _onFinish, _onError, _saveInfo, id));
     _saveInfo();
-    if (!isDownloading) {
-      downloading.first.start();
-      isDownloading = true;
-    }
+    if (!isDownloading) start();
   }
 }
 
-DownloadedItem? _getComicFromJson(String id, String json, DateTime time, [String? directory]) {
+DownloadedItem? _getComicFromJson(String id, String json, DateTime time,
+    [String? directory]) {
   DownloadedItem comic;
   try {
     if (id.contains('-')) {
@@ -577,8 +630,8 @@ DownloadedItem? _getComicFromJson(String id, String json, DateTime time, [String
     comic.directory = directory;
     return comic;
   } catch (e, s) {
-    LogManager.addLog(
-        LogLevel.error, "IO", "Failed to get a downloaded comic info:\n$e\n$s");
+    LogManager.addLog(LogLevel.error, "IO",
+        "Failed to get downloaded comic info:\n${safeNetworkError(e)}\n$s");
     return null;
   }
 }
@@ -661,12 +714,8 @@ abstract mixin class _DownloadDb {
     ''');
     return result
         .map(
-          (e) => _getComicFromJson(
-            e['id'],
-            e['json'],
-            DateTime.fromMillisecondsSinceEpoch(e['time']),
-            e['directory']
-          )!,
+          (e) => _getComicFromJson(e['id'], e['json'],
+              DateTime.fromMillisecondsSinceEpoch(e['time']), e['directory'])!,
         )
         .toList();
   }
@@ -675,14 +724,14 @@ abstract mixin class _DownloadDb {
 
   String getDirectory(String id) {
     var directory = _cache[id];
-    if(directory == null) {
+    if (directory == null) {
       var result = _db!.select('''
       select directory from download
       where id = ?
     ''', [id]);
       directory = result.first['directory'];
       directory = _findAccurateDirectory(directory!);
-      if(_cache.length > 50) {
+      if (_cache.length > 50) {
         _cache.remove(_cache.keys.first);
       }
       _cache[id] = directory;

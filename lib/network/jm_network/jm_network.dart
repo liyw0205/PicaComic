@@ -22,6 +22,7 @@ import '../../foundation/cache_manager.dart';
 import '../../foundation/log.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
+import '../network_logging.dart';
 import '../res.dart';
 import 'headers.dart';
 import 'jm_image.dart';
@@ -207,7 +208,7 @@ class JmNetwork {
       }
     } catch (e) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
       return Res(null, errorMessage: e.toString());
     }
@@ -232,9 +233,10 @@ class JmNetwork {
       return domains;
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return [];
     }
   }
@@ -273,7 +275,7 @@ class JmNetwork {
           }
         } catch (e) {
           if (kDebugMode) {
-            LogManager.addLog(LogLevel.error, "Network", "$e");
+            LogManager.addLog(LogLevel.error, "Network", safeNetworkError(e));
           }
         }
       }();
@@ -320,7 +322,7 @@ class JmNetwork {
       return Res<dynamic>(data);
     } on DioException catch (e) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
       if (e.type != DioExceptionType.unknown) {
         return Res<String>(null, errorMessage: e.message ?? "Network Error");
@@ -329,9 +331,10 @@ class JmNetwork {
       }
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return Res<String>(null, errorMessage: e.toString());
     }
   }
@@ -359,7 +362,7 @@ class JmNetwork {
       return Res<dynamic>(const JsonDecoder().convert(resData));
     } on DioException catch (e) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
       if (e.type != DioExceptionType.unknown) {
         return const Res.error("Network Error");
@@ -368,9 +371,10 @@ class JmNetwork {
       }
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
       return const Res.error("Network Error");
     }
   }
@@ -381,16 +385,18 @@ class JmNetwork {
       var url = res.data["img_host"];
       appdata.settings[86] = url;
       appdata.updateSettings();
-      LogManager.addLog(LogLevel.info, "Network", "Updated JM Image URL: $url");
+      LogManager.addLog(LogLevel.info, "Network",
+          "Updated JM Image URL: ${safeNetworkUrl(url)}");
     } on DioException catch (e) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Network", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Network", "${safeNetworkError(e)}\n$s");
     }
   }
 
@@ -435,9 +441,10 @@ class JmNetwork {
       return Res(data);
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -475,9 +482,10 @@ class JmNetwork {
       return Res(list);
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -517,9 +525,10 @@ class JmNetwork {
       return;
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return;
     }
   }
@@ -554,9 +563,10 @@ class JmNetwork {
       return Res(comics, subData: 99999);
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -635,7 +645,8 @@ class JmNetwork {
               : ((res.data["total"] as num) / res.data["content"].length)
                   .ceil());
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       Future.delayed(const Duration(microseconds: 500),
           () => StateController.find<PreSearchController>().update());
       return Res(null, errorMessage: e.toString());
@@ -659,7 +670,8 @@ class JmNetwork {
       }
       return Res(categories);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -704,7 +716,8 @@ class JmNetwork {
       }
       return Res(comics, subData: pagesCount);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -769,7 +782,8 @@ class JmNetwork {
           int.parse(res.data["comment_total"] ?? "0"),
           epNames));
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -803,7 +817,7 @@ class JmNetwork {
             res.error ? LogLevel.error : LogLevel.info,
             "Network",
             res.error
-                ? "JM auto check-in failed\n${res.errorMessage}"
+                ? "JM auto check-in failed\n${safeNetworkError(res.errorMessage)}"
                 : "JM auto check-in succeed\n${res.subData}");
       }
     }
@@ -870,9 +884,10 @@ class JmNetwork {
       return Res(comics, subData: pages);
     } catch (e, s) {
       if (kDebugMode) {
-        print(e);
+        print(safeNetworkError(e));
       }
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -891,7 +906,8 @@ class JmNetwork {
       }
       return Res(folders);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -949,7 +965,8 @@ class JmNetwork {
       }
       return Res(images);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -959,8 +976,7 @@ class JmNetwork {
   /// 此函数未使用, 因为似乎所有漫画的scramble都一样
   Future<String?> getScramble(String id) async {
     var dio = Dio(getApiOptions(DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        byte: false))
-      ..interceptors.add(LogInterceptor());
+        byte: false));
     dio.interceptors.add(CookieManager(cookieJar));
     var res = await dio.get(
         "$baseUrl/chapter_view_template?id=$id&mode=vertical&page=0&app_ima_shunt=NaN&express=off");
@@ -999,7 +1015,8 @@ class JmNetwork {
             : (int.tryParse(res.data["total"]) ?? 1),
       );
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -1033,7 +1050,8 @@ class JmNetwork {
       }
       return Res(categories);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }
@@ -1066,7 +1084,8 @@ class JmNetwork {
       }
       return Res(comics);
     } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Data Analysis", "$e\n$s");
+      LogManager.addLog(
+          LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: e.toString());
     }
   }

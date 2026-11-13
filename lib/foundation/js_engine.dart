@@ -9,6 +9,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/app_dio.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:pica_comic/network/cloudflare.dart';
@@ -28,7 +29,6 @@ import 'package:pointycastle/block/modes/cfb.dart';
 import 'package:pointycastle/block/modes/ecb.dart';
 import 'package:pointycastle/block/modes/ofb.dart';
 
-
 class JavaScriptRuntimeException implements Exception {
   final String message;
 
@@ -40,7 +40,7 @@ class JavaScriptRuntimeException implements Exception {
   }
 }
 
-class JsEngine with _JSEngineApi{
+class JsEngine with _JSEngineApi {
   factory JsEngine() => _cache ?? (_cache = JsEngine._create());
 
   static JsEngine? _cache;
@@ -53,13 +53,13 @@ class JsEngine with _JSEngineApi{
 
   Dio? _dio;
 
-  static void reset(){
+  static void reset() {
     _cache = null;
     _cache?.dispose();
     JsEngine().init();
   }
 
-  Future<void> init() async{
+  Future<void> init() async {
     if (!_closed) {
       return;
     }
@@ -72,15 +72,16 @@ class JsEngine with _JSEngineApi{
       _closed = false;
       _engine = FlutterQjs();
       _engine!.dispatch();
-      var setGlobalFunc = _engine!.evaluate(
-          "(key, value) => { this[key] = value; }");
+      var setGlobalFunc =
+          _engine!.evaluate("(key, value) => { this[key] = value; }");
       (setGlobalFunc as JSInvokable)(["sendMessage", _messageReceiver]);
       setGlobalFunc.free();
       var jsInit = await rootBundle.load("assets/init.js");
-      _engine!.evaluate(utf8.decode(jsInit.buffer.asUint8List()), name: "<init>");
-    }
-    catch(e, s){
-      log('JS Engine Init Error:\n$e\n$s', 'JS Engine', LogLevel.error);
+      _engine!
+          .evaluate(utf8.decode(jsInit.buffer.asUint8List()), name: "<init>");
+    } catch (e, s) {
+      log('JS Engine Init Error:\n${safeNetworkError(e)}\n$s', 'JS Engine',
+          LogLevel.error);
     }
   }
 
@@ -151,37 +152,41 @@ class JsEngine with _JSEngineApi{
             }
         }
       }
-    }
-    catch(e, s){
-      log("Failed to handle message: $message\n$e\n$s", "JsEngine", LogLevel.error);
+    } catch (e, s) {
+      log("Failed to handle message: ${safeNetworkError(message)}\n${safeNetworkError(e)}\n$s",
+          "JsEngine", LogLevel.error);
       rethrow;
     }
   }
 
-  Future<Map<String, dynamic>> _http(Map<String, dynamic> req) async{
+  Future<Map<String, dynamic>> _http(Map<String, dynamic> req) async {
     Response? response;
     String? error;
 
     try {
       var headers = Map<String, dynamic>.from(req["headers"] ?? {});
-      if(headers["user-agent"] == null && headers["User-Agent"] == null){
+      if (headers["user-agent"] == null && headers["User-Agent"] == null) {
         headers["User-Agent"] = webUA;
       }
-      response = await _dio!.request(req["url"], data: req["data"], options: Options(
-        method: req['http_method'],
-        responseType: req["bytes"] == true ? ResponseType.bytes : ResponseType.plain,
-        headers: headers
-      ));
+      response = await _dio!.request(req["url"],
+          data: req["data"],
+          options: Options(
+              method: req['http_method'],
+              responseType: req["bytes"] == true
+                  ? ResponseType.bytes
+                  : ResponseType.plain,
+              headers: headers));
     } catch (e) {
       error = e.toString();
     }
 
     Map<String, String> headers = {};
 
-    response?.headers.forEach((name, values) => headers[name] = values.join(','));
+    response?.headers
+        .forEach((name, values) => headers[name] = values.join(','));
 
     dynamic body = response?.data;
-    if(body is! Uint8List && body is List<int>) {
+    if (body is! Uint8List && body is List<int>) {
       body = Uint8List.fromList(body);
     }
 
@@ -205,7 +210,7 @@ class JsEngine with _JSEngineApi{
   }
 }
 
-mixin class _JSEngineApi{
+mixin class _JSEngineApi {
   final Map<int, dom.Document> _documents = {};
   final Map<int, dom.Element> _elements = {};
   CookieJarSql? _cookieJar;
@@ -217,13 +222,13 @@ mixin class _JSEngineApi{
         return null;
       case "querySelector":
         var res = _documents[data["key"]]!.querySelector(data["query"]);
-        if(res == null) return null;
+        if (res == null) return null;
         _elements[_elements.length] = res;
         return _elements.length - 1;
       case "querySelectorAll":
         var res = _documents[data["key"]]!.querySelectorAll(data["query"]);
         var keys = <int>[];
-        for(var element in res){
+        for (var element in res) {
           _elements[_elements.length] = element;
           keys.add(_elements.length - 1);
         }
@@ -234,13 +239,13 @@ mixin class _JSEngineApi{
         return _elements[data["key"]]!.attributes;
       case "dom_querySelector":
         var res = _elements[data["key"]]!.querySelector(data["query"]);
-        if(res == null) return null;
+        if (res == null) return null;
         _elements[_elements.length] = res;
         return _elements.length - 1;
       case "dom_querySelectorAll":
         var res = _elements[data["key"]]!.querySelectorAll(data["query"]);
         var keys = <int>[];
-        for(var element in res){
+        for (var element in res) {
           _elements[_elements.length] = element;
           keys.add(_elements.length - 1);
         }
@@ -263,7 +268,7 @@ mixin class _JSEngineApi{
             Uri.parse(data["url"]),
             (data["cookies"] as List).map((e) {
               var c = Cookie(e["name"], e["value"]);
-              if(e['domain'] != null){
+              if (e['domain'] != null) {
                 c.domain = e['domain'];
               }
               return c;
@@ -271,32 +276,34 @@ mixin class _JSEngineApi{
         return null;
       case "get":
         var cookies = _cookieJar!.loadForRequest(Uri.parse(data["url"]));
-        return cookies.map((e) => {
-          "name": e.name,
-          "value": e.value,
-          "domain": e.domain,
-          "path": e.path,
-          "expires": e.expires,
-          "max-age": e.maxAge,
-          "secure": e.secure,
-          "httpOnly": e.httpOnly,
-          "session": e.expires == null,
-        }).toList();
+        return cookies
+            .map((e) => {
+                  "name": e.name,
+                  "value": e.value,
+                  "domain": e.domain,
+                  "path": e.path,
+                  "expires": e.expires,
+                  "max-age": e.maxAge,
+                  "secure": e.secure,
+                  "httpOnly": e.httpOnly,
+                  "session": e.expires == null,
+                })
+            .toList();
       case "delete":
         clearCookies([data["url"]]);
         return null;
     }
   }
 
-  void clear(){
+  void clear() {
     _documents.clear();
     _elements.clear();
   }
 
-  void clearCookies(List<String> domains) async{
-    for(var domain in domains){
+  void clearCookies(List<String> domains) async {
+    for (var domain in domains) {
       var uri = Uri.tryParse(domain);
-      if(uri == null) continue;
+      if (uri == null) continue;
       _cookieJar!.deleteUri(uri);
     }
   }
@@ -308,12 +315,10 @@ mixin class _JSEngineApi{
     try {
       switch (type) {
         case "base64":
-          if(value is String){
+          if (value is String) {
             value = utf8.encode(value);
           }
-          return isEncode
-              ? base64Encode(value)
-              : base64Decode(value);
+          return isEncode ? base64Encode(value) : base64Decode(value);
         case "md5":
           return Uint8List.fromList(md5.convert(value).bytes);
         case "sha1":
@@ -323,7 +328,7 @@ mixin class _JSEngineApi{
         case "sha512":
           return Uint8List.fromList(sha512.convert(value).bytes);
         case "aes-ecb":
-          if(!isEncode){
+          if (!isEncode) {
             var key = data["key"];
             var cipher = ECBBlockCipher(AESEngine());
             cipher.init(false, KeyParameter(key));
@@ -331,7 +336,7 @@ mixin class _JSEngineApi{
           }
           return null;
         case "aes-cbc":
-          if(!isEncode){
+          if (!isEncode) {
             var key = data["key"];
             var iv = data["iv"];
             var cipher = CBCBlockCipher(AESEngine());
@@ -340,7 +345,7 @@ mixin class _JSEngineApi{
           }
           return null;
         case "aes-cfb":
-          if(!isEncode){
+          if (!isEncode) {
             var key = data["key"];
             var blockSize = data["blockSize"];
             var cipher = CFBBlockCipher(AESEngine(), blockSize);
@@ -349,7 +354,7 @@ mixin class _JSEngineApi{
           }
           return null;
         case "aes-ofb":
-          if(!isEncode){
+          if (!isEncode) {
             var key = data["key"];
             var blockSize = data["blockSize"];
             var cipher = OFBBlockCipher(AESEngine(), blockSize);
@@ -358,20 +363,19 @@ mixin class _JSEngineApi{
           }
           return null;
         case "rsa":
-          if(!isEncode){
+          if (!isEncode) {
             var key = data["key"];
             final cipher = PKCS1Encoding(RSAEngine());
-            cipher.init(
-                false, PrivateKeyParameter<RSAPrivateKey>(_parsePrivateKey(key)));
+            cipher.init(false,
+                PrivateKeyParameter<RSAPrivateKey>(_parsePrivateKey(key)));
             return _processInBlocks(cipher, value);
           }
           return null;
         default:
           return value;
       }
-    }
-    catch(e) {
-      Log.error("JS Engine", "Failed to convert $type: $e");
+    } catch (e) {
+      Log.error("JS Engine", "Failed to convert $type: ${safeNetworkError(e)}");
       return null;
     }
   }
@@ -390,11 +394,11 @@ mixin class _JSEngineApi{
     final p = pkSeq.elements![4] as ASN1Integer;
     final q = pkSeq.elements![5] as ASN1Integer;
 
-    return RSAPrivateKey(modulus.integer!, privateExponent.integer!, p.integer!, q.integer!);
+    return RSAPrivateKey(
+        modulus.integer!, privateExponent.integer!, p.integer!, q.integer!);
   }
 
-  Uint8List _processInBlocks(
-      AsymmetricBlockCipher engine, Uint8List input) {
+  Uint8List _processInBlocks(AsymmetricBlockCipher engine, Uint8List input) {
     final numBlocks = input.length ~/ engine.inputBlockSize +
         ((input.length % engine.inputBlockSize != 0) ? 1 : 0);
 

@@ -91,14 +91,6 @@ android {
     }
 
     signingConfigs {
-        debug {
-            if (hasKeystoreProperties) {
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-            }
-        }
         release {
             if (hasKeystoreProperties) {
                 keyAlias keystoreProperties['keyAlias']
@@ -111,8 +103,7 @@ android {
 
     buildTypes {
         release {
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig hasKeystoreProperties ? signingConfigs.release : signingConfigs.debug
+            signingConfig hasKeystoreProperties ? signingConfigs.release : null
         }
     }
     namespace 'com.github.pacalini.pica_comic'
@@ -142,24 +133,57 @@ def patchFlutterKernelSdkHash = { File kernelFile ->
     }
 }
 
+def termuxKernelSdkHashPatchEnabled =
+        project.findProperty('pica.termuxKernelSdkHashPatch') == 'true'
+
 tasks.register('fixDebugFlutterKernelSdkHash') {
     outputs.upToDateWhen { false }
 
     doLast {
+        if (!termuxKernelSdkHashPatchEnabled) {
+            return
+        }
         patchFlutterKernelSdkHash(file("${buildDir}/intermediates/flutter/debug/flutter_assets/kernel_blob.bin"))
         patchFlutterKernelSdkHash(file("${buildDir}/intermediates/assets/debug/mergeDebugAssets/flutter_assets/kernel_blob.bin"))
     }
 }
 
 afterEvaluate {
-    tasks.named('fixDebugFlutterKernelSdkHash') {
-        dependsOn tasks.named('copyFlutterAssetsDebug')
+    if (termuxKernelSdkHashPatchEnabled) {
+        tasks.named('fixDebugFlutterKernelSdkHash') {
+            dependsOn tasks.named('copyFlutterAssetsDebug')
+        }
+
+        ['compressDebugAssets', 'packageDebug', 'packageDebugUniversalApk'].each { taskName ->
+            tasks.named(taskName) {
+                dependsOn tasks.named('fixDebugFlutterKernelSdkHash')
+                outputs.upToDateWhen { false }
+            }
+        }
     }
 
-    ['compressDebugAssets', 'packageDebug', 'packageDebugUniversalApk'].each { taskName ->
-        tasks.named(taskName) {
-            dependsOn tasks.named('fixDebugFlutterKernelSdkHash')
-            outputs.upToDateWhen { false }
+    tasks.register('validateReleaseSigning') {
+        doLast {
+            if (!hasKeystoreProperties) {
+                throw new GradleException('Release builds require android/key.properties and the existing release keystore.')
+            }
+            ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { property ->
+                if (!keystoreProperties.getProperty(property)) {
+                    throw new GradleException("Release signing property '${property}' is missing.")
+                }
+            }
+            def signingStoreFile = file(keystoreProperties.getProperty('storeFile'))
+            if (!signingStoreFile.isFile() || !signingStoreFile.canRead()) {
+                throw new GradleException('The configured release keystore does not exist or is not readable.')
+            }
+        }
+    }
+
+    tasks.configureEach { task ->
+        if (task.name == 'preReleaseBuild' ||
+                ((task.name.startsWith('assemble') || task.name.startsWith('bundle') ||
+                task.name.startsWith('package')) && task.name.toLowerCase().contains('release'))) {
+            task.dependsOn tasks.named('validateReleaseSigning')
         }
     }
 }

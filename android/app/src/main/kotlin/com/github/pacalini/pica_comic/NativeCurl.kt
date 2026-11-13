@@ -1,6 +1,19 @@
 package com.github.pacalini.pica_comic
 
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+
 object NativeCurl {
+    private val cancellations = ConcurrentHashMap<String, AtomicBoolean>()
+
+    fun registerRequest(id: String) {
+        cancellations[id] = AtomicBoolean(false)
+    }
+
+    fun cancelRequest(id: String) {
+        cancellations[id]?.set(true)
+    }
+
     private val loaded: Boolean = try {
         System.loadLibrary("pica_curl")
         availableNative()
@@ -20,6 +33,7 @@ object NativeCurl {
         body: ByteArray?,
         timeoutMs: Int,
         attempts: Int,
+        cancelled: AtomicBoolean,
     ): Map<String, Any?>
 
     fun isAvailable(): Boolean = loaded
@@ -37,7 +51,10 @@ object NativeCurl {
                 }
             }
         }
-        return fetchNative(
+        val id = arguments["requestId"]?.toString() ?: ""
+        val cancelled = cancellations[id] ?: AtomicBoolean(false)
+        try {
+            return fetchNative(
             arguments["method"]?.toString() ?: "GET",
             arguments["url"]?.toString() ?: "",
             arguments["proxy"]?.toString(),
@@ -45,6 +62,10 @@ object NativeCurl {
             arguments["body"] as? ByteArray,
             arguments["timeoutMs"] as? Int ?: 15000,
             arguments["attempts"] as? Int ?: 3,
-        )
+            cancelled,
+            )
+        } finally {
+            cancellations.remove(id)
+        }
     }
 }

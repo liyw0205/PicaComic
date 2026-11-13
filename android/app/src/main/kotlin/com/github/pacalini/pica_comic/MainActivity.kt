@@ -72,8 +72,13 @@ class MainActivity: FlutterFragmentActivity() {
                 call, res ->
             when (call.method) {
                 "available" -> res.success(NativeCurl.isAvailable())
+                "cancel" -> {
+                    NativeCurl.cancelRequest(call.arguments?.toString() ?: "")
+                    res.success(null)
+                }
                 "fetch" -> {
                     val arguments = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                    NativeCurl.registerRequest(arguments["requestId"]?.toString() ?: "")
                     nativeCurlExecutor.execute {
                         try {
                             val result = NativeCurl.fetch(arguments)

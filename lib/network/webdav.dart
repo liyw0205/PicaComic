@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -80,11 +81,12 @@ class Webdav {
           }
         }
       }
-      await client.writeFromFile(await exportDataToFile(false, "${App.cachePath}/userdata.picadata"),
+      await client.writeFromFile(
+          await exportDataToFile(false, "${App.cachePath}/userdata.picadata"),
           "${configs[3]}${appdata.settings[46]}.picadata");
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "Sync",
-          "Failed to upload data to webdav server.\n$e\n$s");
+          "Failed to upload data to webdav server.\n${safeNetworkError(e)}\n$s");
       _isOperating = false;
       return false;
     }
@@ -140,7 +142,7 @@ class Webdav {
         return res;
       } catch (e, s) {
         LogManager.addLog(LogLevel.error, "Sync",
-            "Failed to download data from webdav server.\n$e\n$s");
+            "Failed to download data from webdav server.\n${safeNetworkError(e)}\n$s");
         return false;
       }
     } finally {

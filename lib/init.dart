@@ -12,6 +12,7 @@ import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_proxy.dart';
 import 'package:pica_comic/network/jm_network/jm_network.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/picacg_network/models.dart';
 import 'package:pica_comic/tools/app_links.dart';
 import 'package:pica_comic/tools/background_service.dart';
@@ -35,16 +36,16 @@ Future<void> init() async {
   try {
     await App.init();
     io.File? logFile = io.File("${App.dataPath}/log.txt");
-    if(App.isAndroid) {
+    if (App.isAndroid) {
       var externalDirectory = await getExternalStorageDirectory();
       if (externalDirectory != null) {
         logFile = io.File("${externalDirectory.path}/log.txt");
       }
     }
-    if(App.isIOS) {
+    if (App.isIOS) {
       logFile = null;
     }
-    if(logFile?.existsSync() ?? false) {
+    if (logFile?.existsSync() ?? false) {
       await logFile?.delete();
     }
     LogManager.logFile = logFile;
@@ -59,7 +60,7 @@ Future<void> init() async {
     if (App.isAndroid) {
       final appLinks = AppLinks();
       appLinks.allUriLinkStream.listen((uri) async {
-        while(App.mainNavigatorKey == null) {
+        while (App.mainNavigatorKey == null) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
         handleAppLinks(uri);
@@ -87,8 +88,8 @@ Future<void> init() async {
     ]);
     CacheManager().setLimitSize(appdata.appSettings.cacheLimit);
   } catch (e, s) {
-    LogManager.addLog(
-        LogLevel.error, "Init", "App initialization failed!\n$e$s");
+    LogManager.addLog(LogLevel.error, "Init",
+        "App initialization failed!\n${safeNetworkError(e)}\n$s");
   }
 }
 
@@ -170,7 +171,8 @@ Future<void> _checkOldData() async {
     }
     await _checkAccountData();
   } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "Init", "Check old data failed!\n$e$s");
+    LogManager.addLog(LogLevel.error, "Init",
+        "Check old data failed!\n${safeNetworkError(e)}\n$s");
   }
 }
 
@@ -199,7 +201,7 @@ Future<void> _checkAccountData() async {
     await picacg.saveData();
     await s.remove('picacgAccount');
   }
-  if(s.getString("jmName") != null) {
+  if (s.getString("jmName") != null) {
     var account = s.getString('jmName');
     var pwd = s.getString('jmPwd');
     jm.data['account'] = [account, pwd];
@@ -207,13 +209,13 @@ Future<void> _checkAccountData() async {
     await s.remove("jmName");
     await jm.saveData();
   }
-  if(s.getString("ehAccount") != null) {
+  if (s.getString("ehAccount") != null) {
     ehentai.data['account'] = 'ok';
     ehentai.data['name'] = s.getString("ehAccount")!;
     await s.remove("ehAccount");
     await ehentai.saveData();
   }
-  if(s.getString('htName') != null) {
+  if (s.getString('htName') != null) {
     var account = s.getString('htName');
     var pwd = s.getString('htPwd');
     htManga.data['account'] = [account, pwd];
@@ -222,7 +224,7 @@ Future<void> _checkAccountData() async {
     await htManga.saveData();
   }
   NhentaiNetwork().init();
-  if(NhentaiNetwork().logged) {
+  if (NhentaiNetwork().logged) {
     nhentai.data['account'] = 'ok';
     await nhentai.saveData();
   }

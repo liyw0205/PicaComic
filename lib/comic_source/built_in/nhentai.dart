@@ -52,9 +52,9 @@ final nhentai = ComicSource.named(
     load: (category, param, options, page) async {
       var [_, type, name] = param!.split('/');
       var lang = int.tryParse(appdata.settings[69]) ?? 0;
-      if (lang != 0) {
+      if (lang >= 1 && lang <= 3) {
         return NhentaiNetwork().search(
-          "$type:$name language:${["chinese", "english", "japanese"][lang-1]}",
+          "$type:$name",
           page,
           NhentaiSort.fromValue(options[0]),
         );
@@ -118,9 +118,17 @@ final nhentai = ComicSource.named(
             parts.add(ExplorePagePart("Popular", res.data.popular, null));
           }
           parts.add(res.data.latest);
-          return Res(parts, subData: 20000);
+          return Res(
+            parts,
+            subData:
+                res.data.totalPages ?? (res.data.latest.isEmpty ? index : null),
+          );
         } else {
-          return Res([res.data.latest], subData: 20000);
+          return Res(
+            res.data.latest.isEmpty ? const [] : [res.data.latest],
+            subData: res.data.totalPages ??
+                (res.data.latest.isEmpty ? (index > 1 ? index - 1 : 1) : null),
+          );
         }
       },
     ),

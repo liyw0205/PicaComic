@@ -9,6 +9,7 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/pair.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/network/search_language.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/tags_translation.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -17,12 +18,15 @@ class _SearchPageComicList extends ComicsPage<BaseComic> {
   const _SearchPageComicList({
     super.key,
     required this.keyword,
+    required this.languageIndex,
     required this.options,
     required this.header,
     required this.sourceKey,
   });
 
   final String keyword;
+
+  final int languageIndex;
 
   final List<String> options;
 
@@ -34,18 +38,21 @@ class _SearchPageComicList extends ComicsPage<BaseComic> {
 
   @override
   Future<Res<List<BaseComic>>> getComics(int i) async {
-    var loader = ComicSource.find(sourceKey)!.searchPageData!.loadPage!;
-    return await loader(keyword, i, options);
+    final searchData = ComicSource.find(sourceKey)!.searchPageData!;
+    final query = withDefaultSearchLanguage(keyword, languageIndex,
+        enabled: searchData.enableLanguageFilter);
+    return await searchData.loadPage!(query, i, options);
   }
 
   @override
-  String? get tag => "$sourceKey search page with $keyword";
+  String? get tag =>
+      "$sourceKey search page with ${withDefaultSearchLanguage(keyword, languageIndex, enabled: ComicSource.find(sourceKey)!.searchPageData!.enableLanguageFilter)}";
 
   @override
   String? get title => null;
 }
 
-class SearchResultPage extends StatelessWidget {
+class SearchResultPage extends StatefulWidget {
   const SearchResultPage({
     super.key,
     required this.keyword,
@@ -59,53 +66,23 @@ class SearchResultPage extends StatelessWidget {
 
   final String sourceKey;
 
-  @override
-  Widget build(BuildContext context) {
-    var comicSource =
-        ComicSource.find(sourceKey) ?? (throw "source $sourceKey not found");
-    var options = this.options;
-    if (comicSource.searchPageData?.searchOptions != null) {
-      var searchOptions = comicSource.searchPageData!.searchOptions!;
-      if (searchOptions.length != options.length) {
-        options = searchOptions.map((e) => e.defaultValue).toList();
-      }
-    }
-    if (comicSource.searchPageData?.overrideSearchResultBuilder != null) {
-      return comicSource.searchPageData!.overrideSearchResultBuilder!(
-        keyword,
-        options,
-      );
-    } else {
-      return _SearchResultPage(
-        keyword: keyword,
-        options: options,
-        sourceKey: sourceKey,
-      );
+  static final Set<_SearchResultPageState> _activePages = {};
+
+  static void updateDefaultLanguage(int languageIndex) {
+    for (final page in _activePages.toList()) {
+      page.updateDefaultLanguage(languageIndex);
     }
   }
-}
-
-class _SearchResultPage extends StatefulWidget {
-  const _SearchResultPage({
-    required this.keyword,
-    required this.options,
-    required this.sourceKey,
-  });
-
-  final String keyword;
-
-  final List<String> options;
-
-  final String sourceKey;
 
   @override
-  State<_SearchResultPage> createState() => _SearchResultPageState();
+  State<SearchResultPage> createState() => _SearchResultPageState();
 }
 
-class _SearchResultPageState extends State<_SearchResultPage> {
+class _SearchResultPageState extends State<SearchResultPage> {
   var controller = TextEditingController();
   bool _showFab = true;
   late String keyword = widget.keyword;
+  late int languageIndex = int.tryParse(appdata.settings[69]) ?? 0;
 
   OverlayEntry? get suggestionOverlay => suggestionsController.entry;
   late _SuggestionsController suggestionsController;
@@ -115,15 +92,8 @@ class _SearchResultPageState extends State<_SearchResultPage> {
   @override
   void initState() {
     controller.text = keyword.trim();
-    if (!keyword.contains('language') &&
-        ComicSource.find(sourceKey)?.searchPageData?.enableLanguageFilter ==
-            true) {
-      var lang = int.tryParse(appdata.settings[69]) ?? 0;
-      if (lang != 0) {
-        keyword += " language:${["chinese", "english", "japanese"][lang - 1]}";
-      }
-    }
     suggestionsController = _SuggestionsController(controller);
+    SearchResultPage._activePages.add(this);
     super.initState();
   }
 
@@ -132,7 +102,14 @@ class _SearchResultPageState extends State<_SearchResultPage> {
     if (suggestionOverlay != null) {
       suggestionsController.remove();
     }
+    SearchResultPage._activePages.remove(this);
+    controller.dispose();
     super.dispose();
+  }
+
+  void updateDefaultLanguage(int index) {
+    if (!mounted || languageIndex == index) return;
+    setState(() => languageIndex = index);
   }
 
   void onChanged(String s) {
@@ -173,6 +150,25 @@ class _SearchResultPageState extends State<_SearchResultPage> {
 
   @override
   Widget build(BuildContext context) {
+    final comicSource =
+        ComicSource.find(sourceKey) ?? (throw "source $sourceKey not found");
+    final searchData = comicSource.searchPageData!;
+    final effectiveOptions = searchData.searchOptions != null &&
+            searchData.searchOptions!.length != options.length
+        ? searchData.searchOptions!.map((e) => e.defaultValue).toList()
+        : options;
+    final query = withDefaultSearchLanguage(
+      keyword,
+      languageIndex,
+      enabled: searchData.enableLanguageFilter,
+    );
+    if (searchData.overrideSearchResultBuilder != null) {
+      return KeyedSubtree(
+        key: ValueKey('$sourceKey:$query:${effectiveOptions.join(',')}'),
+        child: searchData.overrideSearchResultBuilder!(query, effectiveOptions),
+      );
+    }
+
     Widget trailing;
     if (context.width < 400) {
       trailing = Button.icon(
@@ -230,8 +226,11 @@ class _SearchResultPageState extends State<_SearchResultPage> {
         },
         child: _SearchPageComicList(
           keyword: keyword,
+          languageIndex: languageIndex,
           sourceKey: sourceKey,
-          key: Key(keyword + options.toString() + sourceKey),
+          key: Key(
+            '$query${effectiveOptions.toString()}$sourceKey',
+          ),
           header: SliverPersistentHeader(
             pinned: _showFab && SmoothScrollProvider.isMouseScroll,
             floating: !SmoothScrollProvider.isMouseScroll,
@@ -253,7 +252,7 @@ class _SearchResultPageState extends State<_SearchResultPage> {
               ),
             ),
           ),
-          options: options,
+          options: effectiveOptions,
         ),
       ),
     );

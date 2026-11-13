@@ -5,6 +5,7 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/jm_network/jm_network.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/webdav.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
@@ -328,7 +329,7 @@ class Appdata {
       return true;
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "Appdata.readDataFromJson",
-          "error reading appdata$e\n$s");
+          "error reading appdata ${safeNetworkError(e)}\n$s");
       readData();
       return false;
     }

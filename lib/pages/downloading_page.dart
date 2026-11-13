@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
@@ -32,11 +34,11 @@ class _DownloadingPageState extends State<DownloadingPage> {
   }
 
   void onChange() {
-    if(downloadManager.error) {
+    if (downloadManager.error) {
       setState(() {});
     } else if (downloadManager.downloading.length != comics.length) {
       rebuild();
-    } else if (key.currentState != null){
+    } else if (key.currentState != null) {
       key.currentState!.updateUi();
     }
   }
@@ -55,7 +57,7 @@ class _DownloadingPageState extends State<DownloadingPage> {
     var widgets = <Widget>[];
     for (var i in comics) {
       var key = Key(i.id);
-      if(i == comics.first) {
+      if (i == comics.first) {
         key = this.key;
       }
 
@@ -63,9 +65,7 @@ class _DownloadingPageState extends State<DownloadingPage> {
         comic: i,
         cancel: () {
           showConfirmDialog(context, "取消".tl, "取消下载任务?".tl, () {
-            setState(() {
-              downloadManager.cancel(i.id);
-            });
+            unawaited(downloadManager.cancel(i.id));
           });
         },
         onComicPositionChange: rebuild,
@@ -125,7 +125,7 @@ class _DownloadingPageState extends State<DownloadingPage> {
                       TextButton(
                         onPressed: () {
                           downloadManager.isDownloading
-                              ? downloadManager.pause()
+                              ? unawaited(downloadManager.pause())
                               : downloadManager.start();
                           setState(() {});
                         },
@@ -196,7 +196,7 @@ class _DownloadingTileState extends State<_DownloadingTile> {
   }
 
   void updateStatistic() {
-    if(comic != DownloadManager().downloading.first) {
+    if (comic != DownloadManager().downloading.first) {
       return;
     }
     comic = DownloadManager().downloading.first;
@@ -278,8 +278,8 @@ class _DownloadingTileState extends State<_DownloadingTile> {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.vertical_align_top),
-                    onPressed: () {
-                      DownloadManager().moveToFirst(comic);
+                    onPressed: () async {
+                      await DownloadManager().moveToFirst(comic);
                       widget.onComicPositionChange();
                     },
                   ),
@@ -321,8 +321,8 @@ class _DownloadingTileState extends State<_DownloadingTile> {
 
     String status = "${"已下载".tl}$downloadPages/$pagesCount";
 
-    if (comic is EhDownloadingItem
-        && (comic as EhDownloadingItem).downloadType != 0) {
+    if (comic is EhDownloadingItem &&
+        (comic as EhDownloadingItem).downloadType != 0) {
       status = "${_bytesToSize(downloadPages).split(' ').first}"
           "/${_bytesToSize(pagesCount!)}";
     }

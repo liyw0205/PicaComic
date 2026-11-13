@@ -13,6 +13,7 @@ import 'package:pica_comic/foundation/app_page_route.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/init.dart';
 import 'package:pica_comic/network/http_client.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/pages/auth_page.dart';
 import 'package:pica_comic/pages/main_page.dart';
 import 'package:pica_comic/pages/welcome_page.dart';
@@ -35,7 +36,7 @@ void main(List<String> args) {
     await init();
     FlutterError.onError = (details) {
       LogManager.addLog(LogLevel.error, "Unhandled Exception",
-          "${details.exception}\n${details.stack}");
+          "${safeNetworkError(details.exception)}\n${details.stack}");
     };
     notFirstUse = appdata.firstUse[3] == "1";
     await setNetworkProxy();
@@ -61,7 +62,8 @@ void main(List<String> args) {
       });
     }
   }, (error, stack) {
-    LogManager.addLog(LogLevel.error, "Unhandled Exception", "$error\n$stack");
+    LogManager.addLog(LogLevel.error, "Unhandled Exception",
+        "${safeNetworkError(error)}\n$stack");
   });
 }
 
@@ -219,13 +221,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         themeMode: appdata.appSettings.darkMode == 2
             ? ThemeMode.dark
             : appdata.appSettings.darkMode == 1
-            ? ThemeMode.light
-            : ThemeMode.system,
+                ? ThemeMode.light
+                : ThemeMode.system,
         onGenerateRoute: (settings) => AppPageRoute(
           builder: (context) => notFirstUse
               ? (appdata.settings[13] == "1"
-              ? const AuthPage()
-              : const MainPage())
+                  ? const AuthPage()
+                  : const MainPage())
               : const WelcomePage(),
         ),
         localizationsDelegates: const [
@@ -241,7 +243,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         builder: (context, widget) {
           ErrorWidget.builder = (details) {
             LogManager.addLog(LogLevel.error, "Unhandled Exception",
-                "${details.exception}\n${details.stack}");
+                "${safeNetworkError(details.exception)}\n${details.stack}");
             return Material(
               child: Center(
                 child: Text(details.exception.toString()),
@@ -253,9 +255,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             if (App.isDesktop) {
               widget = Shortcuts(
                 shortcuts: {
-                  LogicalKeySet(LogicalKeyboardKey.escape):
-                  VoidCallbackIntent(
-                        () {
+                  LogicalKeySet(LogicalKeyboardKey.escape): VoidCallbackIntent(
+                    () {
                       if (App.canPop) {
                         App.globalBack();
                       } else {
