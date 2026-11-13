@@ -2,9 +2,9 @@
 
 日期：2026-11-13。基线：`master`，HEAD `631954f0`，版本 `4.2.17+4217`。
 
-本报告审查当前工作区，包括上一轮未提交的修复；不是只审查 HEAD。
-本报告随修复继续更新。当前版本为 `4.2.18+4218`，代码与 CI 依赖修复已推送到 `master`。
-用户原有未跟踪的 `tool/` 保持原状，不纳入建议提交。
+本报告以 `631954f0`（`4.2.17+4217`）为审计基线，随后结合修复提交持续更新。
+当前版本为 `4.2.18+4218`，修复与 CI 依赖变更已推送到 `master`；本报告记录截至 2026-11-13 的验证状态。
+用户原有未跟踪的 `.ai-memory/` 与 `tool/` 保持原状，不纳入提交。
 
 ## 结论
 
@@ -25,7 +25,7 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设�
 - 后果：同一版本的 tag 与 APK 可变化；并行工作流可能互相覆盖，无法可靠追溯或回滚。
 - 方案：分离验证和发布。分支推送只验证/上传 Actions artifact；不可变版本 tag 才发布。校验 tag、pubspec、提交一致性；同 tag 不覆盖已有资产。为验证和发布分别设置并发策略。
 - 验收：同版本重跑不移动 tag、不更换 APK；两个并行运行不会使旧提交覆盖新产物。
-- 状态：工作流已改为 master 只做 CI/debug，版本 tag 才发布；tag 与 package 版本/提交校验、发布阶段远端 tag 复核、不可覆盖 Release 和并发控制已配置。仓库仍需配置 ruleset 禁止 `v*` tag 更新/删除；GitHub Actions 实跑待验证。
+- 状态：工作流已改为 master 只做 CI/debug，版本 tag 才发布；tag 与 package 版本/提交校验、发布阶段远端 tag 复核、不可覆盖 Release 和并发控制已配置。仓库 ruleset `27179261` 已验证为 active，禁止 `v*` tag 更新/删除且无 bypass。GitHub Actions run `43371123167` 的 master CI 成功；签名 Release 仍因缺少 secrets 未执行。
 
 ### R02：Release 在缺少签名配置时使用临时 debug 密钥
 
@@ -169,8 +169,8 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设�
 
 ## 实施顺序
 
-1. **代码修复与本地回归**：R01-R14 对应代码修复和专项测试已落地，并补齐 ZIP symlink、EH 取链取消、下载封面取消/队列竞态、空 Release 摘要及 Hitomi 非正 ID 回归；全量 Flutter tests 97 项、Native curl 6 项通过，analyze 为 0 error、0 warning、149 info。版本 `4.2.18+4218` 已推送至 `master`。
-2. **发布前置验收**：在 GitHub 配置既有 keystore 与证书指纹 secrets、保护 `v*` tag；用干净 Ubuntu runner 验证 APK 的四种产物和签名，并由真实 Actions 执行发布流程。不能用本机 Termux 构建失败替代这些结果。
+1. **代码修复与本地回归**：R01-R14 对应代码修复和专项测试已落地，并补齐 ZIP symlink、EH 取链取消、下载封面取消/队列竞态、空 Release 摘要及 Hitomi 非正 ID 回归；Actions run `43371123167` 的全量 Flutter tests 97 项、Native curl 6 项通过，analyze 为 0 error、0 warning、149 info。版本 `4.2.18+4218` 已推送至 `master`。
+2. **发布前置验收**：`v*` tag 更新/删除保护已启用；仍需在 GitHub 配置既有 keystore 与证书指纹 secrets，用干净 Ubuntu runner 验证 APK 的四种产物和签名，并由真实 Actions 执行发布流程。不能用本机 Termux 构建失败替代这些结果。
 3. **设备验收**：核对旧 APK 证书并验证覆盖升级和数据保留；实机检查语言切换、多页阅读、代理/TLS、下载暂停恢复及 EH 图片/归档取消。
 4. **性能与依赖治理**：先建立图片和整机内存基线，再决定流式落盘、缓存预算及依赖固定；不凭感觉引入大规模重构或升级。
 5. **交付**：master CI 已生成 debug APK artifact；签名 Release tag 等既有 keystore 与证书指纹 secrets 配置并验收后再创建，不生成新密钥、不覆盖现有 tag。
@@ -178,7 +178,7 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设�
 ## 本轮验证
 
 - 测试运行环境：Termux SDK 内的 Dart 是 Android VM，而 `flutter_tester` 是 Linux ARM64。为不改原 SDK，在 Debian proot 和 `~/.cache/pica-linux-flutter` 建了匹配 engine revision `4c525dac5ebe5971c5708ef73558ed8edcf4a362` 的 Linux Dart 3.12 / Flutter 3.44 source-runner shim。
-- `flutter test --no-pub`：全量 97 项通过，覆盖本轮新增回归。测试通过 Debian proot 内与 Flutter engine revision 匹配的 Linux runner 执行；`LD_LIBRARY_PATH` 指向 Debian SQLite；因 proot 以 root 运行，权限拒绝子测例跳过，非 root CI 会运行该分支。Termux 原生 runner 仍因 SDK snapshot/impellerc 不匹配不可用。
+- `flutter test --no-pub`：新增 EH 跳转 GET 取消与 Unix symlink 两项自动发现回归后，本地全量 99 项通过；先前 Actions run `43371123167` 的 97 项是补测前记录。测试通过 Debian proot 内与 Flutter engine revision 匹配的 Linux runner 执行；`LD_LIBRARY_PATH` 指向 Debian SQLite；因 proot 以 root 运行，权限拒绝子测例跳过，非 root CI 会运行该分支。Termux 原生 runner 仍因 SDK snapshot/impellerc 不匹配不可用。
 - `flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings`：退出码 0，0 error、0 warning、149 info。新增 `tool/` 中已有的 `avoid_print` 与其余 info 未修改。
 - `sh test/native_curl/run.sh`：6 项 JNI/C 回归通过。复核修正了 POST body 用例的假阳性：服务端线程只记录校验结果并返回成功/失败响应，主线程断言请求次数、重试次数、curl/HTTP 状态、响应体及请求 body 校验结果。`git diff --check` 通过。
 - `.github/workflows/android.yml` 与 `ios_simulator.yml` 均通过 Ruby YAML 解析；提取所有 `run:` 块后逐块执行 `bash -n` 均通过。Actions run `43371123167` 中 Android debug 构建与 artifact 上传成功；Release APK 重命名逻辑与 Gradle `splits.abi`/universal 配置一致。签名 Release 仍需干净 Ubuntu 构建确认四种产物及签名。
@@ -187,10 +187,9 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设�
 - Gradle `:app:packageDebug --dry-run` 默认任务图成功且不包含 `fixDebugFlutterKernelSdkHash`；显式 opt-in 任务图包含该任务；`:app:assembleRelease --dry-run` 包含 `validateReleaseSigning`。这些只验证任务图，不是 APK 构建或 hash 实际改写验收。
 - GitHub Actions run `43371123167` 成功，产出 master debug artifact；签名 Release tag 未触发，因为 repository-level Actions secrets 列表为空。旧 APK 证书一致性、既有 keystore secrets 与覆盖升级仍待仓库/设备验收。
 
-## 既有改动状态
+## 工作区状态
 
-下载器、缓存、安全 TLS、幂等重试限制、Hitomi 排除词、语言默认补全、Hitomi 搜索修复和版本页数展示均在当前未提交工作区。
-本轮没有重置或丢弃这些改动；`tool/` 仍为用户已有未跟踪内容，没有纳入修改或提交范围。
+审计中列出的代码修复已提交并推送；`master` 与 `origin/master` 同步。用户原有未跟踪的 `.ai-memory/` 和 `tool/` 未修改、未提交。
 
 ## 后续待办
 
@@ -200,5 +199,5 @@ Termux 原生 Flutter/Dart 与 Linux tester 仍不匹配；签名 Release、设�
 - EH cover 请求仍缺真实网络/目录重建集成验证；ZIP 插件长时间阻塞时的取消边界也需在设备或 CI 验证。
 - 真实设备验证已加载多页时切换语言、代理/TLS、下载暂停恢复、阅读与图片缓存恢复。
 - 核对现有 APK 证书指纹和 Release secrets；本地 dry-run 与全量单测不替代正式签名和覆盖升级验收。
-- 正式发布前增加版本号并创建新不可变 tag；不重推现有版本 tag。
+- 下一个正式版本发布前更新版本号并创建新的不可变 tag；不重推现有版本 tag。
 - 以真实 Ubuntu Release 构建确认 armeabi-v7a APK 是否生成并完成签名校验；若缺失，再依据目标设备支持策略调整 workflow 产物要求。

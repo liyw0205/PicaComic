@@ -60,6 +60,77 @@ void main() {
     }
   });
 
+  test('cancelling after archive redirect GET starts propagates cancellation',
+      () async {
+    final root = await Directory.systemTemp.createTemp('eh-link-get-cancel-');
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final redirectGetStarted = Completer<void>();
+    final redirectGetGate = Completer<void>();
+    var postCount = 0;
+    final serving = server.listen((request) async {
+      if (request.method == 'POST') {
+        postCount++;
+        request.response.headers.contentType = ContentType.html;
+        request.response.write(
+            '<a href="http://${server.address.address}:${server.port}/continue">go</a>');
+        await request.response.close();
+        return;
+      }
+
+      if (!redirectGetStarted.isCompleted) redirectGetStarted.complete();
+      try {
+        await redirectGetGate.future;
+        request.response.headers.contentType = ContentType.html;
+        request.response.write('<a href="/archive.zip">download</a>');
+        await request.response.close();
+      } on HttpException {
+        // The cancelled client closes the pending response.
+      }
+    });
+    final settings = List<String>.from(appdata.settings);
+    final previousProxy = proxyHttpOverrides;
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    if (previousCookieJar == null) {
+      SingleInstanceCookieJar('${root.path}/cookies.sqlite');
+    }
+    appdata.settings[8] = '';
+    appdata.settings[91] = '0';
+    proxyHttpOverrides = null;
+    final token = CancelToken();
+
+    try {
+      final network = EhNetwork.create();
+      final resolving = network.getArchiveDownloadLink(
+        'http://${server.address.address}:${server.port}/archive',
+        0,
+        cancelToken: token,
+      );
+      await redirectGetStarted.future.timeout(const Duration(seconds: 5));
+      expect(postCount, 1);
+
+      token.cancel('archive task stopped');
+      await expectLater(
+        resolving.timeout(const Duration(seconds: 3)),
+        throwsA(isA<DioException>().having(
+          (error) => error.type,
+          'type',
+          DioExceptionType.cancel,
+        )),
+      );
+    } finally {
+      if (!redirectGetGate.isCompleted) redirectGetGate.complete();
+      appdata.settings = settings;
+      proxyHttpOverrides = previousProxy;
+      if (previousCookieJar == null) {
+        SingleInstanceCookieJar.instance?.dispose();
+        SingleInstanceCookieJar.instance = null;
+      }
+      await serving.cancel();
+      await server.close(force: true);
+      await root.delete(recursive: true);
+    }
+  });
+
   test('stop while resolving proxy prevents the archive worker from spawning',
       () async {
     final root = await Directory.systemTemp.createTemp('eh-archive-spawn-');
