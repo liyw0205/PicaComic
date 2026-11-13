@@ -209,10 +209,8 @@ class ComicReadingPage extends StatelessWidget {
           DeviceOrientation.landscapeRight
         ]);
       } else if (appdata.settings[76] == "2") {
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown
-        ]);
+        SystemChrome.setPreferredOrientations(
+            [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
       }
       //进入阅读器时清除内存中的缓存, 并且增大限制
       BaseImageProvider.clearCache();
@@ -240,7 +238,8 @@ class ComicReadingPage extends StatelessWidget {
       ComicImage.clear();
       StateController.remove<ComicReadingPageLogic>();
       // 更新本地收藏
-      LocalFavoritesManager().onReadEnd(readingData.favoriteId, readingData.favoriteType);
+      LocalFavoritesManager()
+          .onReadEnd(readingData.favoriteId, readingData.favoriteType);
       // 保存历史记录
       if (history != null) {
         _updateHistory(logic, true);
@@ -467,15 +466,40 @@ class ComicReadingPage extends StatelessWidget {
   }
 
   void loadInfo(ComicReadingPageLogic logic) async {
-    logic.urls = [];
-    var res = await readingData.loadEp(logic.order);
-    if (res.error) {
-      logic.errorMessage = res.errorMessage;
-    } else {
-      logic.urls = res.data;
+    if (logic.loadInFlight) {
+      return;
     }
-    logic.isLoading = false;
-    logic.update();
+    logic.resetPreloadState();
+    logic.loadInFlight = true;
+    final loadGeneration = logic.loadGeneration;
+    final chapter = logic.order;
+    logic.urls = [];
+    logic.errorMessage = null;
+    try {
+      var res = await readingData.loadEp(chapter);
+      if (loadGeneration != logic.loadGeneration || logic.order != chapter) {
+        return;
+      }
+      if (res.error) {
+        logic.errorMessage = res.errorMessage;
+      } else {
+        logic.urls = res.data;
+      }
+      logic.isLoading = false;
+      logic.update();
+    } catch (e) {
+      if (loadGeneration != logic.loadGeneration || logic.order != chapter) {
+        return;
+      }
+      logic.errorMessage = e.toString();
+      logic.urls = [];
+      logic.isLoading = false;
+      logic.update();
+    } finally {
+      if (loadGeneration == logic.loadGeneration) {
+        logic.loadInFlight = false;
+      }
+    }
   }
 
   Widget buildEpsView() {

@@ -402,6 +402,94 @@ Future<bool> runExportData(bool includeDownload) async {
   return true;
 }
 
+FileSystemEntity? _importEntityAt(String entityPath) {
+  final type = FileSystemEntity.typeSync(entityPath, followLinks: false);
+  if (type == FileSystemEntityType.file) {
+    return File(entityPath);
+  }
+  if (type == FileSystemEntityType.directory) {
+    return Directory(entityPath);
+  }
+  return null;
+}
+
+void _deleteImportEntity(String entityPath) {
+  final entity = _importEntityAt(entityPath);
+  if (entity is File) {
+    entity.deleteSync();
+  } else if (entity is Directory) {
+    entity.deleteSync(recursive: true);
+  }
+}
+
+void _writeImportRollbackManifest(String manifestPath,
+    List<List<String>> rollbackEntries, List<String> createdTargets) {
+  File(manifestPath).writeAsStringSync(const JsonEncoder().convert({
+    "entries": rollbackEntries,
+    "created": createdTargets,
+  }));
+}
+
+void _restoreImportRollback(String manifestPath) {
+  final manifest = File(manifestPath);
+  if (!manifest.existsSync()) {
+    return;
+  }
+  final decoded = const JsonDecoder().convert(manifest.readAsStringSync());
+  if (decoded is! Map) {
+    throw const FormatException("Invalid import rollback manifest");
+  }
+
+  final created = (decoded["created"] as List<dynamic>? ?? const [])
+      .whereType<String>()
+      .toList();
+  final entries = (decoded["entries"] as List<dynamic>? ?? const [])
+      .whereType<List<dynamic>>()
+      .where((entry) => entry.length == 2)
+      .map((entry) => [entry[0].toString(), entry[1].toString()])
+      .toList();
+
+  // Remove targets that did not exist before the import first. Existing
+  // targets are restored below from their renamed backups.
+  for (final target in created.reversed) {
+    _deleteImportEntity(target);
+  }
+  for (final entry in entries.reversed) {
+    final backup = _importEntityAt(entry[1]);
+    if (backup == null) {
+      continue;
+    }
+    _deleteImportEntity(entry[0]);
+    Directory(entry[0]).parent.createSync(recursive: true);
+    backup.renameSync(entry[0]);
+  }
+}
+
+void _discardImportRollback(String manifestPath) {
+  final manifest = File(manifestPath);
+  if (!manifest.existsSync()) {
+    return;
+  }
+  final decoded = const JsonDecoder().convert(manifest.readAsStringSync());
+  if (decoded is Map) {
+    final entries = (decoded["entries"] as List<dynamic>? ?? const [])
+        .whereType<List<dynamic>>()
+        .where((entry) => entry.length == 2);
+    for (final entry in entries) {
+      try {
+        _deleteImportEntity(entry[1].toString());
+      } catch (_) {
+        // A stale backup is safer than discarding an otherwise valid import.
+      }
+    }
+  }
+  try {
+    manifest.deleteSync();
+  } catch (_) {
+    // Cleanup failure must not turn a completed import into a rollback.
+  }
+}
+
 /// import data, filePath is used for webdav
 Future<bool> importData([String? filePath]) async {
   final enableCheck = filePath != null;
@@ -423,55 +511,143 @@ Future<bool> importData([String? filePath]) async {
       return false;
     }
   }
+  final previousSettings = List<String>.from(appdata.settings);
+  final previousFirstUse = List<String>.from(appdata.firstUse);
+  final previousBlockingKeyword = List<String>.from(appdata.blockingKeyword);
+  final previousFavoriteTags = Set<String>.from(appdata.favoriteTags);
+
+  Future<void> restoreAppdataSnapshot() async {
+    appdata.settings = List<String>.from(previousSettings);
+    appdata.firstUse = List<String>.from(previousFirstUse);
+    appdata.blockingKeyword = List<String>.from(previousBlockingKeyword);
+    appdata.favoriteTags = Set<String>.from(previousFavoriteTags);
+    await appdata.writeData(false);
+  }
+
   SingleInstanceCookieJar.instance?.dispose();
   await DownloadManager().dispose();
   String data = '';
+  final tempPath = "$path/dataTemp-${DateTime.now().microsecondsSinceEpoch}";
+  final rollbackSuffix = '.restore-${DateTime.now().microsecondsSinceEpoch}';
+  final rollbackManifestPath = '$tempPath/import-rollback.json';
+  var computeFailed = false;
+  var initializationFailed = false;
   try {
     data = await compute<List<String>, String>((data) async {
       var path = data[0];
-      ZipFile.openAndExtract(data[1], "$path/dataTemp");
+      final tempPath = data[5];
+      final rollbackSuffix = data[6];
+      Directory(tempPath).createSync(recursive: true);
+      ZipFile.openAndExtract(data[1], tempPath);
       var downloadPath = Directory(data[2]);
-      List<FileSystemEntity> contents = Directory("$path/dataTemp").listSync();
+      List<FileSystemEntity> contents = Directory(tempPath).listSync();
       for (FileSystemEntity item in contents) {
         if (item is Directory) {
           if (item.name != "comic_source" && item.name != "download") {
-            item.renameSync('$path/dataTemp/download');
+            item.renameSync('$tempPath/download');
           }
         }
       }
-      final json = File("$path/dataTemp/appdata").readAsStringSync();
-      int fileVersion = int.parse(
-          ((const JsonDecoder().convert(json))["settings"] as List)
-                  .elementAtOrNull(46) ??
-              "1");
+      final json = File("$tempPath/appdata").readAsStringSync();
+      final decoded = const JsonDecoder().convert(json);
+      if (decoded is! Map || decoded["settings"] is! List) {
+        throw const FormatException("Invalid appdata payload");
+      }
+      final settings = decoded["settings"] as List;
+      final versionValue = settings.elementAtOrNull(46) ?? "1";
+      final fileVersion = int.tryParse(versionValue.toString());
+      if (fileVersion == null) {
+        throw const FormatException("Invalid appdata version");
+      }
       if (fileVersion <= int.parse(data[3]) && data[4] == "1") {
         return json;
       }
-      var localFavorite = File('$path/dataTemp/localFavorite');
-      if (localFavorite.existsSync()) {
-        localFavorite.copySync('$path/localFavorite');
-      } else {
-        var localFavorite2 = File('$path/dataTemp/local_favorite.db');
-        localFavorite2.copySync('$path/local_favorite_temp.db');
+      final rollbackEntries = <List<String>>[];
+      final createdTargets = <String>[];
+      final rollbackManifestPath = '$tempPath/import-rollback.json';
+
+      void markTarget(String targetPath) {
+        if (_importEntityAt(targetPath) == null &&
+            !createdTargets.contains(targetPath)) {
+          createdTargets.add(targetPath);
+        }
+        _writeImportRollbackManifest(
+            rollbackManifestPath, rollbackEntries, createdTargets);
       }
-      var history = File('$path/dataTemp/history.db');
-      if (history.existsSync()) {
-        history.copySync('$path/history_temp.db');
+
+      void backupEntity(String entityPath) {
+        final entity = _importEntityAt(entityPath);
+        if (entity == null) {
+          _writeImportRollbackManifest(
+              rollbackManifestPath, rollbackEntries, createdTargets);
+          return;
+        }
+        final backupPath = '$entityPath$rollbackSuffix';
+        _deleteImportEntity(backupPath);
+        Directory(backupPath).parent.createSync(recursive: true);
+        // Persist the intended move before renaming. If the process stops
+        // between rename and the next manifest write, recovery still knows
+        // where the original entity was moved.
+        rollbackEntries.add([entityPath, backupPath]);
+        _writeImportRollbackManifest(
+            rollbackManifestPath, rollbackEntries, createdTargets);
+        entity.renameSync(backupPath);
+        _writeImportRollbackManifest(
+            rollbackManifestPath, rollbackEntries, createdTargets);
       }
-      var comicSource = Directory('$path/dataTemp/comic_source');
-      if (comicSource.existsSync()) {
-        Directory("$path/comic_source").deleteSync(recursive: true);
-        comicSource.renameSync('$path/comic_source');
-      }
-      var cookies = File('$path/dataTemp/cookies.db');
-      if (cookies.existsSync()) {
-        cookies.copySync('$path/cookies.db');
-      }
-      var downloadData = Directory("$path/dataTemp/download");
-      if (downloadData.existsSync()) {
-        downloadPath.deleteSync(recursive: true);
-        downloadPath.createSync();
-        await moveDirectory(downloadData, downloadPath);
+
+      try {
+        var localFavorite = File('$tempPath/localFavorite');
+        if (localFavorite.existsSync()) {
+          markTarget('$path/localFavorite');
+          backupEntity('$path/localFavorite');
+          localFavorite.copySync('$path/localFavorite');
+        } else {
+          var localFavorite2 = File('$tempPath/local_favorite.db');
+          if (localFavorite2.existsSync()) {
+            markTarget('$path/local_favorite_temp.db');
+            backupEntity('$path/local_favorite_temp.db');
+            localFavorite2.copySync('$path/local_favorite_temp.db');
+          }
+        }
+
+        var history = File('$tempPath/history.db');
+        if (history.existsSync()) {
+          markTarget('$path/history_temp.db');
+          backupEntity('$path/history_temp.db');
+          history.copySync('$path/history_temp.db');
+        }
+
+        var comicSource = Directory('$tempPath/comic_source');
+        if (comicSource.existsSync()) {
+          markTarget('$path/comic_source');
+          backupEntity('$path/comic_source');
+          comicSource.renameSync('$path/comic_source');
+        }
+
+        var cookies = File('$tempPath/cookies.db');
+        if (cookies.existsSync()) {
+          markTarget('$path/cookies.db');
+          backupEntity('$path/cookies.db');
+          cookies.copySync('$path/cookies.db.importing');
+          File('$path/cookies.db.importing').renameSync('$path/cookies.db');
+        }
+
+        var downloadData = Directory("$tempPath/download");
+        if (downloadData.existsSync()) {
+          markTarget(downloadPath.path);
+          backupEntity(downloadPath.path);
+          downloadPath.createSync(recursive: true);
+          await moveDirectory(downloadData, downloadPath);
+        }
+      } catch (_) {
+        try {
+          _restoreImportRollback(rollbackManifestPath);
+        } catch (_) {
+          // Keep the original replacement error; any remaining restore paths
+          // are left for manual recovery.
+        }
+        rethrow;
       }
       return json;
     }, [
@@ -479,38 +655,113 @@ Future<bool> importData([String? filePath]) async {
       filePath,
       DownloadManager().path!,
       appdata.settings[46],
-      (enableCheck ? "1" : "0")
+      (enableCheck ? "1" : "0"),
+      tempPath,
+      rollbackSuffix,
     ]);
   } catch (e, s) {
+    computeFailed = true;
     Log.error("importData", "${safeNetworkError(e)}\n$s");
     return false;
   } finally {
-    await ComicSource.reload();
-    SingleInstanceCookieJar.instance?.init();
-    await DownloadManager().init();
-    Directory("$path/dataTemp").deleteSync(recursive: true);
+    try {
+      await ComicSource.reload();
+      SingleInstanceCookieJar.instance?.init();
+      await DownloadManager().init();
+    } catch (e, s) {
+      initializationFailed = true;
+      Log.error(
+          "importData",
+          "Failed to reinitialize after import: "
+              "${safeNetworkError(e)}\n$s");
+      if (!computeFailed) {
+        try {
+          _restoreImportRollback(rollbackManifestPath);
+        } catch (rollbackError, rollbackStack) {
+          Log.error(
+              "importData",
+              "Failed to rollback after reinitialization: "
+                  "${safeNetworkError(rollbackError)}\n$rollbackStack");
+        }
+      }
+    }
+    if (computeFailed || initializationFailed) {
+      try {
+        await Directory(tempPath).delete(recursive: true);
+      } catch (_) {
+        // Cleanup failure must not hide the import result.
+      }
+    }
   }
-  var json = const JsonDecoder().convert(data);
-  int fileVersion =
-      int.parse((json["settings"] as List).elementAtOrNull(46) ?? "1");
-  int appVersion = int.parse(appdata.settings[46]);
-  if (fileVersion <= appVersion && enableCheck) {
-    LogManager.addLog(
-        LogLevel.info,
-        "Appdata",
-        "The data file version is $fileVersion, while the app data version is "
-            "$appVersion\nStop importing data");
-  }
-  var dataReadRes = appdata.readDataFromJson(json);
-  if (!dataReadRes) {
-    LogManager.addLog(
-        LogLevel.error, "Appdata", "appdata.readDataFromJson(json) failed");
+  if (initializationFailed) {
     return false;
   }
-  await LocalFavoritesManager().readData();
-  LocalFavoritesManager().updateUI();
-  await HistoryManager().tryUpdateDb();
-  return true;
+  try {
+    var json = const JsonDecoder().convert(data);
+    int fileVersion =
+        int.parse((json["settings"] as List).elementAtOrNull(46) ?? "1");
+    int appVersion = int.parse(appdata.settings[46]);
+    if (fileVersion <= appVersion && enableCheck) {
+      LogManager.addLog(
+          LogLevel.info,
+          "Appdata",
+          "The data file version is $fileVersion, while the app data version is "
+              "$appVersion\nStop importing data");
+      _discardImportRollback(rollbackManifestPath);
+      return false;
+    }
+    var dataReadRes = appdata.readDataFromJson(json);
+    if (!dataReadRes) {
+      LogManager.addLog(
+          LogLevel.error, "Appdata", "appdata.readDataFromJson(json) failed");
+      throw const FormatException("Failed to apply imported appdata");
+    }
+    await LocalFavoritesManager().readData();
+    LocalFavoritesManager().updateUI();
+    await HistoryManager().tryUpdateDb();
+    // readDataFromJson schedules its serialized settings write internally;
+    // wait for it before deleting the pre-import rollback snapshot.
+    await appdata.waitForSettingsWrites();
+    _discardImportRollback(rollbackManifestPath);
+    return true;
+  } catch (e, s) {
+    LogManager.addLog(
+        LogLevel.error, "importData", "${safeNetworkError(e)}\n$s");
+    try {
+      SingleInstanceCookieJar.instance?.dispose();
+      await DownloadManager().dispose();
+      _restoreImportRollback(rollbackManifestPath);
+      await ComicSource.reload();
+      SingleInstanceCookieJar.instance?.init();
+      await DownloadManager().init();
+    } catch (rollbackError, rollbackStack) {
+      LogManager.addLog(
+          LogLevel.error,
+          "importData",
+          "Failed to rollback imported data: "
+              "${safeNetworkError(rollbackError)}\n$rollbackStack");
+    }
+    try {
+      await appdata.waitForSettingsWrites();
+      await restoreAppdataSnapshot();
+      // Re-read the restored files so an unawaited readData() from a failed
+      // import cannot leave the in-memory settings on the imported snapshot.
+      await appdata.readData();
+    } catch (restoreError, restoreStack) {
+      LogManager.addLog(
+          LogLevel.error,
+          "importData",
+          "Failed to restore appdata snapshot: "
+              "${safeNetworkError(restoreError)}\n$restoreStack");
+    }
+    return false;
+  } finally {
+    try {
+      await Directory(tempPath).delete(recursive: true);
+    } catch (_) {
+      // Cleanup failure must not hide the import result.
+    }
+  }
 }
 
 void saveLog(String log) async {

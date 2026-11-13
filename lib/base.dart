@@ -21,6 +21,8 @@ String get pathSep => Platform.pathSeparator;
 var downloadManager = DownloadManager();
 
 class Appdata {
+  Future<void> _settingsWriteQueue = Future<void>.value();
+
   ///搜索历史
   List<String> searchHistory = [];
   Set<String> favoriteTags = {};
@@ -166,28 +168,31 @@ class Appdata {
     return modes.indexOf(settings[1]);
   }
 
-  void setSearchMode(int mode) async {
+  Future<void> setSearchMode(int mode) async {
     var modes = ["dd", "da", "ld", "vd"];
     settings[1] = modes[mode];
-    var s = await SharedPreferences.getInstance();
-    await s.setStringList("settings", settings);
+    await updateSettings();
   }
 
   Future<void> readSettings(SharedPreferences s) async {
     var settingsFile = File("${App.dataPath}/settings");
-    List<String> st;
-    if (settingsFile.existsSync()) {
-      var json = jsonDecode(await settingsFile.readAsString());
-      if (json is List) {
-        st = List.from(json);
-      } else {
-        st = [];
-      }
-    } else {
-      st = s.getStringList("settings") ?? [];
-    }
+    final backupFile = File("${settingsFile.path}.bak");
+    final primary = await _readSettingsFile(settingsFile);
+    final backup = primary == null ? await _readSettingsFile(backupFile) : null;
+    final shared = _validSettingsList(s.getStringList("settings"));
+    final st = primary ?? backup ?? shared ?? <String>[];
     for (int i = 0; i < st.length && i < settings.length; i++) {
       settings[i] = st[i];
+    }
+    if (primary == null && backup != null) {
+      // Restore the primary file from the known-good backup before the next
+      // write rotates it again.
+      try {
+        await backupFile.copy(settingsFile.path);
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.warning, "Settings",
+            "Failed to restore settings backup.\n${safeNetworkError(e)}\n$s");
+      }
     }
     if (settings[26].length < 2) {
       settings[26] += "0";
@@ -247,10 +252,87 @@ class Appdata {
   }
 
   Future<void> updateSettings([bool syncData = true]) async {
-    var settingsFile = File("${App.dataPath}/settings");
-    await settingsFile.writeAsString(jsonEncode(settings));
-    if (syncData) {
-      Webdav.uploadData();
+    // Capture the state at the call site. Otherwise a later UI mutation can
+    // accidentally change which settings an earlier asynchronous write saves.
+    final snapshot = List<String>.unmodifiable(settings);
+    final operation = _settingsWriteQueue.then((_) async {
+      await _writeSettingsAtomically(snapshot);
+      if (syncData) {
+        // Keep the upload outside the write operation. WebDAV commits its
+        // version by writing settings again, which must not deadlock this
+        // serialized persistence queue.
+        Webdav.uploadData();
+      }
+    });
+    _settingsWriteQueue = operation.then<void>(
+      (_) {},
+      onError: (_, __) {},
+    );
+    return operation;
+  }
+
+  /// Wait until settings writes already requested by an import or UI update
+  /// have reached disk before a dependent sync operation proceeds.
+  Future<void> waitForSettingsWrites() => _settingsWriteQueue;
+
+  Future<List<String>?> _readSettingsFile(File file) async {
+    if (!await file.exists()) {
+      return null;
+    }
+    try {
+      return _validSettingsList(jsonDecode(await file.readAsString()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<String>? _validSettingsList(Object? value) {
+    if (value is! List || value.isEmpty) {
+      return null;
+    }
+    if (value.any((item) => item is! String)) {
+      return null;
+    }
+    return List<String>.from(value);
+  }
+
+  Future<void> _writeSettingsAtomically(List<String> snapshot) async {
+    final settingsFile = File("${App.dataPath}/settings");
+    final tempFile = File("${settingsFile.path}.tmp");
+    final backupFile = File("${settingsFile.path}.bak");
+    await settingsFile.parent.create(recursive: true);
+    try {
+      final sink = tempFile.openWrite();
+      try {
+        sink.write(jsonEncode(snapshot));
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+
+      // Keep the last known-good file until the complete replacement is
+      // ready. A failed write therefore leaves both the original and backup
+      // readable.
+      // Never replace a known-good backup with a truncated or malformed
+      // primary file left by an earlier interrupted write.
+      if (await _readSettingsFile(settingsFile) != null) {
+        await settingsFile.copy(backupFile.path);
+      }
+      if (Platform.isWindows && await settingsFile.exists()) {
+        await settingsFile.delete();
+      }
+      await tempFile.rename(settingsFile.path);
+    } finally {
+      if (await tempFile.exists()) {
+        try {
+          await tempFile.delete();
+        } catch (e, s) {
+          // Cleanup must not hide a write or replacement error. The next
+          // write safely truncates this fixed-name temporary file.
+          LogManager.addLog(LogLevel.warning, "Settings",
+              "Failed to remove temporary settings file.\n${safeNetworkError(e)}\n$s");
+        }
+      }
     }
   }
 
@@ -266,13 +348,13 @@ class Appdata {
   }
 
   Future<void> writeData([bool sync = true]) async {
-    if (sync) {
-      Webdav.uploadData();
-    }
     var s = await SharedPreferences.getInstance();
-    await updateSettings();
     await s.setStringList("blockingKeyword", blockingKeyword);
     await s.setStringList("firstUse", firstUse);
+    await updateSettings(false);
+    if (sync) {
+      await Webdav.uploadData();
+    }
   }
 
   Future<bool> readData() async {
@@ -343,11 +425,22 @@ var notifications = Notifications();
 
 /// clear all data
 Future<void> clearAppdata() async {
+  // Do not delete the files while a serialized settings write is still
+  // pending; otherwise that write can resurrect the data just cleared.
+  final oldAppdata = appdata;
+  await oldAppdata._settingsWriteQueue;
+  await Webdav.waitForIdle();
   var s = await SharedPreferences.getInstance();
   await s.clear();
   var settingsFile = File("${App.dataPath}/settings");
   if (await settingsFile.exists()) {
     await settingsFile.delete();
+  }
+  for (final suffix in ['.bak', '.tmp']) {
+    final file = File("${settingsFile.path}$suffix");
+    if (await file.exists()) {
+      await file.delete();
+    }
   }
   appdata.history.clearHistory();
   appdata = Appdata();

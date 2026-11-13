@@ -21,7 +21,6 @@ const Set<PointerDeviceKind> _kTouchLikeDeviceTypes = <PointerDeviceKind>{
   PointerDeviceKind.unknown
 };
 
-
 extension ImageExt on ComicReadingPage {
   /// build comic image
   Widget buildComicView(
@@ -64,7 +63,9 @@ extension ImageExt on ComicReadingPage {
     }
 
     final decoration = BoxDecoration(
-      color: useDarkBackground ? Colors.black : Theme.of(context).colorScheme.surface,
+      color: useDarkBackground
+          ? Colors.black
+          : Theme.of(context).colorScheme.surface,
     );
 
     Widget buildType123() {
@@ -81,8 +82,9 @@ extension ImageExt on ComicReadingPage {
             imageProvider = createImageProvider(type, logic, index - 1, target);
           } else {
             return PhotoViewGalleryPageOptions.customChild(
-                scaleStateController: PhotoViewScaleStateController(),
-                child: const SizedBox(),);
+              scaleStateController: PhotoViewScaleStateController(),
+              child: const SizedBox(),
+            );
           }
 
           precacheComicImage(logic, context, index, target);
@@ -116,7 +118,10 @@ extension ImageExt on ComicReadingPage {
                         child: Center(
                           child: Text(
                             error.toString(),
-                            style: TextStyle(color: appdata.appSettings.useDarkBackground ? Colors.white : null),
+                            style: TextStyle(
+                                color: appdata.appSettings.useDarkBackground
+                                    ? Colors.white
+                                    : null),
                             maxLines: 3,
                           ),
                         ),
@@ -189,19 +194,17 @@ extension ImageExt on ComicReadingPage {
       );
     }
 
-    Widget buildComicImageOrEmpty({
-      required int imageIndex,
-      required BoxFit fit,
-      required Alignment alignment
-    }) {
-      if(imageIndex < 0 || imageIndex >= logic.urls.length){
+    Widget buildComicImageOrEmpty(
+        {required int imageIndex,
+        required BoxFit fit,
+        required Alignment alignment}) {
+      if (imageIndex < 0 || imageIndex >= logic.urls.length) {
         return const SizedBox();
       }
 
       return ComicImage(
         key: ValueKey(imageIndex),
-        image: createImageProvider(
-            type, logic, imageIndex, target),
+        image: createImageProvider(type, logic, imageIndex, target),
         fit: fit,
         alignment: alignment,
       );
@@ -210,9 +213,9 @@ extension ImageExt on ComicReadingPage {
     Widget buildType56() {
       int calcItemCount() {
         int count = logic.urls.length ~/ 2;
-        if(logic.urls.length % 2 != 0) {
+        if (logic.urls.length % 2 != 0) {
           count++;
-        } else if(logic.singlePageForFirstScreen) {
+        } else if (logic.singlePageForFirstScreen) {
           count++;
         }
         return count + 2;
@@ -233,17 +236,14 @@ extension ImageExt on ComicReadingPage {
           logic.photoViewControllers[index] ??= PhotoViewController();
 
           int firstImage = index * 2 - 2;
-          if(firstImage % 2 != 0) {
+          if (firstImage % 2 != 0) {
             firstImage++;
           }
-          if(logic.singlePageForFirstScreen) {
+          if (logic.singlePageForFirstScreen) {
             firstImage--;
           }
-          var images = <int>[
-            firstImage,
-            firstImage+1
-          ];
-          if(logic.readingMethod == ReadingMethod.twoPageReversed) {
+          var images = <int>[firstImage, firstImage + 1];
+          if (logic.readingMethod == ReadingMethod.twoPageReversed) {
             images = images.reversed.toList();
           }
 
@@ -278,7 +278,8 @@ extension ImageExt on ComicReadingPage {
             logic.jumpToLastChapter();
           } else if (i == calcItemCount() - 1) {
             if (!logic.data.hasEp || logic.order == logic.data.eps?.length) {
-              logic.pageController.jumpByDeviceType(logic.pageController.page!.round() - 1);
+              logic.pageController
+                  .jumpByDeviceType(logic.pageController.page!.round() - 1);
               return;
             }
             logic.jumpToNextChapter();
@@ -342,7 +343,7 @@ extension ImageExt on ComicReadingPage {
             logic.photoViewController.updateMultiple(
                 position: logic.photoViewController.position -
                     Offset(0, pointerSignal.scrollDelta.dy));
-          } else if (!App.isMacOS){
+          } else if (!App.isMacOS) {
             logic.scrollController.smoothTo(pointerSignal.scrollDelta.dy);
           }
         }
@@ -393,8 +394,8 @@ extension ImageExt on ComicReadingPage {
   /// create a image provider
   ImageProvider createImageProvider(
       ReadingType type, ComicReadingPageLogic logic, int index, String target) {
-
-    return logic.data.createImageProvider(logic.order, index, logic.urls[index]);
+    return logic.data
+        .createImageProvider(logic.order, index, logic.urls[index]);
   }
 
   /// check current location of [PageView], update location when it is out of range.
@@ -438,22 +439,42 @@ extension ImageExt on ComicReadingPage {
   void precacheComicImage(ComicReadingPageLogic logic, BuildContext context,
       int index, String target) {
     if (logic.requestedLoadingItems.length != logic.length) {
-      logic.requestedLoadingItems = List.filled(logic.length + 1, false);
+      logic.requestedLoadingItems = List.filled(logic.length, false);
     }
-    int precacheNum = int.parse(appdata.settings[28]) + index;
-    for (; index < precacheNum; index++) {
-      if (index >= logic.urls.length || logic.requestedLoadingItems[index]) {
+    final generation = logic.preloadGeneration;
+    final pageCount = int.tryParse(appdata.settings[28]) ?? 0;
+    final firstEnd = (index + pageCount).clamp(0, logic.urls.length);
+    void request(int candidate) {
+      if (candidate < 0 ||
+          candidate >= logic.urls.length ||
+          logic.requestedLoadingItems[candidate]) {
         return;
       }
-      precacheImage(createImageProvider(type, logic, index, target), context);
+      logic.requestedLoadingItems[candidate] = true;
+      try {
+        unawaited(precacheImage(
+          createImageProvider(type, logic, candidate, target),
+          context,
+        ).catchError((_) {
+          if (generation == logic.preloadGeneration &&
+              candidate < logic.requestedLoadingItems.length) {
+            logic.requestedLoadingItems[candidate] = false;
+          }
+        }));
+      } catch (_) {
+        if (generation == logic.preloadGeneration) {
+          logic.requestedLoadingItems[candidate] = false;
+        }
+      }
+    }
+
+    for (var candidate = index; candidate < firstEnd; candidate++) {
+      request(candidate);
     }
     if (!ImageManager.haveTask) {
-      precacheNum += 3;
-      for (; index < precacheNum; index++) {
-        if (index >= logic.urls.length || logic.requestedLoadingItems[index]) {
-          return;
-        }
-        precacheImage(createImageProvider(type, logic, index, target), context);
+      final secondEnd = (firstEnd + 3).clamp(0, logic.urls.length);
+      for (var candidate = firstEnd; candidate < secondEnd; candidate++) {
+        request(candidate);
       }
     }
   }

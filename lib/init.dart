@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:app_links/app_links.dart';
@@ -103,60 +104,7 @@ Future<void> _checkOldData() async {
     }
     appdata.blockingKeyword.removeWhere((value) => value.isEmpty);
 
-    if (io.Directory("${App.dataPath}/comic_source/cookies/").existsSync() ||
-        io.Directory("${App.dataPath}/eh_cookies").existsSync() ||
-        io.Directory("${App.dataPath}/comic_source/cookies").existsSync()) {
-      // cookies, old version use package cookie_jar
-      final cookieJars = [
-        PersistCookieJar(storage: FileStorage("${App.dataPath}/cookies")),
-        PersistCookieJar(storage: FileStorage("${App.dataPath}/eh_cookies")),
-        PersistCookieJar(
-            storage: FileStorage("${App.dataPath}/comic_source/cookies/"))
-      ];
-      var cookies = <io.Cookie>[];
-      for (var cookie in (await cookieJars[0]
-          .loadForRequest(Uri.parse("https://nhentai.net")))) {
-        cookie.domain ??= ".nhentai.net";
-        cookies.add(cookie);
-      }
-      for (var cookie in (await cookieJars[1]
-          .loadForRequest(Uri.parse("https://e-hentai.org")))) {
-        cookie.domain ??= ".e-hentai.org";
-        cookies.add(cookie);
-      }
-      for (var cookie in (await cookieJars[1]
-          .loadForRequest(Uri.parse("https://exhentai.org")))) {
-        cookie.domain ??= ".exhentai.org";
-        cookies.add(cookie);
-      }
-      try {
-        for (var file in io.Directory("${App.dataPath}/comic_source/cookies/")
-            .listSync()) {
-          var domain = file.path.split("/").last;
-          if (domain == '.domains' || domain == '.index') {
-            continue;
-          }
-          if (domain.startsWith('.')) {
-            domain = domain.substring(1);
-          }
-          for (var cookie in (await cookieJars[2]
-              .loadForRequest(Uri.parse("https://$domain")))) {
-            cookie.domain ??= ".$domain";
-            cookies.add(cookie);
-          }
-        }
-      } finally {}
-      if (io.Directory("${App.dataPath}/cookies").existsSync()) {
-        io.Directory("${App.dataPath}/cookies").deleteSync(recursive: true);
-      }
-      if (io.Directory("${App.dataPath}/eh_cookies").existsSync()) {
-        io.Directory("${App.dataPath}/eh_cookies").deleteSync(recursive: true);
-      }
-      if (io.Directory("${App.dataPath}/comic_source/cookies").existsSync()) {
-        io.Directory("${App.dataPath}/comic_source/cookies")
-            .deleteSync(recursive: true);
-      }
-    }
+    await migrateLegacyCookies(App.dataPath);
 
     if (io.File("${App.dataPath}/cache.json").existsSync()) {
       io.File("${App.dataPath}/cache.json").deleteIgnoreError();
@@ -173,6 +121,157 @@ Future<void> _checkOldData() async {
   } catch (e, s) {
     LogManager.addLog(LogLevel.error, "Init",
         "Check old data failed!\n${safeNetworkError(e)}\n$s");
+  }
+}
+
+/// Migrates cookie_jar files into the SQLite jar. Legacy files are removed
+/// only after the destination has been written and read back successfully.
+/// Returning false leaves every source directory in place for a later retry.
+Future<bool> migrateLegacyCookies(String dataPath,
+    {CookieJarSql? destination}) async {
+  final sourcePaths = [
+    '${dataPath}/cookies',
+    '${dataPath}/eh_cookies',
+    '${dataPath}/comic_source/cookies',
+  ];
+  final existingPaths = sourcePaths
+      .map(io.Directory.new)
+      .where((directory) => directory.existsSync())
+      .toList(growable: false);
+  if (existingPaths.isEmpty) {
+    return true;
+  }
+
+  try {
+    // Only initialize jars for directories that actually exist. FileStorage
+    // creates its directory on first read, which would otherwise make a
+    // failed migration look successful and erase a newly-created directory.
+    final cookies = <io.Cookie>[];
+    final nhentaiPath = '${dataPath}/cookies';
+    if (io.Directory(nhentaiPath).existsSync()) {
+      final jar = PersistCookieJar(storage: FileStorage(nhentaiPath));
+      for (var cookie
+          in await jar.loadForRequest(Uri.parse('https://nhentai.net'))) {
+        cookie.domain ??= '.nhentai.net';
+        cookies.add(cookie);
+      }
+    }
+
+    final ehPath = '${dataPath}/eh_cookies';
+    if (io.Directory(ehPath).existsSync()) {
+      final jar = PersistCookieJar(storage: FileStorage(ehPath));
+      for (var cookie
+          in await jar.loadForRequest(Uri.parse('https://e-hentai.org'))) {
+        cookie.domain ??= '.e-hentai.org';
+        cookies.add(cookie);
+      }
+      for (var cookie
+          in await jar.loadForRequest(Uri.parse('https://exhentai.org'))) {
+        cookie.domain ??= '.exhentai.org';
+        cookies.add(cookie);
+      }
+    }
+
+    final comicCookiesPath = '${dataPath}/comic_source/cookies';
+    final comicCookiesDirectory = io.Directory(comicCookiesPath);
+    if (comicCookiesDirectory.existsSync()) {
+      final jar = PersistCookieJar(
+          storage:
+              FileStorage('$comicCookiesPath${io.Platform.pathSeparator}'));
+      final domains = <String>{};
+      // cookie_jar v4 stores host files below ie*_ps*/ and keeps domain
+      // cookies in .domains. Read both metadata and direct host files so this
+      // also handles older layouts where files lived at the root.
+      for (var entry in comicCookiesDirectory.listSync(recursive: true)) {
+        if (entry is! io.File) {
+          continue;
+        }
+        final name = entry.path.split(io.Platform.pathSeparator).last;
+        if (name == '.domains') {
+          try {
+            final value = jsonDecode(await entry.readAsString());
+            if (value is Map) {
+              domains.addAll(value.keys.whereType<String>());
+            }
+          } catch (_) {
+            // A corrupt metadata file should not prevent host cookies from
+            // being migrated; PersistCookieJar will handle it on load.
+          }
+          continue;
+        }
+        if (name == '.index') {
+          try {
+            final value = jsonDecode(await entry.readAsString());
+            if (value is List) {
+              domains.addAll(value.whereType<String>());
+            }
+          } catch (_) {
+            // See the .domains handling above.
+          }
+          continue;
+        }
+        domains.add(name);
+      }
+      for (var domain in domains) {
+        domain = domain.trim().replaceFirst(RegExp(r'^\.'), '');
+        if (domain.isEmpty) {
+          continue;
+        }
+        final uri = Uri.tryParse('https://$domain');
+        if (uri == null || uri.host.isEmpty) {
+          continue;
+        }
+        for (var cookie in await jar.loadForRequest(uri)) {
+          cookie.domain ??= '.$domain';
+          cookies.add(cookie);
+        }
+      }
+    }
+
+    final target = destination ?? SingleInstanceCookieJar.instance;
+    if (target == null) {
+      throw StateError('Cookie jar is not initialized');
+    }
+
+    // SQLite uses (name, domain, path) as the key. Keep the last value from
+    // the legacy jars, matching INSERT OR REPLACE semantics.
+    final uniqueCookies = <String, io.Cookie>{};
+    for (var cookie in cookies) {
+      var domain = cookie.domain;
+      if (domain == null || domain.isEmpty) {
+        throw StateError('Legacy cookie has no domain');
+      }
+      if (!domain.startsWith('.')) {
+        // PersistCookieJar returns null for host-only cookies; all cookies
+        // with a domain at this point came from a shared-domain store.
+        domain = '.$domain';
+        cookie.domain = domain;
+      }
+      if (cookie.path == null ||
+          cookie.path!.isEmpty ||
+          !cookie.path!.startsWith('/')) {
+        cookie.path = '/';
+      }
+      final key = '${cookie.name}\u0000$domain\u0000${cookie.path}';
+      uniqueCookies[key] = cookie;
+    }
+    final migratedCookies = uniqueCookies.values.toList(growable: false);
+    target.saveCookies(migratedCookies);
+    if (migratedCookies.any((cookie) => !target.containsCookie(cookie))) {
+      throw StateError('Cookie migration read-back verification failed');
+    }
+
+    for (var directory in existingPaths) {
+      await directory.delete(recursive: true);
+    }
+    return true;
+  } catch (e, s) {
+    LogManager.addLog(
+        LogLevel.error,
+        'Init',
+        'Cookie migration failed; legacy files were retained.\n'
+            '${safeNetworkError(e)}\n$s');
+    return false;
   }
 }
 
