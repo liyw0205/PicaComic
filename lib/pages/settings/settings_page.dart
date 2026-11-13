@@ -639,6 +639,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry {
           style: TextStyle(fontSize: 16),
         ),
         Text("Pica Comic是一个完全免费的漫画阅读APP".tl),
+        Text("仅用于学习交流".tl),
         const SizedBox(
           height: 16,
         ),

@@ -217,7 +217,11 @@ class _AppInfoState extends State<_AppInfo> with _WelcomePageComponents {
     var content = '';
     content += "感谢使用本软件, 请注意:".tl;
     content += '\n';
+    content += "本App的开发目的仅为学习交流与个人兴趣, 显示的任何内容均来自网络, 与开发者无关".tl;
+    content += '\n';
     content += "如果在使用中发现问题, 请先确认是否为自己的设备问题, 然后再进行反馈".tl;
+    content += '\n';
+    content += "开发者不对能否解决问题负责".tl;
     return content;
   }
 }
