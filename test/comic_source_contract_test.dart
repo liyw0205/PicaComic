@@ -319,4 +319,17 @@ void main() {
       throwsA(isA<ComicSourceParseException>()),
     );
   });
+
+  test('custom source size gate uses normalized UTF-8 bytes', () {
+    final withinLimit = 'x\r\n' * (ComicSourceParser.maxSourceBytes ~/ 2);
+    expect(() => ComicSourceParser.validateSourceSize(withinLimit),
+        returnsNormally);
+
+    final oversizedAfterNormalization =
+        'x' * (ComicSourceParser.maxSourceBytes + 1);
+    expect(
+      () => ComicSourceParser.validateSourceSize(oversizedAfterNormalization),
+      throwsA(isA<ComicSourceParseException>()),
+    );
+  });
 }

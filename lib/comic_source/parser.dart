@@ -14,12 +14,25 @@ class ComicSourceParseException implements Exception {
 class ComicSourceParser {
   static const maxSourceBytes = 1024 * 1024;
 
+  /// Normalizes source text before both validation and persistence so reloads
+  /// use the same byte budget as the initial parse.
+  static String normalizeSource(String js) => js.replaceAll("\r\n", "\n");
+
+  /// Checks the normalized UTF-8 representation used on disk and at runtime.
+  static void validateSourceSize(String js) {
+    if (utf8.encode(normalizeSource(js)).length > maxSourceBytes) {
+      throw ComicSourceParseException("Source file exceeds 1 MiB limit");
+    }
+  }
+
   /// comic source key
   String? _key;
 
   String? _name;
 
   Future<ComicSource> createAndParse(String js, String fileName) async {
+    js = normalizeSource(js);
+    validateSourceSize(js);
     if (!fileName.endsWith("js")) {
       fileName = "$fileName.js";
     }
@@ -43,10 +56,8 @@ class ComicSourceParser {
   Future<ComicSource> parse(String js, String filePath) async {
     _key = null;
     _name = null;
-    js = js.replaceAll("\r\n", "\n");
-    if (utf8.encode(js).length > maxSourceBytes) {
-      throw ComicSourceParseException("Source file exceeds 1 MiB limit");
-    }
+    js = normalizeSource(js);
+    validateSourceSize(js);
     var line1 = js
         .split('\n')
         .firstWhereOrNull((element) => element.removeAllBlank.isNotEmpty);
