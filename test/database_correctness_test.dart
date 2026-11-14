@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
@@ -72,14 +73,150 @@ void main() {
     await manager.deleteFolder(similarPrefix);
   });
 
+  test('folder deletion rolls back metadata when a later delete fails',
+      () async {
+    final manager = LocalFavoritesManager.create();
+    final path = '${directory.path}/folder-delete-rollback.db';
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('kept');
+    manager.insertFolderSync(FolderSync(folder, 'source', '{}'));
+    manager.updateOrder({folder: 12});
+    await manager.addComic(folder, favorite('kept-comic', 0), null, false);
+    final fixture = sqlite3.open(path);
+    fixture.execute('''
+      create trigger reject_folder_delete before delete on folder_order
+      when old.folder_name = 'kept'
+      begin select raise(abort, 'injected metadata delete failure'); end;
+    ''');
+    fixture.dispose();
+
+    try {
+      await expectLater(
+          manager.deleteFolder(folder), throwsA(isA<SqliteException>()));
+      expect(manager.folderNames, contains(folder));
+      expect(manager.comicExists(folder, 'kept-comic', 0), isTrue);
+      expect(manager.folderSync.single.folderName, folder);
+      final saved = sqlite3.open(path, mode: OpenMode.readOnly);
+      expect(
+          saved.select('select order_value from folder_order;').single[0], 12);
+      saved.dispose();
+    } finally {
+      manager.close();
+    }
+  });
+
+  test('folder deletion cannot remove metadata tables', () async {
+    final manager = LocalFavoritesManager.create();
+    await manager.init(
+        databasePath: '${directory.path}/folder-delete-reserved.db',
+        importLegacy: false);
+    final folder = manager.createFolder('kept');
+    await manager.addComic(folder, favorite('kept-comic', 0), null, false);
+    try {
+      for (final name in ['folder_sync', 'folder_order', 'missing']) {
+        await expectLater(manager.deleteFolder(name), throwsStateError);
+      }
+      expect(manager.folderSync, isEmpty);
+      expect(manager.comicExists(folder, 'kept-comic', 0), isTrue);
+    } finally {
+      manager.close();
+    }
+  });
+
+  test('deleting a favorite retains a cover used by another identity',
+      () async {
+    final manager = LocalFavoritesManager.create();
+    await manager.init(
+        databasePath: '${directory.path}/shared-cover.db', importLegacy: false);
+    final folder = manager.createFolder('shared-cover');
+    final otherFolder = manager.createFolder('other-cover');
+    const coverPath = 'https://example.invalid/shared-cover.jpg';
+    final first = favorite('first', 0)..coverPath = coverPath;
+    final second = favorite('second', 1)..coverPath = coverPath;
+    await manager.addComic(folder, first, null, false);
+    await manager.addComic(otherFolder, second, null, false);
+    final hash = md5.convert(utf8.encode(coverPath));
+    final cover = File('${directory.path}/favoritesCover/$hash.jpg');
+    await cover.parent.create(recursive: true);
+    await cover.writeAsBytes([1, 2, 3]);
+
+    try {
+      await manager.deleteComic(folder, first);
+      expect(cover.existsSync(), isTrue);
+      expect(manager.comicExists(otherFolder, second.target, second.type.key),
+          isTrue);
+      await manager.deleteComic(otherFolder, second);
+      expect(cover.existsSync(), isFalse);
+    } finally {
+      manager.close();
+    }
+  });
+
+  test('cover cleanup failure does not prevent publishing a deletion',
+      () async {
+    final manager = LocalFavoritesManager.create();
+    await manager.init(
+        databasePath: '${directory.path}/cover-delete-failure.db',
+        importLegacy: false);
+    final folder = manager.createFolder('cover-failure');
+    final item = favorite('deleted', 0)
+      ..coverPath = 'https://example.invalid/cannot-delete.jpg';
+    await manager.addComic(folder, item, null, false);
+    final hash = md5.convert(utf8.encode(item.coverPath));
+    final cover = Directory('${directory.path}/favoritesCover/$hash.jpg');
+    await cover.create(recursive: true);
+    await File('${cover.path}/sentinel').writeAsBytes([1, 2, 3]);
+
+    try {
+      await DataMaintenance.run(() async {
+        await manager.deleteComic(folder, item);
+        expect(
+            manager.comicExists(folder, item.target, item.type.key), isFalse);
+        expect(DataMaintenance.currentStats?.syncRequests, 1);
+        expect(DataMaintenance.currentStats?.suppressedSyncRequests, 1);
+      }, suppressSync: true);
+      expect(cover.existsSync(), isTrue);
+    } finally {
+      manager.close();
+    }
+  });
+
   test('history removal binds quote-bearing targets', () async {
     final manager = HistoryManager();
-    final target = "comic's target";
+    const target = "comic's target";
     await manager.addHistory(History(
         HistoryType.picacg, DateTime.now(), 'Title', '', '', 0, 0, target));
     manager.remove(target);
     await DataMaintenance.waitForIdle();
     expect(manager.findSync(target), isNull);
+  });
+
+  test('history deletions publish and keep the local cache coherent', () async {
+    final manager = HistoryManager.create();
+    await manager.init(
+        databasePath: '${directory.path}/history-delete-sync.db',
+        importLegacy: false);
+    const target = 'delete-target';
+    try {
+      await manager.addHistory(History(
+          HistoryType.picacg, DateTime.now(), 'Title', '', '', 0, 0, target));
+      await DataMaintenance.run<void>(() => manager.remove(target),
+          suppressSync: true);
+      expect(manager.findSync(target), isNull);
+      expect(DataMaintenance.lastStats?.syncRequests, 1);
+      expect(DataMaintenance.lastStats?.suppressedSyncRequests, 1);
+      expect(DataMaintenance.lastStats?.unsuppressedSyncRequests, 0);
+
+      await manager.addHistory(History(HistoryType.picacg, DateTime.now(),
+          'Title again', '', '', 0, 0, target));
+      await DataMaintenance.run<void>(() => manager.clearHistory(),
+          suppressSync: true);
+      expect(manager.findSync(target), isNull);
+      expect(DataMaintenance.lastStats?.syncRequests, 1);
+      expect(DataMaintenance.lastStats?.suppressedSyncRequests, 1);
+    } finally {
+      manager.close();
+    }
   });
 
   test('history pages use a stable time and target order', () async {

@@ -449,20 +449,20 @@ class HistoryManager {
         await saveData();
       });
 
-  void clearHistory() {
-    if (_deferWrite(clearHistory)) return;
-    _db.execute("delete from history;");
-    _cachedHistory.clear();
-  }
+  Future<void> clearHistory() => DataMaintenance.run(() async {
+        _db.execute("delete from history;");
+        _cachedHistory.clear();
+        await saveData();
+      });
 
-  void remove(String id) {
-    if (_deferWrite(() => remove(id))) return;
-    _db.execute("""
-      delete from history
-      where target == ?;
-    """, [id]);
-    _rememberHistoryPresence(id, false);
-  }
+  Future<void> remove(String id) => DataMaintenance.run(() async {
+        _db.execute("""
+          delete from history
+          where target == ?;
+        """, [id]);
+        _rememberHistoryPresence(id, false);
+        await saveData();
+      });
 
   Future<History?> find(String target) async {
     return findSync(target);

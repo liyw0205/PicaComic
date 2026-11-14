@@ -897,24 +897,43 @@ class LocalFavoritesManager {
     if (DataMaintenance.busy) {
       return DataMaintenance.run<void>(() => deleteFolder(name));
     }
-    _modifiedAfterLastCache = true;
-    _db.execute("""
+    if (!folderNames.contains(name)) {
+      throw StateError('Folder does not exist: $name');
+    }
+    _transaction(() {
+      _db.execute("""
       delete from folder_sync where folder_name == ?;
     """, [name]);
-    _db.execute("""
+      _db.execute("""
       delete from folder_order where folder_name == ?;
     """, [name]);
-    _db.execute("""
+      _db.execute("""
       drop table ${_identifier(name)};
     """);
+    });
+    _modifiedAfterLastCache = true;
     await saveData();
   }
 
   Future<void> checkAndDeleteCover(FavoriteItem item) async {
-    if ((await find(item.target, item.type)).isEmpty) {
+    // Cache files are shared by cover URL, even across different comics.
+    for (final folder in folderNames) {
+      if (_db.select('''
+        select 1 from ${_identifier(folder)} where cover_path == ? limit 1;
+      ''', [item.coverPath]).isNotEmpty) {
+        return;
+      }
+    }
+    try {
       final hash = md5.convert(utf8.encode(item.coverPath)).toString();
       final file = File('${App.dataPath}/favoritesCover/$hash.jpg');
       if (file.existsSync()) file.deleteSync();
+    } on FileSystemException catch (error, stack) {
+      LogManager.addLog(
+          LogLevel.warning,
+          'LocalFavoritesManager',
+          'Failed to remove unused favorite cover; retaining the cache file.\n'
+              '${safeNetworkError(error)}\n$stack');
     }
   }
 
