@@ -91,6 +91,47 @@ class ComicSourceContract {
       violations.add(const ComicSourceContractViolation(
           'missing-search-loader', 'search metadata has no page loader'));
     }
+    final searchOptions = source.searchPageData?.searchOptions ?? const [];
+    for (var index = 0; index < searchOptions.length; index++) {
+      if (searchOptions[index].options.isEmpty) {
+        violations.add(ComicSourceContractViolation('empty-search-options',
+            'search option $index has no selectable values'));
+      }
+    }
+
+    final categoryComics = source.categoryComicsData;
+    if (categoryComics != null) {
+      for (var index = 0; index < categoryComics.options.length; index++) {
+        if (categoryComics.options[index].options.isEmpty) {
+          violations.add(ComicSourceContractViolation('empty-category-options',
+              'category option $index has no selectable values'));
+        }
+      }
+    }
+
+    final category = source.categoryData;
+    if (category?.enableRankingPage == true) {
+      if (categoryComics == null) {
+        violations.add(const ComicSourceContractViolation(
+            'missing-category-comics',
+            'ranking-enabled category has no comic loader'));
+      } else if (categoryComics.rankingData == null) {
+        violations.add(const ComicSourceContractViolation(
+            'missing-ranking-loader',
+            'ranking-enabled category has no ranking loader'));
+      } else if (categoryComics.rankingData!.options.isEmpty) {
+        violations.add(const ComicSourceContractViolation(
+            'empty-ranking-options',
+            'ranking-enabled category has no selectable values'));
+      }
+    }
+
+    final favorite = source.favoriteData;
+    if (favorite != null && favorite.key != source.key) {
+      violations.add(ComicSourceContractViolation('favorite-key-mismatch',
+          'favorite key ${favorite.key} does not match source ${source.key}'));
+    }
+
     // CategoryComicsData.load and AccountConfig.logout are required by the
     // public API, so their presence is enforced by the type system.
     return violations;
