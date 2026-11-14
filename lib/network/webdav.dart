@@ -4,6 +4,7 @@ import 'dart:io' as io;
 import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/foundation/secret_store.dart';
 import 'package:pica_comic/network/sync_revision.dart';
 import 'package:pica_comic/network/sync_transport.dart';
@@ -107,19 +108,24 @@ class Webdav {
   }
 
   static Future<bool> _runUploadLoop(String? config) async {
+    final timer = RuntimeMetrics.start('sync.upload');
     var result = false;
-    do {
-      _uploadAgain = false;
-      final requestedConfig = config;
-      config = null;
-      result =
-          await _enqueueOperation(() => _uploadOnceExclusive(requestedConfig));
-      if (_uploadAgain) {
-        config = _queuedConfig;
-        _queuedConfig = null;
-      }
-    } while (_uploadAgain);
-    return result;
+    try {
+      do {
+        _uploadAgain = false;
+        final requestedConfig = config;
+        config = null;
+        result = await _enqueueOperation(
+            () => _uploadOnceExclusive(requestedConfig));
+        if (_uploadAgain) {
+          config = _queuedConfig;
+          _queuedConfig = null;
+        }
+      } while (_uploadAgain);
+      return result;
+    } finally {
+      timer.finish(success: result && lastResult.succeeded);
+    }
   }
 
   static SyncResult lastResult = const SyncResult(SyncStatus.unchanged);
@@ -463,11 +469,16 @@ class Webdav {
 
   static Future<bool> downloadData([String? config]) =>
       _enqueueOperation(() async {
+        final timer = RuntimeMetrics.start('sync.download');
+        var succeeded = false;
         List<String>? configs;
         SyncTransport? transport;
         try {
           configs = await _config(config);
-          if (configs == null) return true;
+          if (configs == null) {
+            succeeded = true;
+            return true;
+          }
           transport = transportFactory(configs);
           final state = await _state(configs);
           final heads = revisionHeads(await _revisions(transport));
@@ -483,11 +494,13 @@ class Webdav {
             } else {
               lastResult = const SyncResult(SyncStatus.unchanged);
             }
+            succeeded = true;
             return true;
           }
           final head = heads.single;
           if (config == null && (state['heads'] as List).contains(head.id)) {
             lastResult = SyncResult(SyncStatus.unchanged, heads: heads);
+            succeeded = true;
             return true;
           }
           if (head.legacy &&
@@ -495,12 +508,14 @@ class Webdav {
               head.legacyVersion! <=
                   (int.tryParse(appdata.settings[46]) ?? 0)) {
             lastResult = SyncResult(SyncStatus.skipped, heads: heads);
+            succeeded = true;
             return true;
           }
           await _importRevision(transport, head, preserveSettings: false);
           state['heads'] = [head.id];
           await _saveState(configs, state);
           lastResult = SyncResult(SyncStatus.success, heads: heads);
+          succeeded = true;
           return true;
         } catch (e, s) {
           lastResult = const SyncResult(SyncStatus.failed);
@@ -509,6 +524,7 @@ class Webdav {
           return false;
         } finally {
           transport?.close();
+          timer.finish(success: succeeded);
         }
       });
 

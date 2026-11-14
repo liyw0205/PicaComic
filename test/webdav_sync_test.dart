@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/foundation/secret_store.dart';
 import 'package:pica_comic/network/sync_revision.dart';
 import 'package:pica_comic/network/sync_transport.dart';
@@ -76,6 +77,8 @@ void main() {
     SecretStoreRegistry.configure(MemorySecretStore());
   });
 
+  setUp(RuntimeMetrics.reset);
+
   tearDown(() async {
     await DataMaintenance.waitForIdle();
     SecretStoreRegistry.configure(MemorySecretStore());
@@ -109,6 +112,9 @@ void main() {
       expect(transport.downloads, [second.archiveName]);
       expect(transport.closed, isTrue);
       expect(Webdav.lastResult.status, SyncStatus.failed);
+      final metric = RuntimeMetrics.snapshot()['sync.upload']!;
+      expect(metric.failure, 1);
+      expect(metric.active, 0);
     } finally {
       appdata.settings[45] = previousSetting;
       Webdav.transportFactory = previousFactory;
@@ -173,6 +179,9 @@ void main() {
           containsAll(<String>[first.id, second.id]));
       expect(transport.downloads, isEmpty);
       expect(transport.closed, isTrue);
+      final metric = RuntimeMetrics.snapshot()['sync.download']!;
+      expect(metric.failure, 1);
+      expect(metric.active, 0);
     } finally {
       appdata.settings[45] = previousSetting;
       Webdav.transportFactory = previousFactory;
