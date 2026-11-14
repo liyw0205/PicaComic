@@ -1015,6 +1015,10 @@ abstract mixin class _DownloadDb {
   }
 
   bool isExists(String id) {
+    // A task can be constructed by a queue recovery test before the optional
+    // download database has been opened. Treat that state as no completed
+    // record; normal startup initializes [_db] before downloads begin.
+    if (_db == null) return false;
     var result = _db!.select('''
       select id from download
       where id = ?

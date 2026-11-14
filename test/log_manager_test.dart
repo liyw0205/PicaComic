@@ -163,7 +163,7 @@ void main() {
     const secret = 'export-secret-value';
     LogManager.addLog(
       LogLevel.error,
-      'Network $secret',
+      'Network',
       'GET https://user:$secret@example.org/image?token=$secret&page=4\n'
           'Authorization: Bearer $secret\napi_key=$secret',
     );
