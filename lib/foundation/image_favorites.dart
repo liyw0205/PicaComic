@@ -247,6 +247,14 @@ class ImageFavoriteManager {
       delete from image_favorites
       where id = ? and ep = ? and page = ?;
     """, [favorite.id, favorite.ep, favorite.page]);
+    final deleted =
+        (_db.select('select changes() as count').single['count'] as int) > 0;
+    if (!deleted) {
+      // Keep the page reconciliation behavior, but do not publish a remote
+      // mutation for an already-absent row.
+      _scheduleUiRefresh(imagePage: true);
+      return;
+    }
     DataMaintenance.recordSyncRequest();
     if (!DataMaintenance.syncSuppressed) await Webdav.uploadData();
     _scheduleUiRefresh(imagePage: true);

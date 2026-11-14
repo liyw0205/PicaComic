@@ -134,6 +134,21 @@ void main() {
     });
   });
 
+  test('repeated deletes publish only the first actual mutation', () async {
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+    const image = ImageFavorite('image-0', '', 'Title 0', 1, 1, {});
+
+    await DataMaintenance.run(() async {
+      await ImageFavoriteManager.add(image);
+      await ImageFavoriteManager.delete(image);
+      await ImageFavoriteManager.delete(image);
+    }, suppressSync: true, operationName: 'image-favorites-delete');
+
+    expect(DataMaintenance.lastStats?.syncRequests, 2);
+    expect(DataMaintenance.lastStats?.suppressedSyncRequests, 2);
+    expect(ImageFavoriteManager.exist(image.id, image.ep, image.page), isFalse);
+  });
+
   test('favorite image keys preserve composite field boundaries', () {
     const first = ImageFavorite('comic-1', '', 'Title 1', 2, 34, {});
     const second = ImageFavorite('comic-12', '', 'Title 2', 3, 4, {});
