@@ -158,7 +158,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         hideContent();
       } else if (state == AppLifecycleState.resumed) {
         showContent();
-        Future.delayed(const Duration(milliseconds: 200), checkClipboard);
+        unawaited(Future.delayed(
+          const Duration(milliseconds: 200),
+          checkClipboard,
+        ));
       }
 
       if (DateTime.now().millisecondsSinceEpoch - time.millisecondsSinceEpoch >

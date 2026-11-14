@@ -5,7 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app_page_route.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/webdav.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/app_links.dart';
 import 'package:pica_comic/tools/background_service.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -23,33 +25,41 @@ import 'package:pica_comic/network/picacg_network/methods.dart';
 
 bool _haveClipboardDialog = false;
 
-void checkClipboard() async {
-  if (appdata.settings[61] == "0") {
-    return;
-  }
-  var data = await Clipboard.getData(Clipboard.kTextPlain);
-  if (data?.text != null && canHandle(data!.text!)) {
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (_haveClipboardDialog) {
+Future<void> checkClipboard() async {
+  try {
+    if (appdata.settings[61] == "0") {
       return;
     }
-    _haveClipboardDialog = true;
-    await showDialog(
-      context: App.globalContext!,
-      builder: (context) => ContentDialog(
-        title: "发现剪切板中的链接".tl,
-        content: Text(data.text!),
-        actions: [
-          TextButton(
-            onPressed: () {
-              App.globalContext!.pop();
-              handleAppLinks(Uri.parse(data.text!));
-            },
-            child: Text("打开".tl),
-          ),
-        ],
-      ),
+    var data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text != null && canHandle(data!.text!)) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (_haveClipboardDialog) {
+        return;
+      }
+      _haveClipboardDialog = true;
+      await showDialog(
+        context: App.globalContext!,
+        builder: (context) => ContentDialog(
+          title: "发现剪切板中的链接".tl,
+          content: Text(data.text!),
+          actions: [
+            TextButton(
+              onPressed: () {
+                App.globalContext!.pop();
+                handleAppLinks(Uri.parse(data.text!));
+              },
+              child: Text("打开".tl),
+            ),
+          ],
+        ),
+      );
+    }
+  } catch (error, stack) {
+    Log.warning(
+      'Clipboard',
+      'Clipboard link check failed: ${safeNetworkError(error)}\n$stack',
     );
+  } finally {
     _haveClipboardDialog = false;
   }
 }
@@ -70,7 +80,7 @@ class MainPageState extends State<MainPage> {
 
   late final NaviObserver _observer;
 
-  void to(Widget Function() widget, {bool preventDuplicate = false}) async {
+  void to(Widget Function() widget, {bool preventDuplicate = false}) {
     if (preventDuplicate) {
       var page = widget();
       if ("/${page.runtimeType}" == _observer.routes.last.toString()) return;
@@ -114,7 +124,7 @@ class MainPageState extends State<MainPage> {
     });
   }
 
-  void _checkUpdates() async {
+  Future<void> _checkUpdates() async {
     var s = await SharedPreferences.getInstance();
     var lastCheck = s.getInt("lastCheckUpdate");
     if (lastCheck != null) {
@@ -129,7 +139,7 @@ class MainPageState extends State<MainPage> {
       return;
     }
     var res = await checkUpdate();
-    s.setInt("lastCheckUpdate", DateTime.now().millisecondsSinceEpoch);
+    await s.setInt("lastCheckUpdate", DateTime.now().millisecondsSinceEpoch);
     if (res != true) return;
     var info = await getUpdatesInfo();
     if (info == null) return;
@@ -144,7 +154,13 @@ class MainPageState extends State<MainPage> {
                   onPressed: () {
                     dialogContext.pop();
                     appdata.settings[2] = "0";
-                    appdata.writeData();
+                    unawaited(appdata.writeData().catchError((error, stack) {
+                      Log.warning(
+                        'MainPage',
+                        'Failed to persist update setting: '
+                            '${safeNetworkError(error)}\n$stack',
+                      );
+                    }));
                   },
                   child: const Text("关闭更新检查")),
               TextButton(onPressed: dialogContext.pop, child: Text("取消".tl)),
@@ -198,16 +214,34 @@ class MainPageState extends State<MainPage> {
     _login();
     unawaited(notifications.requestPermission());
     unawaited(notifications.cancelAll());
-    _checkUpdates();
+    unawaited(_checkUpdates().catchError((error, stack) {
+      Log.warning(
+        'MainPage',
+        'Update check failed: ${safeNetworkError(error)}\n$stack',
+      );
+    }));
     _checkDownload();
 
     if (appdata.firstUse[3] == "0") {
       appdata.firstUse[3] = "1";
-      appdata.writeData();
+      unawaited(appdata.writeData().catchError((error, stack) {
+        Log.warning(
+          'MainPage',
+          'Failed to persist first-use state: '
+              '${safeNetworkError(error)}\n$stack',
+        );
+      }));
     }
 
-    Future.delayed(const Duration(milliseconds: 300), () => Webdav.syncData())
-        .then((v) => checkClipboard());
+    unawaited(Future.delayed(const Duration(milliseconds: 300),
+            () => Webdav.syncData())
+        .then((v) => checkClipboard())
+        .catchError((error, stack) {
+      Log.warning(
+        'MainPage',
+        'Startup sync failed: ${safeNetworkError(error)}\n$stack',
+      );
+    }));
     _observer = NaviObserver();
     super.initState();
   }
