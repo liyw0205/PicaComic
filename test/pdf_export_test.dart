@@ -77,6 +77,23 @@ void main() {
     expect(metric.success, 1);
     expect(metric.bytes, greaterThan(0));
   });
+
+  test('cancelled isolate export records a parent metric', () async {
+    final cancellation = PdfExportCancellation()..cancel();
+    await expectLater(
+      createPdfFromComicWithIsolate(
+        title: 'cancelled isolate',
+        comicPath: '/missing/comic',
+        savePath: '/missing/output.pdf',
+        cancellation: cancellation,
+      ),
+      throwsA(isA<PdfExportCancelledException>()),
+    );
+
+    final metric = RuntimeMetrics.snapshot()['pdf.export']!;
+    expect(metric.cancelled, 1);
+    expect(metric.active, 0);
+  });
 }
 
 List<int> _decodeBase64(String value) {

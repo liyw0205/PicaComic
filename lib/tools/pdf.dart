@@ -312,7 +312,8 @@ Future<void> createPdfFromComicWithIsolate({
   if (batchSize <= 0) {
     throw ArgumentError.value(batchSize, 'batchSize', 'must be positive');
   }
-  return DataMaintenance.run(
+  final timer = RuntimeMetrics.start('pdf.export');
+  final operation = DataMaintenance.run(
     () => _createPdfFromComicWithIsolate(
       title: title,
       comicPath: comicPath,
@@ -324,6 +325,17 @@ Future<void> createPdfFromComicWithIsolate({
       batchSize: batchSize,
     ),
     operationName: 'pdf.export',
+  );
+  return operation.then<void>(
+    (_) => timer.finish(),
+    onError: (Object error, StackTrace stack) {
+      if (error is PdfExportCancelledException) {
+        timer.finish(cancelled: true);
+      } else {
+        timer.finish(success: false);
+      }
+      Error.throwWithStackTrace(error, stack);
+    },
   );
 }
 
