@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_priority.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 
 import 'http_client.dart';
 import 'network_logging.dart';
@@ -92,6 +93,7 @@ class NativeCurlHttpClient {
     int attempts = 3,
     Future<void>? cancelFuture,
   }) async {
+    final metric = RuntimeMetrics.start('network.native_curl');
     final requestId =
         '${DateTime.now().microsecondsSinceEpoch}-${_requestSequence++}';
     var finished = false;
@@ -124,44 +126,60 @@ class NativeCurlHttpClient {
                 requestOptions: options, type: DioExceptionType.cancel);
           }),
       ]);
+    } catch (error) {
+      metric.finish(
+          success: false,
+          cancelled:
+              error is DioException && error.type == DioExceptionType.cancel);
+      rethrow;
     } finally {
       finished = true;
     }
 
-    if (result == null) {
-      throw DioException(
-        requestOptions: options,
-        error: "native curl returned empty result",
-        type: DioExceptionType.connectionError,
-      );
-    }
+    try {
+      if (result == null) {
+        throw DioException(
+          requestOptions: options,
+          error: "native curl returned empty result",
+          type: DioExceptionType.connectionError,
+        );
+      }
 
-    final error = result["error"];
-    if (error != null) {
-      throw DioException(
-        requestOptions: options,
-        error: error,
-        message: error.toString(),
-        type: result["curlCode"] == 42
-            ? DioExceptionType.cancel
-            : const {51, 58, 60, 77, 83, 90, 91}.contains(result["curlCode"])
-                ? DioExceptionType.badCertificate
-                : DioExceptionType.connectionError,
-      );
-    }
+      final error = result["error"];
+      if (error != null) {
+        throw DioException(
+          requestOptions: options,
+          error: error,
+          message: error.toString(),
+          type: result["curlCode"] == 42
+              ? DioExceptionType.cancel
+              : const {51, 58, 60, 77, 83, 90, 91}.contains(result["curlCode"])
+                  ? DioExceptionType.badCertificate
+                  : DioExceptionType.connectionError,
+        );
+      }
 
-    final responseBody = ResponseBody.fromBytes(
-      (result["body"] as Uint8List?) ?? Uint8List(0),
-      (result["statusCode"] as int?) ?? 0,
-      headers: _parseHeaders(result["headers"]),
-    );
-    final usedAttempts = result["attempts"];
-    LogManager.addLog(
-        LogLevel.info,
-        "Network",
-        "Native curl ${options.method} ${safeNetworkUrl(options.uri.toString())} ${responseBody.statusCode}"
-            "${usedAttempts == null ? "" : " attempts=$usedAttempts"}");
-    return responseBody;
+      final responseBytes = (result["body"] as Uint8List?) ?? Uint8List(0);
+      final responseBody = ResponseBody.fromBytes(
+        responseBytes,
+        (result["statusCode"] as int?) ?? 0,
+        headers: _parseHeaders(result["headers"]),
+      );
+      final usedAttempts = result["attempts"];
+      LogManager.addLog(
+          LogLevel.info,
+          "Network",
+          "Native curl ${options.method} ${safeNetworkUrl(options.uri.toString())} ${responseBody.statusCode}"
+              "${usedAttempts == null ? "" : " attempts=$usedAttempts"}");
+      metric.finish(bytes: responseBytes.length);
+      return responseBody;
+    } catch (error) {
+      metric.finish(
+          success: false,
+          cancelled:
+              error is DioException && error.type == DioExceptionType.cancel);
+      rethrow;
+    }
   }
 
   static Map<String, String> _headersToStringMap(Map<String, dynamic> raw) {

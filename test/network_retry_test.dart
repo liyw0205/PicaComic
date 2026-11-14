@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/native_curl.dart';
@@ -102,6 +103,7 @@ void main() {
 
   setUp(() {
     SourceNetworkPolicy.instance.reset();
+    RuntimeMetrics.reset();
     final settings = List<String>.from(appdata.settings);
     final overrides = HttpOverrides.current;
     final proxy = proxyHttpOverrides;
@@ -321,6 +323,32 @@ void main() {
     await assertion;
     await Future<void>.delayed(Duration.zero);
     expect(cancelledId, requestId);
+    final metric = RuntimeMetrics.snapshot()['network.native_curl']!;
+    expect(metric.active, 0);
+    expect(metric.peakActive, 1);
+    expect(metric.cancelled, 1);
+  });
+
+  test('native request metrics record completed response bytes', () async {
+    proxyHttpOverrides = ProxyHttpOverrides(
+        null, AppProxyConfig(scheme: 'http', host: 'localhost', port: 8080));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            channel,
+            (_) async => {
+                  'statusCode': 200,
+                  'body': Uint8List.fromList([1, 2])
+                });
+
+    final response = await NativeCurlHttpClient.fetch(
+        RequestOptions(path: 'https://example.org'), null);
+    await response.stream.drain<void>();
+
+    final metric = RuntimeMetrics.snapshot()['network.native_curl']!;
+    expect(metric.active, 0);
+    expect(metric.peakActive, 1);
+    expect(metric.success, 1);
+    expect(metric.bytes, 2);
   });
 
   test('native certificate errors retain their error category', () async {
@@ -334,5 +362,8 @@ void main() {
             RequestOptions(path: 'https://example.org'), null),
         throwsA(isA<DioException>()
             .having((e) => e.type, 'type', DioExceptionType.badCertificate)));
+    final metric = RuntimeMetrics.snapshot()['network.native_curl']!;
+    expect(metric.active, 0);
+    expect(metric.failure, 1);
   });
 }

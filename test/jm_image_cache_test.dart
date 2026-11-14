@@ -10,6 +10,7 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/foundation/image_loader/image_recombine.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_client.dart';
 
@@ -21,6 +22,9 @@ void main() {
   late StreamSubscription<HttpRequest> serving;
   late ImageManager manager;
   late Uint8List responseBytes;
+  Completer<void>? parallelRelease;
+  Completer<void>? parallelStarted;
+  var parallelRequestCount = 0;
   final sourceBytes = Uint8List.fromList(
     image.encodePng(image.Image(width: 4, height: 20)),
   );
@@ -56,6 +60,14 @@ void main() {
     manager = ImageManager();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     serving = server.listen((request) async {
+      if (request.uri.path.contains('parallel-')) {
+        parallelRequestCount++;
+        if (parallelRequestCount == 2 &&
+            !(parallelStarted?.isCompleted ?? true)) {
+          parallelStarted!.complete();
+        }
+        await parallelRelease?.future;
+      }
       request.response.headers.contentType = ContentType('image', 'png');
       request.response.contentLength = responseBytes.length;
       request.response.add(responseBytes);
@@ -63,7 +75,13 @@ void main() {
     });
   });
 
-  setUp(() => responseBytes = sourceBytes);
+  setUp(() {
+    responseBytes = sourceBytes;
+    RuntimeMetrics.reset();
+    parallelRequestCount = 0;
+    parallelRelease = null;
+    parallelStarted = null;
+  });
 
   tearDownAll(() async {
     await JmRecombine.shutdown();
@@ -94,6 +112,33 @@ void main() {
     expect(
         await CacheManager().findCache(url('single-copy')), completed.savePath);
     expect(ImageManager.haveTask, isFalse);
+    final metric = RuntimeMetrics.snapshot()['image.task']!;
+    expect(metric.active, 0);
+    expect(metric.peakActive, 1);
+    expect(metric.count, 1);
+  });
+
+  test('image task metrics expose the concurrent peak and drain on completion',
+      () async {
+    parallelRelease = Completer<void>();
+    parallelStarted = Completer<void>();
+    final first = load('parallel-a').last;
+    final second = load('parallel-b').last;
+
+    try {
+      await parallelStarted!.future.timeout(const Duration(seconds: 5));
+      final active = RuntimeMetrics.snapshot()['image.task']!;
+      expect(active.active, 2);
+      expect(active.peakActive, 2);
+    } finally {
+      if (!parallelRelease!.isCompleted) parallelRelease!.complete();
+      await Future.wait([first, second], eagerError: false);
+    }
+
+    final finished = RuntimeMetrics.snapshot()['image.task']!;
+    expect(finished.active, 0);
+    expect(finished.peakActive, 2);
+    expect(finished.count, 2);
   });
 
   test('cancelling before recombination cannot commit an image cache',
@@ -122,6 +167,9 @@ void main() {
     );
     expect(await CacheManager().findCache(url('cancelled')), isNull);
     expect(ImageManager.haveTask, isFalse);
+    final metric = RuntimeMetrics.snapshot()['image.task']!;
+    expect(metric.active, 0);
+    expect(metric.cancelled, 1);
     final files = await Directory(CacheManager.cachePath)
         .list(recursive: true, followLinks: false)
         .where((entry) => entry is File)

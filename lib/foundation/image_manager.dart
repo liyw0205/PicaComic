@@ -12,6 +12,7 @@ import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/image_loader/image_recombine.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/download_progress.dart';
@@ -56,6 +57,7 @@ class ImageManager {
   ///用于标记正在加载的项目, 避免出现多个异步函数加载同一张图片
   static Map<String, DownloadProgress> loadingItems = {};
   static final Map<String, CancelToken> _cancelTokens = {};
+  static final Map<CancelToken, RuntimeMetricTimer> _taskMetrics = {};
   static final Map<String, Object?> _taskOwners = {};
   static final Object _taskOwnerZoneKey = Object();
   static final Set<Object> _cancelledOwners = {};
@@ -134,15 +136,21 @@ class ImageManager {
       _cancelTokens[key] = token;
       _taskOwners[key] = owner;
       loadingItems[key] = DownloadProgress(0, 1, key, "");
+      _taskMetrics[token] = RuntimeMetrics.start('image.task');
       return token;
     }
   }
 
   static void _finishTask(String key, CancelToken token) {
     if (identical(_cancelTokens[key], token)) {
+      final metric = _taskMetrics.remove(token);
       _cancelTokens.remove(key);
       _taskOwners.remove(key);
       loadingItems.remove(key);
+      metric?.finish(cancelled: token.isCancelled);
+    } else {
+      // A stale cleanup must not leave its lifecycle sample active forever.
+      _taskMetrics.remove(token)?.finish(cancelled: token.isCancelled);
     }
   }
 
