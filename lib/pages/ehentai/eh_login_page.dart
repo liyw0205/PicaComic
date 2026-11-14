@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -278,7 +279,7 @@ class _EhLoginPageState extends State<EhLoginPage> {
             }
           },
         );
-        webview.open();
+        unawaited(webview.open());
       } else {
         showToast(message: "Unsupported device".tl);
       }

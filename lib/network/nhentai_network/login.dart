@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
@@ -332,7 +333,7 @@ void nhLogin(void Function() onFinished) async {
         }
       },
     );
-    webview.open();
+    unawaited(webview.open());
   } else if (App.isMobile) {
     App.globalTo(() => AppWebview(
           initialUrl: "${NhentaiNetwork().baseUrl}/login/?next=/",

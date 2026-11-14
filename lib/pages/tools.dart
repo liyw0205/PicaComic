@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/components/components.dart';
@@ -51,7 +53,7 @@ void openTool() {
                   }
                 },
               );
-              webview.open();
+              unawaited(webview.open());
             }
           },
           trailing: const Icon(Icons.open_in_new)
@@ -81,7 +83,7 @@ void openTool() {
                   }
                 },
               );
-              webview.open();
+              unawaited(webview.open());
             }
           },
           trailing: const Icon(Icons.open_in_new)

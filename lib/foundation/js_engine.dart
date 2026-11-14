@@ -335,7 +335,7 @@ mixin class _JSEngineApi {
     _elements.clear();
   }
 
-  void clearCookies(List<String> domains) async {
+  Future<void> clearCookies(List<String> domains) async {
     for (var domain in domains) {
       var uri = Uri.tryParse(domain);
       if (uri == null) continue;

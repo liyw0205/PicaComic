@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:dio/dio.dart';
@@ -136,7 +137,7 @@ void passCloudflare(CloudflareException e, void Function() onFinished) async {
         }
       },
     );
-    webview.open();
+    unawaited(webview.open());
   } else if (App.isMobile) {
     await App.globalTo(
       () => AppWebview(

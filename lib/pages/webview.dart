@@ -440,6 +440,7 @@ class DesktopWebview {
   String? get userAgent => _ua;
 
   Timer? timer;
+  int _openGeneration = 0;
 
   void _runTimer() {
     timer ??= Timer.periodic(const Duration(seconds: 2), (t) async {
@@ -466,25 +467,34 @@ class DesktopWebview {
     });
   }
 
-  void open() async {
-    _webview = await WebviewWindow.create(
+  Future<void> open() async {
+    if (_webview != null) return;
+    final generation = ++_openGeneration;
+    final webview = await WebviewWindow.create(
         configuration: CreateConfiguration(
       useWindowPositionAndSize: true,
       userDataFolderWindows: "${App.dataPath}\\webview",
       title: "webview",
       proxy: proxyHttpOverrides?.proxyStr,
     ));
-    _webview!.addOnWebMessageReceivedCallback(onMessage);
-    _webview!.setOnNavigation((s) => onNavigation?.call(s, this));
-    _webview!.launch(initialUrl, triggerOnUrlRequestEvent: false);
+    if (generation != _openGeneration) {
+      webview.close();
+      return;
+    }
+    _webview = webview;
+    webview.addOnWebMessageReceivedCallback(onMessage);
+    webview.setOnNavigation((s) => onNavigation?.call(s, this));
+    webview.launch(initialUrl, triggerOnUrlRequestEvent: false);
     _runTimer();
-    _webview!.onClose.then((value) {
+    webview.onClose.then((value) {
+      if (generation != _openGeneration) return;
       _webview = null;
       timer?.cancel();
       timer = null;
       onClose?.call();
     });
     Future.delayed(const Duration(milliseconds: 200), () {
+      if (generation != _openGeneration || _webview == null) return;
       onStarted?.call(this);
     });
   }
@@ -527,6 +537,9 @@ class DesktopWebview {
   }
 
   void close() {
+    _openGeneration++;
+    timer?.cancel();
+    timer = null;
     _webview?.close();
     _webview = null;
   }
