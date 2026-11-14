@@ -66,6 +66,12 @@ class Webdav {
     if (DataMaintenance.syncSuppressed || DataMaintenance.busy) {
       return Future<bool>.value(true);
     }
+    // Avoid enqueueing a no-op maintenance task when sync has never been
+    // configured. Synchronous local writes call saveData() without awaiting
+    // it, so even an empty upload must not hold the database queue.
+    if (config == null && _parseConfig(appdata.settings[45]) == null) {
+      return Future<bool>.value(true);
+    }
     final current = _uploadTask;
     if (current != null) {
       _uploadAgain = true;

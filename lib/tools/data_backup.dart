@@ -1021,12 +1021,6 @@ Future<void> recoverPendingDataRestore(String dataPath,
           key is! String || !recoverablePreferenceKeys.contains(key))) {
     throw const FormatException('Invalid restore preferences');
   }
-  for (final value in preferences.values) {
-    if (value != null &&
-        (value is! List || value.any((item) => item is! String))) {
-      throw const FormatException('Invalid restore preferences');
-    }
-  }
 
   final entries = state['entries'] as List;
   final targets = <String>[];

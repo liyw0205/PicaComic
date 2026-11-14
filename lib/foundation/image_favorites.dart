@@ -47,7 +47,10 @@ class ImageFavoriteManager {
     _refreshImagePagePending = _refreshImagePagePending || imagePage;
     if (_uiRefreshQueued) return;
     _uiRefreshQueued = true;
-    Future.microtask(() {
+    // Let all writes in the current maintenance turn finish before notifying
+    // pages. A timer event coalesces awaits inside one batch, while still
+    // updating the UI promptly after the batch completes.
+    Future<void>.delayed(Duration.zero).then((_) {
       _uiRefreshQueued = false;
       final refreshMePage = _refreshMePagePending;
       final refreshImagePage = _refreshImagePagePending;

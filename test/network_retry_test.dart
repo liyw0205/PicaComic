@@ -9,6 +9,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/native_curl.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 
 class _Adapter extends AppHttpAdapter {
   _Adapter(this.failure, {this.onFailure}) : super(false);
@@ -34,6 +35,7 @@ void main() {
   const channel = MethodChannel('com.github.pacalini.pica_comic/native_curl');
 
   setUp(() {
+    SourceNetworkPolicy.instance.reset();
     final settings = List<String>.from(appdata.settings);
     final overrides = HttpOverrides.current;
     final proxy = proxyHttpOverrides;

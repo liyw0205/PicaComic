@@ -36,8 +36,15 @@ bool _sensitiveField(String name) {
 String safeNetworkUrl(String value) {
   try {
     final uri = Uri.parse(value);
-    final query = uri.queryParametersAll.map((key, values) =>
-        MapEntry(key, _sensitiveField(key) ? ['<redacted>'] : values));
+    // Build the encoded query explicitly so an empty value keeps its `=`.
+    // Uri.replace(queryParameters: ...) serializes `?page=` as `?page`, which
+    // can merge with a caller-appended suffix and change the logged URL.
+    final query = uri.queryParametersAll.entries.expand((entry) {
+      final values =
+          _sensitiveField(entry.key) ? const ['<redacted>'] : entry.value;
+      return values.map((value) => '${Uri.encodeQueryComponent(entry.key)}='
+          '${Uri.encodeQueryComponent(value)}');
+    }).join('&');
     final pathSegments = uri.pathSegments.toList();
     for (var index = 0; index + 1 < pathSegments.length; index++) {
       if (pathSegments[index] == 's') {
@@ -49,7 +56,7 @@ String safeNetworkUrl(String value) {
         .replace(
           userInfo: uri.userInfo.isNotEmpty ? '' : null,
           pathSegments: pathSegments,
-          queryParameters: uri.hasQuery ? query : null,
+          query: uri.hasQuery ? query : null,
         )
         .toString();
   } on FormatException {

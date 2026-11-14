@@ -138,10 +138,11 @@ Future<CacheCleanupReport> cleanupDirectory(
     }
     try {
       final stat = await entity.stat();
-      final accessed = stat.accessed;
       final modified = stat.modified;
-      final lastUsed = accessed.isAfter(modified) ? accessed : modified;
-      records.add(_FileRecord(entity, stat.size, lastUsed));
+      // Access time is disabled or coarsely updated on many mobile filesystems
+      // and is refreshed by ordinary scans. Modification time is the stable
+      // signal for cache retention and makes cleanup deterministic.
+      records.add(_FileRecord(entity, stat.size, modified));
       scannedBytes += stat.size;
     } on FileSystemException {
       // Races with writers are expected for a best-effort cache pass.
