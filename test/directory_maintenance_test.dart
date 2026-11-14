@@ -80,6 +80,23 @@ void main() {
     expect(await journal.exists(), isFalse);
   });
 
+  test('migration replaces a destination containing only empty directories',
+      () async {
+    final root = await Directory.systemTemp.createTemp('pica-dir-empty-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    await source.create(recursive: true);
+    await File('${source.path}/comic.bin').writeAsString('comic');
+    await Directory('${destination.path}/stale/nested').create(recursive: true);
+
+    final report = await migrateDirectory(source, destination);
+
+    expect(report.fileCount, 1);
+    expect(await source.exists(), isFalse);
+    expect(await File('${destination.path}/comic.bin').readAsString(), 'comic');
+  });
+
   test('committed recovery retains source when destination has extra files',
       () async {
     final root = await Directory.systemTemp.createTemp('pica-dir-extra-');

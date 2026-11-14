@@ -442,7 +442,7 @@ Future<DirectoryMigrationReport> migrateDirectory(
       if (existing.fileCount != 0) {
         throw StateError('Destination directory is not empty');
       }
-      await destination.delete();
+      await destination.delete(recursive: true);
     }
     await staging.rename(destination.path);
     state['phase'] = 'committed';
@@ -519,7 +519,8 @@ Future<bool> _destinationMatches(
   // match as a successful recovery and losing the original directory.
   final destinationPath = _absolutePath(destination.path);
   final actualPaths = <String>{};
-  await for (final entity in destination.list(recursive: true, followLinks: false)) {
+  await for (final entity
+      in destination.list(recursive: true, followLinks: false)) {
     if (entity is Link) return false;
     if (entity is! File) continue;
     final absolute = _absolutePath(entity.path);
