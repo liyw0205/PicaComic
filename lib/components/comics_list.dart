@@ -27,7 +27,7 @@ class ComicsPageLogic<T> extends StateController {
 
   int _generation = 0;
 
-  void get(Future<Res<List<T>>> Function(int) getComics) async {
+  Future<void> get(Future<Res<List<T>>> Function(int) getComics) async {
     if (loadingData) return;
     final generation = _generation;
     final firstPage = comics == null;
@@ -73,7 +73,8 @@ class ComicsPageLogic<T> extends StateController {
 
   int _emptyPageCount = 0;
 
-  void loadNextPage(Future<Res<List<T>>> Function(int) getComics) async {
+  Future<void> loadNextPage(
+      Future<Res<List<T>>> Function(int) getComics) async {
     if (maxPage != null && current >= maxPage!) return;
     if (paginationError != null) return;
     if (loadingData) return;
@@ -112,17 +113,19 @@ class ComicsPageLogic<T> extends StateController {
     }
   }
 
-  void retryNextPage(Future<Res<List<T>>> Function(int) getComics) {
+  Future<void> retryNextPage(
+      Future<Res<List<T>>> Function(int) getComics) async {
     if (paginationError == null) return;
     paginationError = null;
-    loadNextPage(getComics);
+    await loadNextPage(getComics);
   }
 
-  void retryCurrentPage(Future<Res<List<T>>> Function(int) getComics) {
+  Future<void> retryCurrentPage(
+      Future<Res<List<T>>> Function(int) getComics) async {
     if (paginationError == null || loadingData) return;
     paginationError = null;
     loading = true;
-    get(getComics);
+    await get(getComics);
   }
 
   @override
@@ -213,7 +216,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
             logic.loading = true;
           }
           if (logic.loading) {
-            logic.get(getComics);
+            unawaited(logic.get(getComics));
             return Column(
               children: [
                 if (title != null) const Appbar(title: Text("")),
@@ -242,7 +245,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
               logic.paginationError != null) {
             return NetworkError(
               message: logic.paginationError!,
-              retry: () => logic.retryCurrentPage(getComics),
+              retry: () => unawaited(logic.retryCurrentPage(getComics)),
               withAppbar: title != null,
             );
           } else {
@@ -285,7 +288,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                     delegate: SliverChildBuilderDelegate(
                         childCount: comics.length, (context, i) {
                       if (i == comics.length - 1) {
-                        logic.loadNextPage(getComics);
+                        unawaited(logic.loadNextPage(getComics));
                       }
                       return buildItem(context, comics[i]);
                     }),
@@ -300,7 +303,8 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                     SliverToBoxAdapter(
                       child: Center(
                         child: TextButton.icon(
-                          onPressed: () => logic.retryNextPage(getComics),
+                          onPressed: () =>
+                              unawaited(logic.retryNextPage(getComics)),
                           icon: const Icon(Icons.refresh),
                           label: Text(logic.paginationError!),
                         ),

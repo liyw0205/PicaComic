@@ -18,17 +18,14 @@ void main() {
       return const Res.error('temporary failure');
     }
 
-    logic.loadNextPage(load);
-    await Future<void>.delayed(Duration.zero);
+    await logic.loadNextPage(load);
     expect(logic.paginationError, 'temporary failure');
     expect(logic.current, 1);
 
-    logic.loadNextPage(load);
-    await Future<void>.delayed(Duration.zero);
+    await logic.loadNextPage(load);
     expect(calls, 1);
 
-    logic.retryNextPage(load);
-    await Future<void>.delayed(Duration.zero);
+    await logic.retryNextPage(load);
     expect(calls, 2);
     expect(logic.current, 1);
   });
@@ -47,14 +44,12 @@ void main() {
       return const Res([2], subData: 3);
     }
 
-    logic.loadNextPage(load);
-    await Future<void>.delayed(Duration.zero);
+    await logic.loadNextPage(load);
     expect(logic.paginationError, contains('temporary exception'));
     expect(logic.loadingData, isFalse);
     expect(logic.current, 1);
 
-    logic.retryNextPage(load);
-    await Future<void>.delayed(Duration.zero);
+    await logic.retryNextPage(load);
     expect(logic.comics, [1, 2]);
     expect(logic.current, 2);
     expect(logic.paginationError, isNull);
@@ -71,24 +66,22 @@ void main() {
       ..current = 10
       ..maxPage = 20;
 
-    logic.loadNextPage((page) {
+    final staleLoad = logic.loadNextPage((page) {
       expect(page, 11);
       return stalePage.future;
     });
-    await Future<void>.delayed(Duration.zero);
 
     logic.refresh();
     expect(logic.current, 1);
     expect(logic.maxPage, isNull);
     expect(logic.dividedComics, isNull);
 
-    logic.get((page) async {
+    await logic.get((page) async {
       expect(page, 1);
       return const Res([1], subData: 4);
     });
-    await Future<void>.delayed(Duration.zero);
     stalePage.complete(const Res([99], subData: 20));
-    await Future<void>.delayed(Duration.zero);
+    await staleLoad;
 
     expect(logic.comics, [1]);
     expect(logic.dividedComics, {
