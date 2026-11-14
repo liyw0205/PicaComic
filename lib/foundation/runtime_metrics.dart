@@ -12,6 +12,8 @@ class RuntimeMetricSnapshot {
     required this.failure,
     required this.cancelled,
     required this.bytes,
+    this.active = 0,
+    this.peakActive = 0,
     required this.p50Milliseconds,
     required this.p95Milliseconds,
   });
@@ -21,6 +23,10 @@ class RuntimeMetricSnapshot {
   final int failure;
   final int cancelled;
   final int bytes;
+  /// Number of timers that have started and not finished at snapshot time.
+  final int active;
+  /// Highest simultaneous timer count observed for this operation.
+  final int peakActive;
   final int? p50Milliseconds;
   final int? p95Milliseconds;
 
@@ -30,6 +36,8 @@ class RuntimeMetricSnapshot {
         'failure': failure,
         'cancelled': cancelled,
         'bytes': bytes,
+        'active': active,
+        'peakActive': peakActive,
         'p50Ms': p50Milliseconds,
         'p95Ms': p95Milliseconds,
       };
@@ -41,6 +49,8 @@ class _MetricBucket {
   int failure = 0;
   int cancelled = 0;
   int bytes = 0;
+  int active = 0;
+  int peakActive = 0;
   final List<int> durations = <int>[];
 }
 
@@ -57,8 +67,12 @@ class RuntimeMetrics {
   static const int maxSamplesPerMetric = 256;
   static final Map<String, _MetricBucket> _buckets = <String, _MetricBucket>{};
 
-  static RuntimeMetricTimer start(String operation) =>
-      RuntimeMetricTimer._(operation, Stopwatch()..start());
+  static RuntimeMetricTimer start(String operation) {
+    final bucket = _bucketFor(operation);
+    bucket.active++;
+    bucket.peakActive = math.max(bucket.peakActive, bucket.active);
+    return RuntimeMetricTimer._(operation, Stopwatch()..start(), bucket);
+  }
 
   static void record(
     String operation, {
@@ -66,12 +80,30 @@ class RuntimeMetrics {
     bool success = true,
     bool cancelled = false,
     int bytes = 0,
-  }) {
+  }) =>
+      _record(
+        _bucketFor(operation),
+        elapsed: elapsed,
+        success: success,
+        cancelled: cancelled,
+        bytes: bytes,
+      );
+
+  static _MetricBucket _bucketFor(String operation) {
     var key = _normaliseOperation(operation);
     if (!_buckets.containsKey(key) && _buckets.length >= maxMetricBuckets - 1) {
       key = 'overflow';
     }
-    final bucket = _buckets.putIfAbsent(key, _MetricBucket.new);
+    return _buckets.putIfAbsent(key, _MetricBucket.new);
+  }
+
+  static void _record(
+    _MetricBucket bucket, {
+    required Duration elapsed,
+    required bool success,
+    required bool cancelled,
+    required int bytes,
+  }) {
     bucket.count++;
     if (cancelled) {
       bucket.cancelled++;
@@ -97,6 +129,8 @@ class RuntimeMetrics {
         failure: entry.value.failure,
         cancelled: entry.value.cancelled,
         bytes: entry.value.bytes,
+        active: entry.value.active,
+        peakActive: entry.value.peakActive,
         p50Milliseconds: _percentile(values, .50),
         p95Milliseconds: _percentile(values, .95),
       );
@@ -133,17 +167,22 @@ class RuntimeMetrics {
 }
 
 class RuntimeMetricTimer {
-  RuntimeMetricTimer._(this.operation, this._watch);
+  RuntimeMetricTimer._(this.operation, this._watch, this._bucket);
 
   final String operation;
   final Stopwatch _watch;
+  final _MetricBucket _bucket;
   bool _finished = false;
 
   void finish({bool success = true, bool cancelled = false, int bytes = 0}) {
     if (_finished) return;
     _finished = true;
-    RuntimeMetrics.record(
-      operation,
+    _watch.stop();
+    _bucket.active--;
+    // Keep a timer in the bucket it started in. A reset must not let an older
+    // operation decrement or add samples to a new diagnostics session.
+    RuntimeMetrics._record(
+      _bucket,
       elapsed: _watch.elapsed,
       success: success,
       cancelled: cancelled,

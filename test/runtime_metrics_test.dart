@@ -20,6 +20,8 @@ void main() {
     expect(metric.failure, 1);
     expect(metric.cancelled, 1);
     expect(metric.bytes, 0);
+    expect(metric.active, 0);
+    expect(metric.peakActive, 0);
     expect(metric.p50Milliseconds, 30);
     expect(metric.p95Milliseconds, 40);
   });
@@ -45,6 +47,56 @@ void main() {
     expect(metric.count, 1);
     expect(metric.success, 1);
     expect(metric.bytes, 123);
+    expect(metric.active, 0);
+    expect(metric.peakActive, 1);
+  });
+
+  test('tracks overlapping operations through success failure and cancellation',
+      () {
+    final first = RuntimeMetrics.start('network.request');
+    final second = RuntimeMetrics.start('network.request');
+    var metric = RuntimeMetrics.snapshot()['network.request']!;
+    expect(metric.count, 0);
+    expect(metric.active, 2);
+    expect(metric.peakActive, 2);
+    expect(metric.p50Milliseconds, isNull);
+
+    first.finish();
+    final third = RuntimeMetrics.start('network.request');
+    second.finish(success: false);
+    second.finish();
+    third.finish(cancelled: true);
+
+    metric = RuntimeMetrics.snapshot()['network.request']!;
+    expect(metric.count, 3);
+    expect(metric.success, 1);
+    expect(metric.failure, 1);
+    expect(metric.cancelled, 1);
+    expect(metric.active, 0);
+    expect(metric.peakActive, 2);
+    expect(metric.toJson()['peakActive'], 2);
+  });
+
+  test('reset isolates timers from the previous diagnostics session', () {
+    final previous = RuntimeMetrics.start('network.request');
+    RuntimeMetrics.reset();
+    final current = RuntimeMetrics.start('network.request');
+
+    previous.finish(success: false, bytes: 123);
+
+    var metric = RuntimeMetrics.snapshot()['network.request']!;
+    expect(metric.count, 0);
+    expect(metric.active, 1);
+    expect(metric.peakActive, 1);
+    expect(metric.bytes, 0);
+
+    current.finish(bytes: 456);
+    metric = RuntimeMetrics.snapshot()['network.request']!;
+    expect(metric.count, 1);
+    expect(metric.success, 1);
+    expect(metric.failure, 0);
+    expect(metric.active, 0);
+    expect(metric.bytes, 456);
   });
 
   test('bounds the number of metric operation buckets', () {
@@ -55,5 +107,26 @@ void main() {
     final snapshot = RuntimeMetrics.snapshot();
     expect(snapshot.length, RuntimeMetrics.maxMetricBuckets);
     expect(snapshot['overflow']?.count, greaterThan(0));
+  });
+
+  test('bounds buckets while operations are still active', () {
+    final timers = <RuntimeMetricTimer>[];
+    for (var i = 0; i < RuntimeMetrics.maxMetricBuckets + 32; i++) {
+      timers.add(RuntimeMetrics.start('operation$i'));
+    }
+
+    var snapshot = RuntimeMetrics.snapshot();
+    expect(snapshot.length, RuntimeMetrics.maxMetricBuckets);
+    expect(snapshot.values.fold(0, (sum, metric) => sum + metric.active),
+        timers.length);
+
+    for (final timer in timers) {
+      timer.finish();
+    }
+    snapshot = RuntimeMetrics.snapshot();
+    expect(snapshot.values.every((metric) => metric.active == 0), isTrue);
+    expect(snapshot.values.fold(0, (sum, metric) => sum + metric.count),
+        timers.length);
+    expect(snapshot['overflow']?.peakActive, 33);
   });
 }

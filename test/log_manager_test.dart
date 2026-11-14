@@ -88,6 +88,52 @@ void main() {
     expect(await logFile.readAsString(), contains('current event'));
   });
 
+  test('explicit rotation stays ordered between queued writes', () async {
+    LogManager.addLog(LogLevel.info, 'Network', 'before rotation');
+    final rotation = LogManager.rotate();
+    LogManager.addLog(LogLevel.info, 'Network', 'after rotation');
+    await rotation;
+    await LogManager.flush();
+
+    final rotated = directory
+        .listSync()
+        .whereType<File>()
+        .where((file) => file.path.startsWith('${logFile.path}.'))
+        .toList();
+    expect(rotated, hasLength(1));
+    final previous = await rotated.single.readAsString();
+    final current = await logFile.readAsString();
+    expect(previous, contains('before rotation'));
+    expect(previous, isNot(contains('after rotation')));
+    expect(current, contains('after rotation'));
+    expect(current, isNot(contains('before rotation')));
+  });
+
+  test('retention removes only generated rotations beyond the limit', () async {
+    LogManager.maxRotatedLogFiles = 2;
+    final unrelated = File('${logFile.path}.backup');
+    await unrelated.writeAsString('keep unrelated file');
+    for (var index = 0; index < 4; index++) {
+      final old = File('${logFile.path}.2000010${index + 1}-000000-000000');
+      await old.writeAsString('old event $index');
+      await old.setLastModified(DateTime(2000, 1, index + 1));
+    }
+
+    LogManager.addLog(LogLevel.info, 'Network', 'current event');
+    await LogManager.flush();
+
+    expect(await unrelated.readAsString(), 'keep unrelated file');
+    expect(await logFile.readAsString(), contains('current event'));
+    final retained = directory
+        .listSync()
+        .whereType<File>()
+        .where((file) => file.path.startsWith('${logFile.path}.2000'))
+        .toList();
+    expect(retained, hasLength(2));
+    expect(await Future.wait(retained.map((file) => file.readAsString())),
+        unorderedEquals(['old event 2', 'old event 3']));
+  });
+
   test('file failures do not escape addLog or flush', () async {
     final blockedPath = '${directory.path}/blocked';
     await Directory(blockedPath).create();
@@ -100,7 +146,16 @@ void main() {
     );
     await expectLater(LogManager.flush(), completes);
 
-    expect(LogManager.writeFailureCount, greaterThan(failuresBefore));
+    expect(LogManager.writeFailureCount, failuresBefore + 1);
+    expect(LogManager.lastWriteError, isA<FileSystemException>());
+    expect(LogManager.lastWriteStackTrace, isNotNull);
     expect(LogManager.logs.last.content, 'still in memory');
+
+    LogManager.logFile = logFile;
+    LogManager.addLog(LogLevel.info, 'Network', 'file writing recovered');
+    await expectLater(LogManager.flush(), completes);
+
+    expect(await logFile.readAsString(), contains('file writing recovered'));
+    expect(LogManager.writeFailureCount, failuresBefore + 1);
   });
 }
