@@ -216,13 +216,16 @@ void main() {
         dataPath, {target.path: replacement.path});
     transaction.apply();
     final journal = File('$dataPath/data-restore/journal.json');
-    final state =
+    var state =
         jsonDecode(await journal.readAsString()) as Map<String, dynamic>;
     state['preferences']['firstUse'] = 'invalid-list';
     await journal.writeAsString(jsonEncode(state), flush: true);
     await expectLater(recoverPendingDataRestore(dataPath), throwsA(anything));
     expect(await target.readAsString(), 'original');
     expect(journal.existsSync(), isTrue);
+    // Recovery persists per-entry progress before restoring files. Reload the
+    // journal so changing the preference fixture does not discard that proof.
+    state = jsonDecode(await journal.readAsString()) as Map<String, dynamic>;
     state['preferences']['firstUse'] = ['old'];
     await journal.writeAsString(jsonEncode(state), flush: true);
     await recoverPendingDataRestore(dataPath);
