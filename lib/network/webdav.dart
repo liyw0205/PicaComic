@@ -554,11 +554,16 @@ class Webdav {
   /// Null means keep local settings. No archive is selected by wall clock.
   static Future<bool> resolveConflict({String? settingsRevision}) =>
       _enqueueOperation(() async {
+        final timer = RuntimeMetrics.start('sync.resolve');
+        var succeeded = false;
         List<String>? config;
         SyncTransport? transport;
         try {
           config = await _config(null);
-          if (config == null) return true;
+          if (config == null) {
+            succeeded = true;
+            return true;
+          }
           transport = transportFactory(config);
           final state = await _state(config);
           final heads = revisionHeads(await _revisions(transport));
@@ -583,13 +588,16 @@ class Webdav {
           state['heads'] = heads.map((e) => e.id).toList();
           await _saveState(config, state);
           // Publish one descendant only after every branch has been merged.
-          return await _uploadOnceExclusive(null);
+          final result = await _uploadOnceExclusive(null);
+          succeeded = result && lastResult.succeeded;
+          return result;
         } catch (e, s) {
           lastResult = const SyncResult(SyncStatus.failed);
           Log.error('Sync', '${safeNetworkError(e)}\n$s');
           return false;
         } finally {
           transport?.close();
+          timer.finish(success: succeeded);
         }
       });
 

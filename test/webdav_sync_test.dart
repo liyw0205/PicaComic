@@ -112,7 +112,7 @@ void main() {
       expect(transport.downloads, [second.archiveName]);
       expect(transport.closed, isTrue);
       expect(Webdav.lastResult.status, SyncStatus.failed);
-      final metric = RuntimeMetrics.snapshot()['sync.upload']!;
+      final metric = RuntimeMetrics.snapshot()['sync.resolve']!;
       expect(metric.failure, 1);
       expect(metric.active, 0);
     } finally {
