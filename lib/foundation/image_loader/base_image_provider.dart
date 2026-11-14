@@ -1,4 +1,4 @@
-import 'dart:async' show Future, StreamController, scheduleMicrotask;
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui show Codec;
 import 'dart:ui';
@@ -36,6 +36,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
     StreamController<ImageChunkEvent> chunkEvents,
     ImageDecoderCallback decode,
   ) async {
+    final cancellation = ImageLoadCancellation();
     try {
       int retryTime = 1;
 
@@ -43,6 +44,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 
       chunkEvents.onCancel = () {
         stop = true;
+        return cancellation.cancel();
       };
 
       Uint8List? data;
@@ -53,7 +55,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
           if (cached != null) {
             data = cached;
           } else {
-            data = await load(chunkEvents);
+            data = await loadWithCancellation(chunkEvents, cancellation);
           }
         } catch (e) {
           if (e is ImageTaskCancelledException ||
@@ -135,6 +137,15 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents);
 
+  /// Loads bytes while allowing a completer that lost its listeners to stop
+  /// an underlying stream. Existing providers can keep implementing [load];
+  /// providers backed by a cancellable stream may override this method.
+  Future<Uint8List> loadWithCancellation(
+    StreamController<ImageChunkEvent> chunkEvents,
+    ImageLoadCancellation cancellation,
+  ) =>
+      load(chunkEvents);
+
   String get key;
 
   @override
@@ -152,3 +163,41 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 }
 
 typedef FileDecoderCallback = Future<ui.Codec> Function(Uint8List);
+
+/// Cancellation hooks owned by one BaseImageProvider load.
+///
+/// A [MultiFrameImageStreamCompleter] cancels its chunk-event subscription when
+/// the last listener is removed. Provider implementations register the actual
+/// source subscription here so that cancellation reaches the network task.
+class ImageLoadCancellation {
+  bool _cancelled = false;
+  final _callbacks = <FutureOr<void> Function()>{};
+
+  bool get isCancelled => _cancelled;
+
+  void register(FutureOr<void> Function() callback) {
+    if (_cancelled) {
+      unawaited(_run(callback));
+      return;
+    }
+    _callbacks.add(callback);
+  }
+
+  Future<void> cancel() async {
+    if (_cancelled) return;
+    _cancelled = true;
+    final callbacks = List<FutureOr<void> Function()>.of(_callbacks);
+    _callbacks.clear();
+    for (final callback in callbacks) {
+      await _run(callback);
+    }
+  }
+
+  Future<void> _run(FutureOr<void> Function() callback) async {
+    try {
+      await callback();
+    } catch (_) {
+      // Cancellation is best effort. The load itself reports its source error.
+    }
+  }
+}
