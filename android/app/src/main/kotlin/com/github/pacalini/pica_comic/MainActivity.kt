@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
+import android.os.Debug
 import android.Manifest
 import android.content.Context
 import android.net.ConnectivityManager
@@ -113,6 +114,13 @@ class MainActivity: FlutterFragmentActivity() {
                 else -> res.notImplemented()
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pica_comic/runtime_memory").setMethodCallHandler{
+                call, res ->
+            when (call.method) {
+                "sample" -> res.success(sampleRuntimeMemory())
+                else -> res.notImplemented()
+            }
+        }
         //保持屏幕常亮
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"com.github.pacalini.pica_comic/keepScreenOn").setMethodCallHandler{
                 call, _ ->
@@ -183,6 +191,21 @@ class MainActivity: FlutterFragmentActivity() {
     private fun getDeviceInfo(): String{
         //获取cpu架构从而找到应当下载的app版本
         return Build.SUPPORTED_ABIS[0]
+    }
+
+    private fun sampleRuntimeMemory(): Map<String, Long> {
+        val memory = Debug.MemoryInfo()
+        Debug.getMemoryInfo(memory)
+        val runtime = Runtime.getRuntime()
+        return mapOf(
+            "totalPssKb" to memory.totalPss.toLong(),
+            "privateDirtyKb" to memory.totalPrivateDirty.toLong(),
+            "nativePssKb" to memory.nativePss.toLong(),
+            "dalvikPssKb" to memory.dalvikPss.toLong(),
+            "otherPssKb" to memory.otherPss.toLong(),
+            "javaHeapUsedKb" to ((runtime.totalMemory() - runtime.freeMemory()) / 1024L),
+            "javaHeapMaxKb" to (runtime.maxMemory() / 1024L),
+        )
     }
 
     private fun getProxy(): String{

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:pica_comic/network/source_network_policy.dart';
 
+import 'runtime_memory.dart';
+
 /// A bounded, in-memory metric sample. Values are intentionally numeric so a
 /// diagnostic export cannot accidentally contain URLs, response bodies, or
 /// credentials.
@@ -145,6 +147,15 @@ class RuntimeMetrics {
         },
         'sourceNetwork': SourceNetworkPolicy.instance.diagnosticSummary(),
       };
+
+  /// Collects the bounded runtime counters and one opt-in platform memory
+  /// sample for a diagnostics export.
+  static Future<Map<String, Object?>> diagnosticSummaryWithMemory() async {
+    final summary = <String, Object?>{...diagnosticSummary()};
+    final memory = await RuntimeMemory.sample();
+    if (memory != null) summary['memory'] = memory.toJson();
+    return summary;
+  }
 
   static void reset() => _buckets.clear();
 
