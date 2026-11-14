@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:dio/dio.dart';
@@ -113,6 +114,8 @@ void main() {
             return const Res.error('429 rate limit');
           case 'authentication':
             return const Res.error('403 authentication required');
+          case 'timeout':
+            throw TimeoutException('fixture request timed out');
           case 'parse':
             return const Res.error('invalid JSON payload');
           case 'wrapped-parse':
@@ -143,6 +146,11 @@ void main() {
           name: 'authentication',
           operation: () => source.loadComicInfo!('authentication'),
           expectedKind: SourceNetworkErrorKind.authentication,
+        ),
+        ComicSourceContractErrorCase(
+          name: 'timeout',
+          operation: () => source.loadComicInfo!('timeout'),
+          expectedKind: SourceNetworkErrorKind.timeout,
         ),
         ComicSourceContractErrorCase(
           name: 'parse',
