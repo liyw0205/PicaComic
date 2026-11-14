@@ -727,9 +727,18 @@ class ImageManager {
           bytes.length, (bytes.length / 0.75).toInt(), url, savePath);
       yield progress;
       loadingItems[urlWithoutParam] = progress;
+      if (cancelToken.isCancelled) {
+        throw DioException(
+            requestOptions: RequestOptions(path: url),
+            type: DioExceptionType.cancel);
+      }
       if (url.split('.').last != "gif") {
-        bytes = await startRecombineAndWriteImage(
-            bytes, epsId, scrambleId, bookId, savePath);
+        bytes = await startRecombineImage(bytes, epsId, scrambleId, bookId);
+      }
+      if (cancelToken.isCancelled) {
+        throw DioException(
+            requestOptions: RequestOptions(path: url),
+            type: DioExceptionType.cancel);
       }
       await cachingFile.writeBytes(bytes);
       await cachingFile.close();
