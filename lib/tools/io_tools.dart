@@ -372,11 +372,17 @@ Future<bool> runExportData(bool includeDownload) async {
 
 enum DataImportResult { imported, skipped, cancelled, failed }
 
+/// Compatibility wrapper for the original boolean import API.
+///
+/// A skipped archive is a successful no-op for the revision-based sync API,
+/// but the legacy boolean contract historically returned `false` when an
+/// older archive was not applied. Keep that distinction explicit at this
+/// boundary; callers that need to report the reason should use
+/// [importDataResult] directly.
 Future<bool> importData([String? filePath]) async {
   final result =
       await importDataResult(filePath, checkVersion: filePath != null);
-  return result == DataImportResult.imported ||
-      result == DataImportResult.skipped;
+  return result == DataImportResult.imported;
 }
 
 Future<DataImportResult> importDataResult(String? filePath,
