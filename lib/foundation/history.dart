@@ -220,8 +220,21 @@ class HistoryManager {
           LogLevel.info, "HistoryManager.tryUpdateDb", "db file not exist");
       return;
     }
-    await mergeFrom(file.path);
+    await _mergeWithReadonlyFallback(() => mergeFrom(file.path));
     _deleteImportedSource(file);
+  }
+
+  Future<void> _mergeWithReadonlyFallback(
+      Future<void> Function() operation) async {
+    try {
+      await operation();
+    } on SqliteException catch (error) {
+      // The source directory may be writable only for the already-open
+      // database file. Avoid creating a rollback journal beside it on retry.
+      if (error.resultCode != 8) rethrow;
+      _db.execute('PRAGMA journal_mode = MEMORY;');
+      await operation();
+    }
   }
 
   void _deleteImportedSource(File file) {

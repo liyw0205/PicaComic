@@ -472,17 +472,32 @@ class LocalFavoritesManager {
   Future<void> readData() => DataMaintenance.run(() async {
         var file = File("${App.dataPath}/localFavorite");
         if (file.existsSync()) {
-          await mergeLegacyJson(file.path);
+          await _mergeWithReadonlyFallback(() => mergeLegacyJson(file.path));
           _deleteImportedSource(file);
         } else if ((file = File("${App.dataPath}/local_favorite_temp.db"))
             .existsSync()) {
-          await mergeFrom(file.path);
+          await _mergeWithReadonlyFallback(() => mergeFrom(file.path));
           _deleteImportedSource(file);
         } else {
           LogManager.addLog(LogLevel.info, "LocalFavoritesManager",
               "no local favorites db file found");
         }
       }, suppressSync: true);
+
+  Future<void> _mergeWithReadonlyFallback(
+      Future<void> Function() operation) async {
+    try {
+      await operation();
+    } on SqliteException catch (error) {
+      // SQLite's default rollback journal is created beside the database. A
+      // read-only parent directory can still contain a writable database, so
+      // retry this import with an in-memory journal while preserving the
+      // transaction boundary.
+      if (error.resultCode != 8) rethrow;
+      _db.execute('PRAGMA journal_mode = MEMORY;');
+      await operation();
+    }
+  }
 
   void _deleteImportedSource(File file) {
     try {
