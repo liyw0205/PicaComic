@@ -231,8 +231,10 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
         throw StateError("Comic source response is empty");
       } else {
         parseStarted = true;
-        await ComicSourceParser().parse(data, source.filePath);
-        await writeTextFileAtomically(File(source.filePath), data);
+        final normalizedData = ComicSourceParser.normalizeSource(data);
+        await ComicSourceParser().parse(normalizedData, source.filePath);
+        await writeTextFileAtomically(
+            File(source.filePath), normalizedData);
         updated = true;
       }
     } catch (e) {
