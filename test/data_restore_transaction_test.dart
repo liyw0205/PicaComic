@@ -445,6 +445,28 @@ void main() {
     expect(transaction.journal.existsSync(), isTrue);
   });
 
+  test('live transaction trust cannot be expanded by journal state mutation',
+      () async {
+    final dataPath = '${root.path}/data';
+    final trustedRoot = Directory('${root.path}/trusted')..createSync();
+    final attackerRoot = Directory('${root.path}/attacker')..createSync();
+    final target = File('${trustedRoot.path}/settings')
+      ..writeAsStringSync('old');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path},
+        allowedRoots: [trustedRoot.path]);
+    transaction.apply();
+
+    transaction.state['allowedRoots'] = [attackerRoot.path];
+    await transaction.journal
+        .writeAsString(jsonEncode(transaction.state), flush: true);
+    await expectLater(transaction.recover(), throwsA(isA<FormatException>()));
+    expect(await target.readAsString(), 'new');
+    expect(transaction.journal.existsSync(), isTrue);
+  });
+
   test('recovery rejects external roots that differ from current config',
       () async {
     final dataPath = '${root.path}/data';

@@ -850,7 +850,14 @@ Future<bool> _isSafeRestoreTarget(String dataPath, String target,
 class DataRestoreTransaction {
   final File journal;
   final Map<String, dynamic> state;
-  DataRestoreTransaction._(this.journal, this.state);
+  // Keep the runtime authorization separate from mutable journal state. A
+  // journal is persisted input and may be edited while this transaction is
+  // still alive; it must never grant itself access to a new external root.
+  final List<String> _trustedAllowedRoots;
+
+  DataRestoreTransaction._(this.journal, this.state,
+      {Iterable<String> trustedAllowedRoots = const []})
+      : _trustedAllowedRoots = List<String>.unmodifiable(trustedAllowedRoots);
 
   List<String> _validateRestoreRootIdentity() {
     final persisted = state['allowedRoots'];
@@ -865,6 +872,15 @@ class DataRestoreTransaction {
         throw const FormatException('Restore root changed before recovery');
       }
       roots.add(canonical);
+    }
+    final dataRoot =
+        Directory(journal.parent.parent.path).resolveSymbolicLinksSync();
+    for (final root
+        in roots.where((root) => !_isRestorePathWithin(dataRoot, root))) {
+      if (!_trustedAllowedRoots.any((trusted) =>
+          _normaliseRestorePath(trusted) == _normaliseRestorePath(root))) {
+        throw const FormatException('Untrusted external restore root');
+      }
     }
     return roots;
   }
@@ -903,17 +919,20 @@ class DataRestoreTransaction {
     final prefs = await SharedPreferences.getInstance();
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final entries = <Map<String, dynamic>>[];
-    final transaction = DataRestoreTransaction._(journal, {
-      'version': 1,
-      'phase': 'prepare',
-      'id': id,
-      'entries': entries,
-      'allowedRoots': canonicalAllowedRoots,
-      'preferences': {
-        for (final key in ['firstUse', 'blockingKeyword', 'favoriteTags'])
-          key: prefs.getStringList(key)
-      },
-    });
+    final transaction = DataRestoreTransaction._(
+        journal,
+        {
+          'version': 1,
+          'phase': 'prepare',
+          'id': id,
+          'entries': entries,
+          'allowedRoots': canonicalAllowedRoots,
+          'preferences': {
+            for (final key in ['firstUse', 'blockingKeyword', 'favoriteTags'])
+              key: prefs.getStringList(key)
+          },
+        },
+        trustedAllowedRoots: canonicalAllowedRoots);
     transaction._write();
     for (final entry in replacements.entries) {
       final target = entry.key;
@@ -1033,8 +1052,7 @@ class DataRestoreTransaction {
       // retryability when preference recovery fails after file rollback.
       for (final entry in entries) {
         if (entry['restored'] != true || entry['existed'] != true) continue;
-        final targetType = FileSystemEntity.typeSync(
-            entry['target'] as String,
+        final targetType = FileSystemEntity.typeSync(entry['target'] as String,
             followLinks: false);
         if (targetType != FileSystemEntityType.file &&
             targetType != FileSystemEntityType.directory) {
@@ -1211,5 +1229,7 @@ Future<void> recoverPendingDataRestore(String dataPath,
   }
   // Use the canonical path even when the previous journal was the only
   // surviving complete record, so recovery cleans both names consistently.
-  await DataRestoreTransaction._(canonical, state).recover();
+  await DataRestoreTransaction._(canonical, state,
+          trustedAllowedRoots: runtimeAllowedRoots)
+      .recover();
 }
