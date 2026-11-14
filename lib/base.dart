@@ -475,7 +475,7 @@ Future<void> clearAppdata() async {
         await file.delete();
       }
     }
-    appdata.history.clearHistory();
+    await oldAppdata.history.clearHistory();
     appdata = Appdata();
     await appdata.readData();
     await eraseCache();
