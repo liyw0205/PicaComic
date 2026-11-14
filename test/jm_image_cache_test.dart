@@ -9,6 +9,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
+import 'package:pica_comic/foundation/image_loader/image_recombine.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_client.dart';
 
@@ -65,6 +66,7 @@ void main() {
   setUp(() => responseBytes = sourceBytes);
 
   tearDownAll(() async {
+    await JmRecombine.shutdown();
     manager.dio.close(force: true);
     await CacheManager().clear();
     ImageManager.cache = previousManager;

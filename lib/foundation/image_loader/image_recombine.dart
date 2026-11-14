@@ -110,9 +110,34 @@ class JmRecombine {
 
   static _RecombinationTask? _current;
   static Future<void>? _recovering;
+  static bool _shutdownRequested = false;
+
+  /// Stops the worker and rejects queued work during application shutdown.
+  static Future<void> shutdown() async {
+    _shutdownRequested = true;
+    final error = StateError('Image recombination worker stopped');
+    final current = _current;
+    _current = null;
+    current?.completer?.completeError(error);
+    for (final task in _tasks) {
+      task.completer?.completeError(error);
+    }
+    _tasks.clear();
+
+    final isolate = _isolate;
+    _isolate = null;
+    _sendPort = null;
+    _receivePort?.close();
+    _errorPort?.close();
+    _receivePort = null;
+    _errorPort = null;
+    _recovering = null;
+    isolate?.kill(priority: Isolate.immediate);
+  }
 
   static Future<Uint8List> recombineImage(
       Uint8List imgData, String epsId, String scrambleId, String bookId) async {
+    _shutdownRequested = false;
     Completer<Uint8List> completer = Completer();
     _RecombinationTask task =
         _RecombinationTask(imgData, epsId, scrambleId, bookId, completer);
@@ -133,9 +158,16 @@ class JmRecombine {
   }
 
   static Future<void> _start() async {
+    final receivePort = _receivePort;
+    if (receivePort == null || _shutdownRequested) return;
     _errorPort = ReceivePort();
-    _isolate = await Isolate.spawn(_run, _receivePort!.sendPort,
+    final isolate = await Isolate.spawn(_run, receivePort.sendPort,
         onError: _errorPort!.sendPort, debugName: "JmRecombine");
+    if (_shutdownRequested || !identical(_receivePort, receivePort)) {
+      isolate.kill(priority: Isolate.immediate);
+      return;
+    }
+    _isolate = isolate;
     _listen();
   }
 
@@ -181,6 +213,7 @@ class JmRecombine {
         _current = null;
       }
       await Future.delayed(const Duration(milliseconds: 50));
+      if (_shutdownRequested) return;
       if (_isolate == null && _receivePort == null) {
         _receivePort = ReceivePort();
         await _start();
