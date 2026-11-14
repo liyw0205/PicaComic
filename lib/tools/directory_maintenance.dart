@@ -507,11 +507,31 @@ Future<bool> _destinationMatches(
   Directory destination,
   List<_MigrationEntry> entries,
 ) async {
+  final expectedPaths = <String>{};
   for (final entry in entries) {
+    if (!expectedPaths.add(entry.relativePath)) return false;
     final file = File(_joinRelative(destination.path, entry.relativePath));
     if (!await _matchesDigest(file, entry.size, entry.sha256)) return false;
   }
-  return true;
+
+  // A committed journal is the last point at which it is safe to delete the
+  // source. Detect files added after the rename instead of treating a partial
+  // match as a successful recovery and losing the original directory.
+  final destinationPath = _absolutePath(destination.path);
+  final actualPaths = <String>{};
+  await for (final entity in destination.list(recursive: true, followLinks: false)) {
+    if (entity is Link) return false;
+    if (entity is! File) continue;
+    final absolute = _absolutePath(entity.path);
+    if (!_isWithin(absolute, destinationPath)) return false;
+    actualPaths.add(
+      absolute
+          .substring(destinationPath.length + 1)
+          .replaceAll(Platform.pathSeparator, '/'),
+    );
+  }
+  return actualPaths.length == expectedPaths.length &&
+      actualPaths.containsAll(expectedPaths);
 }
 
 class _MigrationPlanData {
