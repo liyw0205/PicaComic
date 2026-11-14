@@ -1028,20 +1028,73 @@ class DataRestoreTransaction {
       }
     }
     if (state['phase'] != 'committed') {
+      // A consumed backup is only safe to ignore after the journal records
+      // that this entry's original target was restored. This preserves
+      // retryability when preference recovery fails after file rollback.
+      for (final entry in entries) {
+        if (entry['restored'] != true || entry['existed'] != true) continue;
+        final targetType = FileSystemEntity.typeSync(
+            entry['target'] as String,
+            followLinks: false);
+        if (targetType != FileSystemEntityType.file &&
+            targetType != FileSystemEntityType.directory) {
+          throw StateError(
+              'Cannot prove restored target exists; journal retained');
+        }
+      }
+      // Check every old target before moving any backup. A missing backup in
+      // a phase where replacement may have started is unrecoverable evidence;
+      // fail before a partial rollback can consume other backups.
+      for (final entry in entries) {
+        if (entry['restored'] == true ||
+            entry['existed'] != true ||
+            FileSystemEntity.typeSync(entry['backup'] as String,
+                    followLinks: false) !=
+                FileSystemEntityType.notFound) {
+          continue;
+        }
+        final stagedType = FileSystemEntity.typeSync(entry['staged'] as String,
+            followLinks: false);
+        final untouched = state['phase'] == 'prepare' ||
+            (state['phase'] == 'replace' &&
+                stagedType != FileSystemEntityType.notFound);
+        if (!untouched) {
+          throw StateError('Missing original restore backup; journal retained');
+        }
+        if (FileSystemEntity.typeSync(entry['target'] as String,
+                followLinks: false) ==
+            FileSystemEntityType.notFound) {
+          throw StateError(
+              'Cannot prove original restore target exists; journal retained');
+        }
+      }
       for (final entry in entries.toList().reversed) {
         final backup = entry['backup'] as String;
         final target = entry['target'] as String;
         final type = FileSystemEntity.typeSync(backup, followLinks: false);
         if (type != FileSystemEntityType.notFound) {
+          // Persist intent before the rename. If the process stops between
+          // the rename and this journal update, the backup remains available;
+          // if it stops after the update, retry can prove the old target was
+          // restored even though the backup has been consumed.
+          if (entry['restored'] != true) {
+            entry['restored'] = true;
+            _write();
+          }
           _deleteEntity(target);
           if (type == FileSystemEntityType.directory)
             Directory(backup).renameSync(target);
           else
             File(backup).renameSync(target);
         } else if (entry['existed'] == false) {
+          if (entry['restored'] != true) {
+            entry['restored'] = true;
+            _write();
+          }
           _deleteEntity(target);
-        } else if (FileSystemEntity.typeSync(target, followLinks: false) ==
-            FileSystemEntityType.notFound) {
+        } else if (entry['restored'] != true &&
+            FileSystemEntity.typeSync(target, followLinks: false) ==
+                FileSystemEntityType.notFound) {
           throw StateError(
               'Cannot prove original restore target exists; journal retained');
         }

@@ -285,6 +285,27 @@ void main() {
     expect(transaction.journal.existsSync(), isTrue);
   });
 
+  test('applied restore retains journal when an old backup disappears',
+      () async {
+    final dataPath = '${root.path}/data';
+    final target = File('$dataPath/settings')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('old');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path});
+    transaction.apply();
+
+    final state = jsonDecode(await transaction.journal.readAsString()) as Map;
+    await File(state['entries'][0]['backup'] as String).delete();
+
+    await expectLater(
+        recoverPendingDataRestore(dataPath), throwsA(isA<StateError>()));
+    expect(await target.readAsString(), 'new');
+    expect(transaction.journal.existsSync(), isTrue);
+  });
+
   test('rollback rejects a planted backup link before changing the target',
       () async {
     final dataPath = '${root.path}/data';
