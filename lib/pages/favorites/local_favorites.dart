@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_reorderable_grid_view/widgets/reorderable_builder.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/history.dart';
@@ -270,9 +272,7 @@ class RenameFolderDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = TextEditingController(
-      text: before
-    );
+    final controller = TextEditingController(text: before);
     final FocusNode focusNode = FocusNode();
     focusNode.requestFocus();
     return SimpleDialog(
@@ -491,7 +491,7 @@ class LocalFavoriteTile extends ComicTile {
         DesktopMenuEntry(
           text: "取消收藏".tl,
           onClick: () {
-            LocalFavoritesManager().deleteComic(folderName, comic);
+            unawaited(LocalFavoritesManager().deleteComic(folderName, comic));
             onDelete();
           },
         ),
@@ -560,7 +560,8 @@ class LocalFavoriteTile extends ComicTile {
                       title: Text("取消收藏".tl),
                       onTap: () {
                         App.globalBack();
-                        LocalFavoritesManager().deleteComic(folderName, comic);
+                        unawaited(LocalFavoritesManager()
+                            .deleteComic(folderName, comic));
                         onDelete();
                       },
                     ),
@@ -619,7 +620,7 @@ class LocalFavoriteTile extends ComicTile {
       var download =
           await DownloadManager().getComicOrNull(comic.toDownloadId());
       if (download != null) {
-        download.read();
+        unawaited(download.read());
         return;
       }
     }
@@ -931,8 +932,11 @@ class LocalFavoriteTile extends ComicTile {
                             Center(
                               child: FilledButton(
                                   onPressed: () {
-                                    LocalFavoritesManager().editTags(
-                                        comic.target, folderName, tags);
+                                    unawaited(LocalFavoritesManager().editTags(
+                                        comic.target,
+                                        folderName,
+                                        tags,
+                                        comic.type));
                                     App.globalBack();
                                     StateController.findOrNull<
                                             FavoritesPageController>()
@@ -1158,7 +1162,8 @@ Future<void> checkFolder(String name) async {
       if (!available) {
         unavailableNum++;
         if (!comic.tags.contains("Unavailable")) {
-          LocalFavoritesManager().addTagTo(name, comic.target, "Unavailable");
+          LocalFavoritesManager()
+              .addTagTo(name, comic.target, "Unavailable", comic.type);
         }
       }
       checked++;

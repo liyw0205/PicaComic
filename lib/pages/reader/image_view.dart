@@ -26,6 +26,8 @@ extension ImageExt on ComicReadingPage {
   Widget buildComicView(
       ComicReadingPageLogic logic, BuildContext context, String target) {
     ScrollExtension.futurePosition = null;
+    final (firstVisible, visibleCount) = logic.visibleImageRange;
+    precacheComicImage(logic, context, firstVisible + visibleCount, target);
     Widget buildType4() {
       return ScrollablePositionedList.builder(
         itemScrollController: logic.itemScrollController,
@@ -48,8 +50,7 @@ extension ImageExt on ComicReadingPage {
             imageWidth = height / 1.2;
           }
 
-          precacheComicImage(logic, context, index + 1, target);
-
+          if (!logic.readerImages.contains(index)) return const SizedBox();
           ImageProvider image = createImageProvider(type, logic, index, target);
           return ComicImage(
             filterQuality: FilterQuality.medium,
@@ -79,6 +80,10 @@ extension ImageExt on ComicReadingPage {
         builder: (BuildContext context, int index) {
           ImageProvider? imageProvider;
           if (index != 0 && index != logic.urls.length + 1) {
+            if (!logic.readerImages.contains(index - 1)) {
+              return PhotoViewGalleryPageOptions.customChild(
+                  child: const SizedBox());
+            }
             imageProvider = createImageProvider(type, logic, index - 1, target);
           } else {
             return PhotoViewGalleryPageOptions.customChild(
@@ -86,8 +91,6 @@ extension ImageExt on ComicReadingPage {
               child: const SizedBox(),
             );
           }
-
-          precacheComicImage(logic, context, index, target);
 
           BoxFit getFit() {
             switch (appdata.settings[41]) {
@@ -198,7 +201,9 @@ extension ImageExt on ComicReadingPage {
         {required int imageIndex,
         required BoxFit fit,
         required Alignment alignment}) {
-      if (imageIndex < 0 || imageIndex >= logic.urls.length) {
+      if (imageIndex < 0 ||
+          imageIndex >= logic.urls.length ||
+          !logic.readerImages.contains(imageIndex)) {
         return const SizedBox();
       }
 
@@ -231,8 +236,6 @@ extension ImageExt on ComicReadingPage {
             return PhotoViewGalleryPageOptions.customChild(
                 child: const SizedBox());
           }
-          precacheComicImage(logic, context, index * 2 + 1, target);
-
           logic.photoViewControllers[index] ??= PhotoViewController();
 
           int firstImage = index * 2 - 2;
@@ -394,8 +397,7 @@ extension ImageExt on ComicReadingPage {
   /// create a image provider
   ImageProvider createImageProvider(
       ReadingType type, ComicReadingPageLogic logic, int index, String target) {
-    return logic.data
-        .createImageProvider(logic.order, index, logic.urls[index]);
+    return logic.readerImages.imageFor(index);
   }
 
   /// check current location of [PageView], update location when it is out of range.
@@ -438,44 +440,18 @@ extension ImageExt on ComicReadingPage {
   /// preload image
   void precacheComicImage(ComicReadingPageLogic logic, BuildContext context,
       int index, String target) {
-    if (logic.requestedLoadingItems.length != logic.length) {
-      logic.requestedLoadingItems = List.filled(logic.length, false);
-    }
-    final generation = logic.preloadGeneration;
-    final pageCount = int.tryParse(appdata.settings[28]) ?? 0;
-    final firstEnd = (index + pageCount).clamp(0, logic.urls.length);
-    void request(int candidate) {
-      if (candidate < 0 ||
-          candidate >= logic.urls.length ||
-          logic.requestedLoadingItems[candidate]) {
-        return;
-      }
-      logic.requestedLoadingItems[candidate] = true;
-      try {
-        unawaited(precacheImage(
-          createImageProvider(type, logic, candidate, target),
-          context,
-        ).catchError((_) {
-          if (generation == logic.preloadGeneration &&
-              candidate < logic.requestedLoadingItems.length) {
-            logic.requestedLoadingItems[candidate] = false;
-          }
-        }));
-      } catch (_) {
-        if (generation == logic.preloadGeneration) {
-          logic.requestedLoadingItems[candidate] = false;
-        }
-      }
-    }
-
-    for (var candidate = index; candidate < firstEnd; candidate++) {
-      request(candidate);
-    }
-    if (!ImageManager.haveTask) {
-      final secondEnd = (firstEnd + 3).clamp(0, logic.urls.length);
-      for (var candidate = firstEnd; candidate < secondEnd; candidate++) {
-        request(candidate);
-      }
-    }
+    final (firstVisible, _) = logic.visibleImageRange;
+    final chapter = logic.order;
+    final urls = logic.urls;
+    logic.readerImages.configure(
+      context: context,
+      imageCount: urls.length,
+      firstVisible: firstVisible,
+      visibleCount: (index - firstVisible).clamp(1, urls.length),
+      preloadCount: int.tryParse(appdata.settings[28]) ?? 0,
+      createProvider: (candidate, scope) => logic.data.createImageProvider(
+          chapter, candidate, urls[candidate],
+          taskScope: scope),
+    );
   }
 }

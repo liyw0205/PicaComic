@@ -646,7 +646,7 @@ class NormalComicTile extends ComicTile {
   String? get badge => badgeName;
 
   @override
-  Widget get image => AnimatedImage(
+  Widget get image => ThumbnailImage(
         image: CachedImageProvider(
           coverPath,
           headers: headers,
@@ -771,7 +771,7 @@ class CustomComicTile extends ComicTile {
   String get description => comic.description;
 
   @override
-  Widget get image => AnimatedImage(
+  Widget get image => ThumbnailImage(
         image: StreamImageProvider(
             () =>
                 ImageManager().getCustomThumbnail(comic.cover, comic.sourceKey),

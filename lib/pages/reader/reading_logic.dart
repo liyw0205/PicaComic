@@ -57,11 +57,11 @@ class ComicReadingPageLogic extends StateController {
 
   bool get isCtrlPressed => HardwareKeyboard.instance.isControlPressed;
 
-  List<bool> requestedLoadingItems = [];
+  final readerImages = ReaderImageController();
 
-  int _preloadGeneration = 0;
+  List<bool> get requestedLoadingItems => readerImages.requested;
 
-  int get preloadGeneration => _preloadGeneration;
+  int get preloadGeneration => readerImages.generation;
 
   // A chapter request can outlive a fast chapter switch. The token prevents
   // an older response from replacing the newly selected chapter.
@@ -70,10 +70,34 @@ class ComicReadingPageLogic extends StateController {
   bool loadInFlight = false;
 
   void resetPreloadState() {
-    _preloadGeneration++;
+    readerImages.reset();
     _loadGeneration++;
     loadInFlight = false;
-    requestedLoadingItems = [];
+  }
+
+  void releaseImageTasks() {
+    _loadGeneration++;
+    loadInFlight = false;
+    readerImages.dispose();
+  }
+
+  (int first, int count) get visibleImageRange {
+    if (readingMethod == ReadingMethod.topToBottomContinuously) {
+      final visible = itemScrollListener.itemPositions.value
+          .where(
+              (item) => item.itemTrailingEdge > 0 && item.itemLeadingEdge < 1)
+          .map((item) => item.index)
+          .toList()
+        ..sort();
+      if (visible.isNotEmpty) {
+        return (visible.first, visible.last - visible.first + 1);
+      }
+    }
+    final count =
+        readingMethod.isTwoPage && !(singlePageForFirstScreen && index == 1)
+            ? 2
+            : 1;
+    return (index - 1, count);
   }
 
   bool haveUsedInitialPage = false;
@@ -85,6 +109,9 @@ class ComicReadingPageLogic extends StateController {
 
   static int _getIndex(int initPage) {
     if (appdata.settings[9] == "5" || appdata.settings[9] == "6") {
+      if (appdata.implicitData[1] == '1') {
+        return initPage == 1 ? 1 : initPage ~/ 2 * 2;
+      }
       return initPage % 2 == 1 ? initPage : initPage - 1;
     } else {
       return initPage;
@@ -93,7 +120,9 @@ class ComicReadingPageLogic extends StateController {
 
   static int _getPage(int initPage) {
     if (appdata.settings[9] == "5" || appdata.settings[9] == "6") {
-      return (initPage + 2) ~/ 2;
+      return appdata.implicitData[1] == '1'
+          ? initPage ~/ 2 + 1
+          : (initPage + 1) ~/ 2;
     } else {
       return initPage;
     }
@@ -108,10 +137,20 @@ class ComicReadingPageLogic extends StateController {
     _index = _getIndex(initialPage);
     order <= 0 ? order = 1 : order;
     itemScrollListener.itemPositions.addListener(() {
-      var newIndex = itemScrollListener.itemPositions.value.first.index + 1;
+      final visible = itemScrollListener.itemPositions.value
+          .where(
+              (item) => item.itemTrailingEdge > 0 && item.itemLeadingEdge < 1)
+          .map((item) => item.index)
+          .toList()
+        ..sort();
+      if (visible.isEmpty) return;
+      var newIndex = visible.first + 1;
       if (newIndex != index) {
         index = newIndex;
-        update(["ToolBar"]);
+        update();
+      } else {
+        readerImages.updateWindow(visible.first,
+            visibleCount: visible.last - visible.first + 1);
       }
     });
   }
@@ -156,6 +195,10 @@ class ComicReadingPageLogic extends StateController {
   ///当前的页面, 0和最后一个为空白页, 用于进行章节跳转
   set index(int value) {
     _index = value;
+    if (urls.isNotEmpty) {
+      final (first, count) = visibleImageRange;
+      readerImages.updateWindow(first, visibleCount: count);
+    }
     for (var element in _indexChangeCallbacks) {
       element(value);
     }
@@ -225,6 +268,7 @@ class ComicReadingPageLogic extends StateController {
 
   void jumpToPage(int i, [bool updateWidget = false]) {
     i = i.clamp(1, length);
+    readerImages.updateWindow(i - 1);
     if (readingMethod == ReadingMethod.topToBottomContinuously) {
       itemScrollController.jumpTo(index: i - 1);
     } else if (!readingMethod.isTwoPage) {

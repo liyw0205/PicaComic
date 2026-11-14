@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:pica_comic/network/http_client.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 
 class FileDownloader {
   final String url;
@@ -80,6 +81,7 @@ class FileDownloader {
               Options(responseType: ResponseType.stream, headers: headers));
 
   Future<void> _download(StreamController<DownloadingStatus> controller) async {
+    final metric = RuntimeMetrics.start('download.file');
     Timer? timer;
     Object? failure;
     StackTrace? failureStack;
@@ -172,6 +174,11 @@ class FileDownloader {
       }
       _running = false;
       _done.complete();
+      metric.finish(
+          success: failure == null,
+          cancelled: failure is DioException &&
+              failure.type == DioExceptionType.cancel,
+          bytes: _currentBytes);
       unawaited(controller.close());
     }
   }

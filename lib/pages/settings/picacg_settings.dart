@@ -97,7 +97,8 @@ class _PicacgSettingsState extends State<PicacgSettings> {
             onChanged: (b) {
               b ? appdata.settings[6] = "1" : appdata.settings[6] = "0";
               if (App.isMobile) {
-                b ? runBackgroundService() : cancelBackgroundService();
+                unawaited(
+                    b ? runBackgroundService() : cancelBackgroundService());
               }
               setState(() {
                 punchIn = b;

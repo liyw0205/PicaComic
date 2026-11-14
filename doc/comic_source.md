@@ -33,8 +33,19 @@ App会自动处理网络请求中的Cookie, 使用`Network`对象提供的方法
       "headers": Object,
       "body": string | ArrayBuffer,
       "error": string?,
+      "errorType": string?,
 }
 ```
+
+`errorType` is an additive diagnostic field. Existing sources may continue to
+check `error`; new sources can use one of `cancelled`, `timeout`, `connection`,
+`tls`, `authentication`, `rateLimited`, `server`, `client`,
+`responseTooLarge`, `circuitOpen`, `parse`, or `unknown`. Requests from the
+same source/host share a bounded concurrency budget, minimum interval,
+idempotent GET/HEAD retry, response-size limit, and circuit breaker. A source
+must treat `circuitOpen` and `rateLimited` as retryable later rather than
+spinning in a tight loop; POST/PUT/PATCH/DELETE are never replayed by the
+transport.
 
 ```js
 let Network = {

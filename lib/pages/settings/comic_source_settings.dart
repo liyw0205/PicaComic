@@ -68,17 +68,17 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
       children: [
         buildCard(context),
         const _BuiltInSources(),
-        if(appdata.appSettings.isComicSourceEnabled("picacg"))
+        if (appdata.appSettings.isComicSourceEnabled("picacg"))
           const PicacgSettings(false).withDivider(),
-        if(appdata.appSettings.isComicSourceEnabled("ehentai"))
+        if (appdata.appSettings.isComicSourceEnabled("ehentai"))
           const EhSettings(false).withDivider(),
-        if(appdata.appSettings.isComicSourceEnabled("nhentai"))
+        if (appdata.appSettings.isComicSourceEnabled("nhentai"))
           const NhSettings(false).withDivider(),
-        if(appdata.appSettings.isComicSourceEnabled("jm"))
+        if (appdata.appSettings.isComicSourceEnabled("jm"))
           const JmSettings(false).withDivider(),
-        if(appdata.appSettings.isComicSourceEnabled("hitomi"))
+        if (appdata.appSettings.isComicSourceEnabled("hitomi"))
           const HitomiSettings(false).withDivider(),
-        if(appdata.appSettings.isComicSourceEnabled("htmanga"))
+        if (appdata.appSettings.isComicSourceEnabled("htmanga"))
           // const HtSettings(false).withDivider(),
           const HtSettings(false),
         // buildCustomSettings(),
@@ -125,19 +125,25 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
                 Tooltip(
                   message: "Edit",
                   child: IconButton(
-                      onPressed: () => edit(source),
+                      onPressed: () {
+                        unawaited(edit(source));
+                      },
                       icon: const Icon(Icons.edit_note)),
                 ),
               Tooltip(
                 message: "Update",
                 child: IconButton(
-                    onPressed: () => update(source),
+                    onPressed: () {
+                      unawaited(update(source));
+                    },
                     icon: const Icon(Icons.update)),
               ),
               Tooltip(
                 message: "Delete",
                 child: IconButton(
-                    onPressed: () => delete(source),
+                    onPressed: () {
+                      unawaited(delete(source));
+                    },
                     icon: const Icon(Icons.delete)),
               ),
             ],
@@ -151,17 +157,26 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
     );
   }
 
-  void delete(ComicSource source) {
+  Future<void> delete(ComicSource source) {
     showConfirmDialog(App.globalContext!, "删除".tl, "要删除此漫画源吗?".tl, () {
-      var file = File(source.filePath);
-      file.delete();
-      ComicSource.sources.remove(source);
-      _validatePages();
-      MyApp.updater?.call();
+      unawaited(() async {
+        try {
+          final file = File(source.filePath);
+          if (await file.exists()) {
+            await file.delete();
+          }
+          ComicSource.sources.remove(source);
+          await _validatePages();
+          MyApp.updater?.call();
+        } catch (e) {
+          showToast(message: e.toString());
+        }
+      }());
     });
+    return Future.value();
   }
 
-  void edit(ComicSource source) async {
+  Future<void> edit(ComicSource source) async {
     try {
       await Process.run("code", [source.filePath], runInShell: true);
       await showDialog(
@@ -173,9 +188,8 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
                       onPressed: () => Navigator.pop(context),
                       child: const Text("cancel")),
                   TextButton(
-                      onPressed: () async {
-                        await ComicSource.reload();
-                        MyApp.updater?.call();
+                      onPressed: () {
+                        unawaited(_reloadAfterEdit(context));
                       },
                       child: const Text("continue")),
                 ],
@@ -185,27 +199,74 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
     }
   }
 
-  static void update(ComicSource source) async {
-    ComicSource.sources.remove(source);
+  Future<void> _reloadAfterEdit(BuildContext dialogContext) async {
+    try {
+      await ComicSource.reload();
+      MyApp.updater?.call();
+      if (dialogContext.mounted) Navigator.pop(dialogContext);
+    } catch (e) {
+      showToast(message: e.toString());
+    }
+  }
+
+  static Future<void> update(ComicSource source) async {
     if (!source.url.isURL) {
       showToast(message: "Invalid url config");
+      return;
     }
+    final sourceIndex = ComicSource.sources.indexOf(source);
+    ComicSource.sources.remove(source);
     bool cancel = false;
+    var updated = false;
+    var parseStarted = false;
     var controller = showLoadingDialog(App.globalContext!,
         onCancel: () => cancel = true, barrierDismissible: false);
     try {
       var res = await logDio().get<String>(source.url,
           options: Options(responseType: ResponseType.plain));
-      if (cancel) return;
-      controller.close();
-      await ComicSourceParser().parse(res.data!, source.filePath);
-      await File(source.filePath).writeAsString(res.data!);
+      final data = res.data;
+      if (cancel) {
+        // The finally block restores the source in the in-memory list.
+      } else if (data == null) {
+        throw StateError("Comic source response is empty");
+      } else {
+        parseStarted = true;
+        await ComicSourceParser().parse(data, source.filePath);
+        await writeTextFileAtomically(File(source.filePath), data);
+        updated = true;
+      }
     } catch (e) {
-      if (cancel) return;
+      if (!cancel) showToast(message: e.toString());
+    } finally {
+      controller.close();
+    }
+    if (!updated || cancel) {
+      if (parseStarted) {
+        try {
+          // Parsing installs a temporary JS source before the file replacement;
+          // reload to discard it when validation or persistence fails.
+          await ComicSource.reload();
+          MyApp.updater?.call();
+          return;
+        } catch (e) {
+          showToast(message: e.toString());
+        }
+      }
+      if (!ComicSource.sources.contains(source)) {
+        final index =
+            sourceIndex < 0 || sourceIndex > ComicSource.sources.length
+                ? ComicSource.sources.length
+                : sourceIndex;
+        ComicSource.sources.insert(index, source);
+      }
+      return;
+    }
+    try {
+      await ComicSource.reload();
+      MyApp.updater?.call();
+    } catch (e) {
       showToast(message: e.toString());
     }
-    await ComicSource.reload();
-    MyApp.updater?.call();
   }
 
   Widget buildCard(BuildContext context) {
@@ -217,48 +278,48 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: Row(
-                children: [
-                  Text("添加漫画源".tl),
-                  const SizedBox(
-                    width: 2,
+              title: Row(children: [
+                Text("添加漫画源".tl),
+                const SizedBox(
+                  width: 2,
+                ),
+                InkWell(
+                  borderRadius: const BorderRadius.all(Radius.circular(18)),
+                  onTap: () => showDialogMessage(
+                      context, "警告".tl, "${"此功能已不再受支持".tl}\n${"请勿反馈相关问题".tl}"),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                    size: 18,
                   ),
-                  InkWell(
-                    borderRadius: const BorderRadius.all(Radius.circular(18)),
-                    onTap: () => showDialogMessage(
-                        context,
-                        "警告".tl,
-                        "${"此功能已不再受支持".tl}\n${"请勿反馈相关问题".tl}"
-                    ),
-                    child: const Icon(
-                      Icons.warning_amber_rounded,
-                      color: Colors.red,
-                      size: 18,
-                    ),
-                  )
-                ]
-              ),
+                )
+              ]),
               leading: const Icon(Icons.dashboard_customize),
             ),
             TextField(
-                    decoration: InputDecoration(
-                        hintText: "URL",
-                        border: const UnderlineInputBorder(),
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 12),
-                        suffix: IconButton(
-                            onPressed: () => handleAddSource(url),
-                            icon: const Icon(Icons.check))),
-                    onChanged: (value) {
-                      url = value;
-                    },
-                    onSubmitted: handleAddSource)
-                .paddingHorizontal(16)
-                .paddingBottom(32),
+                decoration: InputDecoration(
+                    hintText: "URL",
+                    border: const UnderlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    suffix: IconButton(
+                        onPressed: () {
+                          unawaited(handleAddSource(url));
+                        },
+                        icon: const Icon(Icons.check))),
+                onChanged: (value) {
+                  url = value;
+                },
+                onSubmitted: (value) {
+                  unawaited(handleAddSource(value));
+                }).paddingHorizontal(16).paddingBottom(32),
             Row(
               children: [
                 const Spacer(),
-                TextButton(onPressed: chooseFile, child: Text("选择文件".tl))
+                TextButton(
+                        onPressed: () {
+                          unawaited(chooseFile());
+                        },
+                        child: Text("选择文件".tl))
                     .paddingLeft(8),
                 const Spacer(),
                 TextButton(
@@ -279,7 +340,7 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
     ).paddingHorizontal(12);
   }
 
-  void chooseFile() async {
+  Future<void> chooseFile() async {
     const XTypeGroup typeGroup = XTypeGroup(
       extensions: <String>['js'],
     );
@@ -316,19 +377,24 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
       var res = await logDio()
           .get<String>(url, options: Options(responseType: ResponseType.plain));
       if (cancel) return;
-      controller.close();
-      await addSource(res.data!, fileName);
+      final data = res.data;
+      if (data == null) {
+        throw StateError("Comic source response is empty");
+      }
+      await addSource(data, fileName);
     } catch (e) {
       if (cancel) return;
       showToast(message: e.toString());
+    } finally {
+      controller.close();
     }
   }
 
   Future<void> addSource(String js, String fileName) async {
     var comicSource = await ComicSourceParser().createAndParse(js, fileName);
     ComicSource.sources.add(comicSource);
-    _addAllPagesWithComicSource(comicSource);
-    appdata.updateSettings();
+    await _addAllPagesWithComicSource(comicSource);
+    await appdata.updateSettings();
     MyApp.updater?.call();
   }
 }
@@ -345,19 +411,34 @@ class _ComicSourceList extends StatefulWidget {
 class _ComicSourceListState extends State<_ComicSourceList> {
   bool loading = true;
   List? json;
+  String? error;
 
-  void load() async {
-    var dio = logDio();
-    var res = await dio.get<String>(
-        "https://raw.githubusercontent.com/wgh136/pica_configs/master/index.json");
-    if (res.statusCode != 200) {
-      showToast(message: "网络错误".tl);
-      return;
+  @override
+  void initState() {
+    super.initState();
+    unawaited(load());
+  }
+
+  Future<void> load() async {
+    try {
+      var dio = logDio();
+      var res = await dio.get<String>(
+          "https://raw.githubusercontent.com/wgh136/pica_configs/master/index.json");
+      if (res.statusCode != 200 || res.data == null) {
+        throw StateError("Network error");
+      }
+      if (!mounted) return;
+      setState(() {
+        json = jsonDecode(res.data!);
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        error = e.toString();
+        loading = false;
+      });
     }
-    setState(() {
-      json = jsonDecode(res.data!);
-      loading = false;
-    });
   }
 
   @override
@@ -375,8 +456,9 @@ class _ComicSourceListState extends State<_ComicSourceList> {
 
   Widget buildBody() {
     if (loading) {
-      load();
       return const Center(child: CircularProgressIndicator());
+    } else if (error != null) {
+      return Center(child: Text(error!));
     } else {
       var currentKey = ComicSource.sources.map((e) => e.key).toList();
       return ListView.builder(
@@ -389,10 +471,8 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                   message: "Add",
                   child: IconButton(
                     icon: const Icon(Icons.add),
-                    onPressed: () async {
-                      await widget.onAdd(
-                          "https://raw.githubusercontent.com/wgh136/pica_configs/master/${json![index]["fileName"]}");
-                      setState(() {});
+                    onPressed: () {
+                      unawaited(_addSource(index));
                     },
                   ),
                 );
@@ -404,6 +484,16 @@ class _ComicSourceListState extends State<_ComicSourceList> {
           );
         },
       );
+    }
+  }
+
+  Future<void> _addSource(int index) async {
+    try {
+      await widget.onAdd(
+          "https://raw.githubusercontent.com/wgh136/pica_configs/master/${json![index]["fileName"]}");
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) showToast(message: e.toString());
     }
   }
 }
@@ -424,7 +514,7 @@ class _BuiltInSourcesState extends State<_BuiltInSources> {
         ListTile(
           title: Text("内置漫画源".tl),
         ),
-        for(int index = 0; index < builtInSources.length; index++)
+        for (int index = 0; index < builtInSources.length; index++)
           buildTile(index),
         const Divider(),
       ],
@@ -436,37 +526,46 @@ class _BuiltInSourcesState extends State<_BuiltInSources> {
   Widget buildTile(int index) {
     var key = builtInSources[index];
     return ListTile(
-      title: Text(
-          ComicSource.builtIn.firstWhere((e) => e.key == key).name.tl),
+      title: Text(ComicSource.builtIn.firstWhere((e) => e.key == key).name.tl),
       trailing: Switch(
         value: appdata.appSettings.isComicSourceEnabled(key),
-        onChanged: (v) async {
-          if (isLoading) return;
-          isLoading = true;
-          appdata.appSettings.setComicSourceEnabled(key, v);
-          await appdata.updateSettings();
-          if(!v) {
-            ComicSource.sources.removeWhere((e) => e.key == key);
-            _validatePages();
-          } else {
-            var source = ComicSource.builtIn.firstWhere((e) => e.key == key);
-            ComicSource.sources.add(source);
-            source.loadData();
-            _addAllPagesWithComicSource(source);
-          }
-          isLoading = false;
-          if (mounted) {
-            setState(() {});
-            context.findAncestorStateOfType<_ComicSourceSettingsState>()
-                ?.setState(() {});
-          }
+        onChanged: (v) {
+          unawaited(_setSourceEnabled(key, v));
         },
       ),
     );
   }
+
+  Future<void> _setSourceEnabled(String key, bool enabled) async {
+    if (isLoading) return;
+    isLoading = true;
+    try {
+      appdata.appSettings.setComicSourceEnabled(key, enabled);
+      await appdata.updateSettings();
+      if (!enabled) {
+        ComicSource.sources.removeWhere((e) => e.key == key);
+        await _validatePages();
+      } else {
+        var source = ComicSource.builtIn.firstWhere((e) => e.key == key);
+        ComicSource.sources.add(source);
+        await source.loadData();
+        await _addAllPagesWithComicSource(source);
+      }
+      if (mounted) {
+        setState(() {});
+        context
+            .findAncestorStateOfType<_ComicSourceSettingsState>()
+            ?.setState(() {});
+      }
+    } catch (e) {
+      if (mounted) showToast(message: e.toString());
+    } finally {
+      isLoading = false;
+    }
+  }
 }
 
-void _validatePages() {
+Future<void> _validatePages() async {
   var explorePages = appdata.appSettings.explorePages;
   var categoryPages = appdata.appSettings.categoryPages;
   var networkFavorites = appdata.appSettings.networkFavorites;
@@ -506,10 +605,10 @@ void _validatePages() {
   appdata.appSettings.categoryPages = categoryPages;
   appdata.appSettings.networkFavorites = networkFavorites;
 
-  appdata.updateSettings();
+  await appdata.updateSettings();
 }
 
-void _addAllPagesWithComicSource(ComicSource source) {
+Future<void> _addAllPagesWithComicSource(ComicSource source) async {
   var explorePages = appdata.appSettings.explorePages;
   var categoryPages = appdata.appSettings.categoryPages;
   var networkFavorites = appdata.appSettings.networkFavorites;
@@ -534,5 +633,5 @@ void _addAllPagesWithComicSource(ComicSource source) {
   appdata.appSettings.categoryPages = categoryPages.toSet().toList();
   appdata.appSettings.networkFavorites = networkFavorites.toSet().toList();
 
-  appdata.updateSettings();
+  await appdata.updateSettings();
 }

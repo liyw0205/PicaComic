@@ -593,7 +593,7 @@ class JmNetwork {
     keyword = keyword.replaceAll('  ', ' ');
     keyword = Uri.encodeComponent(keyword);
     keyword = keyword.replaceAll('%20', '+');
-    appdata.writeHistory();
+    await appdata.writeHistory();
     Res res;
     if (page != 1) {
       res = await get(

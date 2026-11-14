@@ -10,6 +10,7 @@ import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/network_logging.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:pica_comic/network/cloudflare.dart';
@@ -59,7 +60,7 @@ class JsEngine with _JSEngineApi {
     JsEngine().init();
   }
 
-  Future<void> init() async {
+  Future<void> init({bool throwOnError = false}) async {
     if (!_closed) {
       return;
     }
@@ -80,8 +81,15 @@ class JsEngine with _JSEngineApi {
       _engine!
           .evaluate(utf8.decode(jsInit.buffer.asUint8List()), name: "<init>");
     } catch (e, s) {
+      _engine?.close();
+      _engine?.port.close();
+      _engine = null;
+      _closed = true;
+      _dio?.close();
+      _dio = null;
       log('JS Engine Init Error:\n${safeNetworkError(e)}\n$s', 'JS Engine',
           LogLevel.error);
+      if (throwOnError) rethrow;
     }
   }
 
@@ -162,6 +170,7 @@ class JsEngine with _JSEngineApi {
   Future<Map<String, dynamic>> _http(Map<String, dynamic> req) async {
     Response? response;
     String? error;
+    Object? failure;
 
     try {
       var headers = Map<String, dynamic>.from(req["headers"] ?? {});
@@ -175,8 +184,12 @@ class JsEngine with _JSEngineApi {
               responseType: req["bytes"] == true
                   ? ResponseType.bytes
                   : ResponseType.plain,
-              headers: headers));
+              headers: headers,
+              extra: {
+                'sourceKey': _sourceKeyForUrl(req['url']?.toString()),
+              }));
     } catch (e) {
+      failure = e;
       error = e.toString();
     }
 
@@ -190,12 +203,34 @@ class JsEngine with _JSEngineApi {
       body = Uint8List.fromList(body);
     }
 
+    final errorKind = error == null
+        ? (response == null
+            ? null
+            : SourceNetworkPolicy.instance
+                .classifyStatus(response.statusCode)
+                ?.name)
+        : SourceNetworkPolicy.instance.classify(failure!).name;
     return {
       "status": response?.statusCode,
       "headers": headers,
       "body": body,
       "error": error,
+      "errorType": errorKind,
     };
+  }
+
+  String? _sourceKeyForUrl(String? value) {
+    final uri = value == null ? null : Uri.tryParse(value);
+    if (uri == null || uri.host.isEmpty) return null;
+    for (final source in ComicSource.sources) {
+      final sourceUri = Uri.tryParse(source.url);
+      if (sourceUri != null &&
+          sourceUri.host.isNotEmpty &&
+          sourceUri.host.toLowerCase() == uri.host.toLowerCase()) {
+        return source.key;
+      }
+    }
+    return null;
   }
 
   dynamic runCode(String js, [String? name]) {

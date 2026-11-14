@@ -72,7 +72,10 @@ enum DownloadType {
       };
 }
 
-typedef DownloadProgressCallback = void Function();
+/// Completion callbacks may perform persistence or queue control work.
+/// `FutureOr` keeps existing synchronous callbacks source-compatible while
+/// allowing the download runner to wait for asynchronous callbacks.
+typedef DownloadProgressCallback = FutureOr<void> Function();
 
 typedef DownloadProgressCallbackAsync = Future<void> Function();
 
@@ -155,7 +158,12 @@ abstract class DownloadingItem with _TransferSpeedMixin {
     final run = failedRun ?? _runtimeKey;
     _retryTimes++;
     if (_retryTimes > 4) {
-      onError?.call();
+      try {
+        await onError?.call();
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.error, "Download",
+            "Download error callback failed\n${safeNetworkError(e)}\n$s");
+      }
       _retryTimes = 0;
     } else {
       await waitBeforeRetry(Duration(seconds: 2 << _retryTimes));
@@ -202,9 +210,9 @@ abstract class DownloadingItem with _TransferSpeedMixin {
         downloadTo,
         basename,
         onData,
-        () {
+        () async {
           if (_runtimeKey != run) return;
-          updateInfo?.call();
+          await updateInfo?.call();
           _scheduleTasks(ep, this.index, run);
         },
       );
@@ -230,13 +238,19 @@ abstract class DownloadingItem with _TransferSpeedMixin {
   }
 
   /// begin or continue downloading
-  void start() async {
+  void start() {
+    // Keep the legacy fire-and-forget entry point for platform-specific
+    // subclasses, while keeping the actual lifecycle Future-returning.
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
     _runtimeKey++;
     var currentKey = _runtimeKey;
     try {
       await onStart();
       if (_runtimeKey != currentKey) return;
-      notifications.sendProgressNotification(downloadedPages, totalPages,
+      await notifications.sendProgressNotification(downloadedPages, totalPages,
           "下载中".tl, "${downloadManager.downloading.length} Tasks");
 
       // get image links and cover
@@ -262,8 +276,11 @@ abstract class DownloadingItem with _TransferSpeedMixin {
         int ep = links!.keys.elementAt(_downloadingEp);
         var urls = links![ep]!;
         while (index < urls.length && currentKey == _runtimeKey) {
-          notifications.sendProgressNotification(downloadedPages, totalPages,
-              "下载中".tl, "${downloadManager.downloading.length} Tasks");
+          await notifications.sendProgressNotification(
+              downloadedPages,
+              totalPages,
+              "下载中".tl,
+              "${downloadManager.downloading.length} Tasks");
           _scheduleTasks(ep, index, currentKey);
           if (currentKey != _runtimeKey) return;
           var task = _downloading["$ep$index"];
@@ -301,12 +318,12 @@ abstract class DownloadingItem with _TransferSpeedMixin {
           !identical(DownloadManager().downloading.firstOrNull, this)) {
         return;
       }
-      onFinish?.call();
+      await onFinish?.call();
     } catch (e, s) {
       if (currentKey != _runtimeKey) return;
       LogManager.addLog(
           LogLevel.error, "Download", "${safeNetworkError(e)}\n$s");
-      retry(currentKey);
+      await retry(currentKey);
     }
   }
 
@@ -335,7 +352,7 @@ abstract class DownloadingItem with _TransferSpeedMixin {
     _runtimeKey++;
     _cancelCoverRequest('Download paused');
     stopRecorder();
-    notifications.endProgress();
+    await notifications.endProgress();
     await _stopAllTasks();
   }
 
@@ -345,7 +362,7 @@ abstract class DownloadingItem with _TransferSpeedMixin {
     _cancelCoverRequest('Download stopped');
     stopRecorder();
     await _stopAllTasks();
-    notifications.endProgress();
+    await notifications.endProgress();
     if (downloadManager.isExists(id)) {
       if (links != null) {
         var comicPath = "$path/";
@@ -480,6 +497,26 @@ Future<void> Function() createImageDownloadTaskCancelForTesting(
   return task.cancel;
 }
 
+@visibleForTesting
+Future<Object?> runImageDownloadTaskForTesting(
+  Stream<DownloadProgress> stream,
+  String path,
+  String fileBaseName, {
+  required Future<List<int>> Function(DownloadProgress) readData,
+  DownloadProgressCallback? onFinished,
+}) async {
+  final task = _ImageDownloadWrapper(
+    stream,
+    path,
+    fileBaseName,
+    null,
+    onFinished,
+    readData: readData,
+  );
+  await task.wait();
+  return task.error;
+}
+
 class _ImageDownloadWrapper {
   late final Stream<DownloadProgress> stream;
 
@@ -489,7 +526,7 @@ class _ImageDownloadWrapper {
 
   final void Function(int length)? onReceiveData;
 
-  final void Function()? onFinished;
+  final DownloadProgressCallback? onFinished;
 
   Object? error;
 
@@ -592,7 +629,11 @@ class _ImageDownloadWrapper {
     if (!isFinished && error == null) {
       error = Exception("Failed to download image");
     }
-    onFinished?.call();
+    try {
+      await onFinished?.call();
+    } catch (e) {
+      if (!_canceled) error ??= e;
+    }
     _completeWaiters();
   }
 

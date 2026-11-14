@@ -4,9 +4,11 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:dio_http2_adapter/dio_http2_adapter.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/native_curl.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 import 'network_logging.dart';
 import '../base.dart';
 
@@ -174,50 +176,95 @@ class AppHttpAdapter implements HttpClientAdapter {
   @override
   Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? requestStream,
       Future<void>? cancelFuture) async {
-    await setNetworkProxy();
-    final proxySignature = _proxySignature();
-    if (adapter == null || _adapterProxySignature != proxySignature) {
-      adapter?.close(force: true);
-      adapter = await createAdapter(http2);
-      _adapterProxySignature = proxySignature;
-    }
+    final metric = RuntimeMetrics.start('network.request');
+    final policy = SourceNetworkPolicy.instance;
+    final sourceKey = policy.keyFor(o);
     var cancelled = false;
     cancelFuture?.then((_) => cancelled = true);
     final canReplay = requestStream == null &&
         const {'GET', 'HEAD'}.contains(o.method.toUpperCase());
     int retry = 0;
-    while (true) {
-      if (cancelled) {
-        throw DioException(requestOptions: o, type: DioExceptionType.cancel);
+    try {
+      await setNetworkProxy();
+      final proxySignature = _proxySignature();
+      if (adapter == null || _adapterProxySignature != proxySignature) {
+        adapter?.close(force: true);
+        adapter = await createAdapter(http2);
+        _adapterProxySignature = proxySignature;
       }
-      try {
-        var res = await fetchOnce(o, requestStream, cancelFuture);
-        return res;
-      } catch (e) {
+      while (true) {
         if (cancelled) {
           throw DioException(requestOptions: o, type: DioExceptionType.cancel);
         }
-        final transient = e is SocketException ||
-            e is HttpException ||
-            (e is DioException &&
-                e.error is! HandshakeException &&
-                const {
-                  DioExceptionType.connectionError,
-                  DioExceptionType.connectionTimeout,
-                  DioExceptionType.receiveTimeout,
-                }.contains(e.type));
-        if (!canReplay || !transient || cancelled || retry >= 1) {
-          rethrow;
+        SourceNetworkLease? lease;
+        try {
+          lease = await policy.beforeRequest(o, cancelFuture: cancelFuture);
+          var res = await fetchOnce(o, requestStream, cancelFuture);
+          res = policy.enforceResponseLimit(res, sourceKey);
+          final statusKind = policy.classifyStatus(res.statusCode);
+          if (statusKind != null) {
+            final canRetry =
+                policy.shouldRetry(o, statusKind, retry, sourceKey);
+            final delay = policy.retryDelay(sourceKey, retry + 1,
+                retryAfter: policy.retryAfter(res));
+            policy.reportResponse(lease, res.statusCode);
+            lease = null;
+            if (canRetry && !cancelled) {
+              await res.stream.drain<void>();
+              policy.recordRetry(sourceKey);
+              retry++;
+              await _waitBeforeRetry(delay, cancelFuture);
+              continue;
+            }
+            metric.finish(
+                success: false,
+                bytes: res.contentLength < 0 ? 0 : res.contentLength);
+            return res;
+          }
+          policy.reportSuccess(lease, response: res);
+          lease = null;
+          metric.finish(bytes: res.contentLength < 0 ? 0 : res.contentLength);
+          return res;
+        } catch (e) {
+          if (lease != null) {
+            policy.reportFailure(lease, e);
+            lease = null;
+          }
+          if (cancelled) {
+            throw DioException(
+                requestOptions: o, type: DioExceptionType.cancel);
+          }
+          final kind = policy.classify(e);
+          if (!canReplay || !policy.shouldRetry(o, kind, retry, sourceKey)) {
+            rethrow;
+          }
+          LogManager.addLog(LogLevel.error, "Network",
+              "${o.method} ${safeNetworkUrl(o.uri.toString())}\n${e.runtimeType}\nRetrying...");
+          retry++;
+          policy.recordRetry(sourceKey);
+          await _waitBeforeRetry(
+              policy.retryDelay(sourceKey, retry), cancelFuture);
         }
-        LogManager.addLog(LogLevel.error, "Network",
-            "${o.method} ${safeNetworkUrl(o.uri.toString())}\n${e.runtimeType}\nRetrying...");
-        retry++;
-        await Future.any([
-          Future<void>.delayed(const Duration(seconds: 1)),
-          if (cancelFuture != null) cancelFuture,
-        ]);
       }
+    } catch (error) {
+      metric.finish(
+          success: false,
+          cancelled:
+              error is DioException && error.type == DioExceptionType.cancel);
+      rethrow;
     }
+  }
+
+  Future<void> _waitBeforeRetry(
+      Duration delay, Future<void>? cancelFuture) async {
+    if (cancelFuture == null) {
+      await Future<void>.delayed(delay);
+      return;
+    }
+    await Future.any([
+      Future<void>.delayed(delay),
+      cancelFuture,
+    ]);
   }
 
   Future<ResponseBody> fetchOnce(RequestOptions o,

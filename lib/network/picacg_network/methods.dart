@@ -288,7 +288,7 @@ class PicacgNetwork {
     if (page == 1 && addToHistory && keyWord != "") {
       appdata.searchHistory.remove(keyWord);
       appdata.searchHistory.add(keyWord);
-      appdata.writeHistory();
+      await appdata.writeHistory();
     }
     if (response.error) {
       return Res(null, errorMessage: response.errorMessage);

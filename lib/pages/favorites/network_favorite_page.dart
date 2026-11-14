@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/network/base_comic.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/components/components.dart';
@@ -74,22 +77,38 @@ class _MultiFolderFavoritesPage extends StatefulWidget {
 
 class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
   bool _loading = true;
+  bool _loadingRequest = false;
 
   String? _errorMessage;
 
   Map<String, String>? folders;
 
-  void loadPage() async {
-    var res = await widget.data.loadFolders!();
-    _loading = false;
-    if (res.error) {
+  Future<void> loadPage() async {
+    if (_loadingRequest) return;
+    _loadingRequest = true;
+    try {
+      var res = await widget.data.loadFolders!();
+      if (!mounted) return;
+      if (res.error) {
+        setState(() {
+          _loading = false;
+          _errorMessage = res.errorMessage;
+        });
+      } else {
+        setState(() {
+          _loading = false;
+          _errorMessage = null;
+          folders = res.data;
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
-        _errorMessage = res.errorMessage;
+        _loading = false;
+        _errorMessage = safeNetworkError(error);
       });
-    } else {
-      setState(() {
-        folders = res.data;
-      });
+    } finally {
+      _loadingRequest = false;
     }
   }
 
@@ -100,12 +119,21 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      loadPage();
+      unawaited(loadPage());
       return const Center(
         child: CircularProgressIndicator(),
       );
     } else if (_errorMessage != null) {
-      return NetworkError(message: _errorMessage!, withAppbar: false,);
+      return NetworkError(
+        message: _errorMessage!,
+        withAppbar: false,
+        retry: () {
+          setState(() {
+            _loading = true;
+            _errorMessage = null;
+          });
+        },
+      );
     } else {
       var length = folders!.length;
       if (widget.data.allFavoritesId != null) length++;
@@ -267,7 +295,13 @@ class _FolderTile extends StatelessWidget {
                   onPressed: () async {
                     context.pop();
                     showToast(message: "正在删除收藏夹".tl);
-                    var res = await deleteFolder!();
+                    Res<bool> res;
+                    try {
+                      res = await deleteFolder!();
+                    } catch (error) {
+                      showToast(message: safeNetworkError(error));
+                      return;
+                    }
                     showToast(
                         message: res.error ? res.errorMessage! : "删除成功".tl);
                     if (!res.error) {
@@ -299,6 +333,33 @@ class _CreateFolderDialogState extends State<_CreateFolderDialog> {
   var controller = TextEditingController();
   var focusNode = FocusNode();
   bool loading = false;
+
+  Future<void> _submit() async {
+    if (loading) return;
+    setState(() {
+      loading = true;
+    });
+    try {
+      final result = await widget.data.addFolder!(controller.text);
+      if (!mounted) return;
+      if (result.error) {
+        showToast(message: result.errorMessage!);
+        setState(() {
+          loading = false;
+        });
+      } else {
+        context.pop();
+        showToast(message: "成功创建".tl);
+        widget.updateState();
+      }
+    } catch (error) {
+      if (!mounted) return;
+      showToast(message: safeNetworkError(error));
+      setState(() {
+        loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -332,23 +393,7 @@ class _CreateFolderDialogState extends State<_CreateFolderDialog> {
               height: 35,
               child: Center(
                 child: TextButton(
-                    onPressed: () {
-                      setState(() {
-                        loading = true;
-                      });
-                      widget.data.addFolder!(controller.text).then((b) {
-                        if (b.error) {
-                          showToast(message: b.errorMessage!);
-                          setState(() {
-                            loading = false;
-                          });
-                        } else {
-                          context.pop();
-                          showToast(message: "成功创建".tl);
-                          widget.updateState();
-                        }
-                      });
-                    },
+                    onPressed: () => unawaited(_submit()),
                     child: Text("提交".tl)),
               ))
       ],

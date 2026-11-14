@@ -24,120 +24,272 @@ class ImageFavoritesPage extends StatefulWidget {
   State<ImageFavoritesPage> createState() => _ImageFavoritesPageState();
 }
 
-class _ImageFavoritesPageState extends State<ImageFavoritesPage> {
+class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
+  static const _pageSize = 60;
+
+  final _images = <ImageFavorite>[];
+  final _scrollController = ScrollController();
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  int? _nextCursor;
+  int _totalCount = 0;
+  String _keyword = '';
+  bool _hasMore = true;
+  bool _loading = false;
+  bool _searchMode = false;
+
+  @override
+  Object? get tag => "image_favorites_page";
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    _images.clear();
+    _nextCursor = null;
+    _hasMore = true;
+    _totalCount = ImageFavoriteManager.count(keyword: _keyword);
+    _loadPage();
+  }
+
+  void _loadPage() {
+    if (_loading || !_hasMore) return;
+    _loading = true;
+    final page = ImageFavoriteManager.getPage(
+      limit: _pageSize,
+      afterRowId: _nextCursor,
+      keyword: _keyword,
+    );
+    _images.addAll(page.items);
+    _nextCursor = page.nextCursor;
+    _hasMore = page.hasMore;
+    _loading = false;
+    if (mounted) setState(() {});
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.extentAfter < 800) {
+      _loadPage();
+    }
+  }
+
+  @override
+  void refresh() {
+    if (!mounted) return;
+    _reconcileExternalChanges();
+    super.refresh();
+  }
+
+  void _reconcileExternalChanges() {
+    final head = ImageFavoriteManager.getPage(
+      limit: _pageSize,
+      keyword: _keyword,
+    );
+    final known = _images.map((image) => image.key).toSet();
+    for (final image in head.items.reversed) {
+      if (known.add(image.key)) {
+        _images.insert(0, image);
+      }
+    }
+    final existing = ImageFavoriteManager.existingKeys(_images);
+    _images.removeWhere((image) => !existing.contains(image.key));
+    _totalCount = ImageFavoriteManager.count(keyword: _keyword);
+    if (_images.length <= _pageSize && _nextCursor == null) {
+      _nextCursor = head.nextCursor;
+      _hasMore = head.hasMore;
+    }
+  }
+
+  void _setKeyword(String value) {
+    _keyword = value.trim();
+    _reload();
+  }
+
+  void _toggleSearch() {
+    final enabled = !_searchMode;
+    setState(() {
+      _searchMode = enabled;
+      if (!enabled) {
+        _searchController.clear();
+        _keyword = '';
+      }
+    });
+    _reload();
+    if (enabled) {
+      scheduleMicrotask(_searchFocus.requestFocus);
+    }
+  }
+
+  Widget _buildTitle() {
+    if (_searchMode) {
+      return TextField(
+        controller: _searchController,
+        focusNode: _searchFocus,
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          hintText: "搜索".tl,
+        ),
+        onChanged: _setKeyword,
+      );
+    }
+    return Text("${"图片收藏".tl}($_totalCount)");
+  }
+
+  List<Widget> _buildActions() => [
+        Tooltip(
+          message: "搜索".tl,
+          child: IconButton(
+            icon: Icon(_searchMode ? Icons.close : Icons.search),
+            onPressed: _toggleSearch,
+          ),
+        ),
+      ];
+
   @override
   Widget build(BuildContext context) {
-    return StateBuilder(
-      tag: "image_favorites_page",
-      init: SimpleController(),
-      builder: (controller) {
-        if (UiMode.m1(context)) {
-          return Scaffold(
-            appBar: AppBar(
-              title: Text("图片收藏".tl),
-            ),
-            body: buildPage(),
-          );
-        } else {
-          return Material(
-            child: Column(
-              children: [
-                Appbar(
-                  title: Text("图片收藏".tl),
-                ),
-                Expanded(
-                  child: buildPage(),
-                )
-              ],
-            ),
-          );
-        }
-      },
+    if (UiMode.m1(context)) {
+      return Scaffold(
+        appBar: AppBar(
+          title: _buildTitle(),
+          actions: _buildActions(),
+        ),
+        body: buildPage(),
+      );
+    }
+    return Material(
+      child: Column(
+        children: [
+          Appbar(
+            title: _buildTitle(),
+            actions: _buildActions(),
+          ),
+          Expanded(
+            child: buildPage(),
+          )
+        ],
+      ),
     );
   }
 
   Widget buildPage() {
-    var images = ImageFavoriteManager.getAll();
-
+    if (_images.isEmpty && !_loading) {
+      return Center(
+        child: Text(_keyword.isEmpty ? "暂无图片收藏".tl : "没有匹配结果".tl),
+      );
+    }
     return GridView.builder(
+      controller: _scrollController,
+      cacheExtent: 800,
       gridDelegate: SliverGridDelegateWithComics(true, appdata.settings[74]),
-      itemCount: images.length,
+      itemCount: _images.length,
       itemBuilder: (context, index) {
-        return FavoriteImageTile(images[index]);
+        final image = _images[index];
+        return FavoriteImageTile(
+          image,
+          onDeleted: () {
+            setState(() {
+              _images.removeWhere((item) => item.key == image.key);
+              _totalCount = ImageFavoriteManager.count(keyword: _keyword);
+            });
+          },
+        );
       },
     );
   }
 }
 
 class FavoriteImageTile extends StatelessWidget {
-  const FavoriteImageTile(this.image, {super.key});
+  const FavoriteImageTile(this.image, {this.onDeleted, super.key});
 
   final ImageFavorite image;
+  final VoidCallback? onDeleted;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        elevation: 1,
-        child: Stack(
-          children: [
-            Positioned.fill(
-                child: Container(
-                    decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(8)),
-                    clipBehavior: Clip.antiAlias,
-                    child: Image(
-                      image: _ImageProvider(image),
-                    ))),
-            Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withOpacity(0.3),
-                            Colors.black.withOpacity(0.5),
-                          ]),
-                      borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(8),
-                          bottomRight: Radius.circular(8))),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-                    child: Text(
-                      image.title.replaceAll("\n", ""),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14.0,
-                        color: Colors.white,
+    return Semantics(
+      button: true,
+      label: image.title.replaceAll("\n", ""),
+      child: RepaintBoundary(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            elevation: 1,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                    child: Container(
+                        decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .secondaryContainer,
+                            borderRadius: BorderRadius.circular(8)),
+                        clipBehavior: Clip.antiAlias,
+                        child: ThumbnailImage(
+                          image: _ImageProvider(image),
+                        ))),
+                Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withOpacity(0.3),
+                                Colors.black.withOpacity(0.5),
+                              ]),
+                          borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(8),
+                              bottomRight: Radius.circular(8))),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                        child: Text(
+                          image.title.replaceAll("\n", ""),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 14.0,
+                            color: Colors.white,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    )),
+                Positioned.fill(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onTap,
+                      onLongPress: onLongTap,
+                      onSecondaryTapDown: onSecondaryTap,
+                      borderRadius: BorderRadius.circular(8),
+                      child: const SizedBox.expand(),
                     ),
                   ),
-                )),
-            Positioned.fill(
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onTap,
-                  onLongPress: onLongTap,
-                  onSecondaryTapDown: onSecondaryTap,
-                  borderRadius: BorderRadius.circular(8),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            )
-          ],
+                )
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -145,8 +297,8 @@ class FavoriteImageTile extends StatelessWidget {
 
   void onTap() {
     var type = image.id.split("-")[0];
-    _readWithKey(type, image.id.replaceFirst("$type-", ""), image.ep, image.page,
-        image.title, image.otherInfo);
+    _readWithKey(type, image.id.replaceFirst("$type-", ""), image.ep,
+        image.page, image.title, image.otherInfo);
   }
 
   void _readWithKey(String key, String target, int ep, int page, String title,
@@ -224,10 +376,13 @@ class FavoriteImageTile extends StatelessWidget {
     showConfirmDialog(App.globalContext!, "确认删除".tl, "要删除这个图片吗".tl, delete);
   }
 
-  void delete() {
-    ImageFavoriteManager.delete(image);
+  Future<void> delete() async {
+    await ImageFavoriteManager.delete(image);
+    onDeleted?.call();
     showToast(message: "删除成功".tl);
-    StateController.findOrNull(tag: "image_favorites_page")?.update();
+    if (onDeleted == null) {
+      StateController.findOrNull(tag: "image_favorites_page")?.refresh();
+    }
   }
 
   void onSecondaryTap(TapDownDetails details) {
@@ -248,9 +403,11 @@ class _ImageProvider extends BaseImageProvider<_ImageProvider> {
 
   @override
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents) async {
-    if (File(image.imagePath).existsSync()) {
-      return await File("${App.dataPath}/images/${image.imagePath}")
-          .readAsBytes();
+    final localFile = Uri.file(image.imagePath).isAbsolute
+        ? File(image.imagePath)
+        : File("${App.dataPath}/images/${image.imagePath}");
+    if (localFile.existsSync()) {
+      return await localFile.readAsBytes();
     } else {
       var type = image.id.split("-")[0];
       Stream<DownloadProgress> stream;
@@ -281,7 +438,9 @@ class _ImageProvider extends BaseImageProvider<_ImageProvider> {
       }
       var file = finishProgress!.getFile();
       var data = await file.readAsBytes();
-      var file2 = File("${App.dataPath}/images/${image.imagePath}");
+      final file2 = Uri.file(image.imagePath).isAbsolute
+          ? File(image.imagePath)
+          : File("${App.dataPath}/images/${image.imagePath}");
       if (!file2.existsSync()) {
         await file2.create(recursive: true);
       }

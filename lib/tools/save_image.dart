@@ -12,19 +12,19 @@ import 'package:share_plus/share_plus.dart';
 import '../foundation/app.dart';
 
 ///保存图片
-void saveImage(File file) async {
-  final imageSaver = ImageGallerySaver();
-  var data = await file.readAsBytes();
-  var type = detectFileType(data);
-  var fileName = file.name;
-  if (!fileName.contains('.')) {
-    fileName += type.ext;
-  }
-  if (App.isAndroid || App.isIOS) {
-    await imageSaver.saveImage(data);
-    showToast(message: "已保存".tl);
-  } else if (App.isDesktop) {
-    try {
+Future<void> saveImage(File file) async {
+  try {
+    final imageSaver = ImageGallerySaver();
+    var data = await file.readAsBytes();
+    var type = detectFileType(data);
+    var fileName = file.name;
+    if (!fileName.contains('.')) {
+      fileName += type.ext;
+    }
+    if (App.isAndroid || App.isIOS) {
+      await imageSaver.saveImage(data);
+      showToast(message: "已保存".tl);
+    } else if (App.isDesktop) {
       final String? path =
           (await getSaveLocation(suggestedName: fileName))?.path;
       if (path != null) {
@@ -33,22 +33,29 @@ void saveImage(File file) async {
             XFile.fromData(data, mimeType: mimeType, name: fileName);
         await xFile.saveTo(path);
       }
-    } catch (e, s) {
-      LogManager.addLog(
-          LogLevel.error, "Save Image", "${safeNetworkError(e)}\n$s");
     }
+  } catch (e, s) {
+    LogManager.addLog(
+        LogLevel.error, "Save Image", "${safeNetworkError(e)}\n$s");
+    showToast(message: "保存失败".tl);
   }
 }
 
 Future<String> persistentCurrentImage(File file) async {
-  var newFile = File("${App.dataPath}/images/${file.path.split('/').last})}");
+  var newFile = File("${App.dataPath}/images/${file.path.split('/').last}");
   if (!(await newFile.exists())) {
-    newFile.createSync(recursive: true);
-    newFile.writeAsBytesSync(await file.readAsBytes());
+    await newFile.parent.create(recursive: true);
+    await newFile.writeAsBytes(await file.readAsBytes(), flush: true);
   }
   return newFile.path;
 }
 
-void shareImage(File file) {
-  Share.shareXFiles([XFile(file.path)]);
+Future<void> shareImage(File file) async {
+  try {
+    await Share.shareXFiles([XFile(file.path)]);
+  } catch (e, s) {
+    LogManager.addLog(
+        LogLevel.error, "Share Image", "${safeNetworkError(e)}\n$s");
+    showToast(message: "分享失败".tl);
+  }
 }

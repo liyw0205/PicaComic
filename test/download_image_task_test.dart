@@ -57,4 +57,61 @@ void main() {
         reason: 'a cancelled task must not recreate a deleted directory');
     await source.close();
   });
+
+  test('image task waits for asynchronous completion callback', () async {
+    final temp = await Directory.systemTemp.createTemp('image-task-finish-');
+    addTearDown(() async {
+      if (await temp.exists()) await temp.delete(recursive: true);
+    });
+
+    final callbackStarted = Completer<void>();
+    final callbackGate = Completer<void>();
+    final source = Stream<DownloadProgress>.value(
+      const DownloadProgress(
+        1,
+        1,
+        'https://example.test/image',
+        '',
+      ),
+    );
+    final completion = runImageDownloadTaskForTesting(
+      source,
+      temp.path,
+      '0',
+      readData: (_) async => image.encodePng(image.Image(width: 1, height: 1)),
+      onFinished: () async {
+        callbackStarted.complete();
+        await callbackGate.future;
+      },
+    );
+
+    await callbackStarted.future;
+    var completed = false;
+    completion.whenComplete(() => completed = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(completed, isFalse);
+
+    callbackGate.complete();
+    expect(await completion, isNull);
+    expect(completed, isTrue);
+  });
+
+  test('image task exposes completion callback errors', () async {
+    final temp = await Directory.systemTemp.createTemp('image-task-error-');
+    addTearDown(() async {
+      if (await temp.exists()) await temp.delete(recursive: true);
+    });
+
+    final error = await runImageDownloadTaskForTesting(
+      Stream<DownloadProgress>.value(
+        const DownloadProgress(1, 1, 'https://example.test/image', ''),
+      ),
+      temp.path,
+      '0',
+      readData: (_) async => image.encodePng(image.Image(width: 1, height: 1)),
+      onFinished: () => throw StateError('finish callback failed'),
+    );
+
+    expect(error, isA<StateError>());
+  });
 }

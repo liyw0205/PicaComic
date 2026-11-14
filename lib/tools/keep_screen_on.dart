@@ -1,15 +1,19 @@
 import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/network/network_logging.dart';
 
+Future<void> setKeepScreenOn() => _updateKeepScreenOn('set');
 
-void setKeepScreenOn() async{
-  if(!App.isMobile)  return;
-  var channel = const MethodChannel("com.github.pacalini.pica_comic/keepScreenOn");
-  await channel.invokeMethod("set");
-}
+Future<void> cancelKeepScreenOn() => _updateKeepScreenOn('cancel');
 
-void cancelKeepScreenOn() async{
-  if(!App.isMobile)  return;
-  var channel = const MethodChannel("com.github.pacalini.pica_comic/keepScreenOn");
-  await channel.invokeMethod("cancel");
+Future<void> _updateKeepScreenOn(String method) async {
+  if (!App.isMobile) return;
+  const channel = MethodChannel("com.github.pacalini.pica_comic/keepScreenOn");
+  try {
+    await channel.invokeMethod<void>(method);
+  } catch (e, s) {
+    LogManager.addLog(LogLevel.warning, 'Keep screen on',
+        '$method failed: ${safeNetworkError(e)}\n$s');
+  }
 }

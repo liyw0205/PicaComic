@@ -1003,7 +1003,7 @@ class EhNetwork {
     if (keyword != "") {
       appdata.searchHistory.remove(keyword);
       appdata.searchHistory.add(keyword);
-      appdata.writeHistory();
+      await appdata.writeHistory();
     }
     keyword = keyword.replaceAll(RegExp(r"\s+"), " ").trim();
     keyword = withDefaultSearchLanguage(

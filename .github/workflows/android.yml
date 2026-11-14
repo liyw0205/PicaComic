@@ -24,14 +24,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: "3.44.0"
-          architecture: x64
-      - run: flutter pub get
+      - uses: ./.github/actions/setup-flutter
+      - run: flutter pub get --enforce-lockfile
       - name: Analyze Dart sources
-        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings
+        run: bash tool/check-analyzer-baseline.sh
+      - name: Check async and file I/O boundaries
+        run: bash tool/check-async-boundary.sh
       - name: Run Flutter regression tests
         run: flutter test --no-pub
       - name: Install native curl test dependency
@@ -40,6 +38,15 @@ jobs:
           sudo apt-get install -y libcurl4-openssl-dev
       - name: Run native curl regression tests
         run: sh test/native_curl/run.sh
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          test -n "$version"
+          test "$GITHUB_REF_NAME" = "v${version}"
+          test "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" = "$GITHUB_SHA"
       - name: Prepare optional Android signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -78,6 +85,21 @@ jobs:
             (cd android && ./gradlew assembleRelease)
           else
             (cd android && ./gradlew assembleDebug)
+          fi
+      - name: Generate APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            bash tool/android_apk_metadata.sh \
+              --apk-root build/app/outputs/apk/release \
+              --build-mode release \
+              --output build/apk-metadata.json
+          else
+            bash tool/android_apk_metadata.sh \
+              --apk-root build/app/outputs/apk/debug \
+              --build-mode debug \
+              --output build/apk-metadata.json
           fi
       - name: Verify release APK signer certificate
         if: startsWith(github.ref, 'refs/tags/v')
@@ -135,6 +157,7 @@ jobs:
             esac
           done < <(find build/app/outputs/apk -type f -name "*.apk")
 
+          cp build/apk-metadata.json release/apk-metadata.json
           for apk in \
             "release/PicaComic-${version}-armeabi-v7a.apk" \
             "release/PicaComic-${version}-arm64-v8a.apk" \
@@ -148,7 +171,9 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
           name: PicaComic-debug-${{ github.run_id }}-${{ github.run_attempt }}
-          path: build/app/outputs/apk/debug/*.apk
+          path: |
+            build/app/outputs/apk/debug/*.apk
+            build/apk-metadata.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
@@ -158,6 +183,7 @@ jobs:
           path: |
             release/PicaComic-*.apk
             release/SHA256SUMS
+            release/apk-metadata.json
           if-no-files-found: error
   publish:
     needs: build

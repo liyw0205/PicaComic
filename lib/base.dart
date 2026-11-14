@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/foundation/settings_schema.dart';
+import 'package:pica_comic/foundation/secret_store.dart';
 
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
@@ -22,6 +25,12 @@ var downloadManager = DownloadManager();
 
 class Appdata {
   Future<void> _settingsWriteQueue = Future<void>.value();
+  Future<void> _settingsWriteResult = Future<void>.value();
+  late final List<String> _defaultSettings;
+
+  Appdata() {
+    _defaultSettings = List<String>.unmodifiable(settings);
+  }
 
   ///搜索历史
   List<String> searchHistory = [];
@@ -134,16 +143,16 @@ class Appdata {
     webUA, // UA
   ];
 
-  void writeImplicitData() async {
+  Future<void> writeImplicitData() async {
     var s = await SharedPreferences.getInstance();
     await s.setStringList("implicitData", implicitData);
   }
 
-  void readImplicitData() async {
+  Future<void> readImplicitData() async {
     var s = await SharedPreferences.getInstance();
     var data = s.getStringList("implicitData");
     if (data == null) {
-      writeImplicitData();
+      await writeImplicitData();
       return;
     }
     for (int i = 0; i < data.length && i < implicitData.length; i++) {
@@ -252,28 +261,27 @@ class Appdata {
   }
 
   Future<void> updateSettings([bool syncData = true]) async {
+    if (DataMaintenance.busy && !DataMaintenance.ownsScope) {
+      return DataMaintenance.run(
+          () => identical(this, appdata) ? updateSettings(syncData) : null);
+    }
     // Capture the state at the call site. Otherwise a later UI mutation can
     // accidentally change which settings an earlier asynchronous write saves.
     final snapshot = List<String>.unmodifiable(settings);
-    final operation = _settingsWriteQueue.then((_) async {
-      await _writeSettingsAtomically(snapshot);
-      if (syncData) {
-        // Keep the upload outside the write operation. WebDAV commits its
-        // version by writing settings again, which must not deadlock this
-        // serialized persistence queue.
-        Webdav.uploadData();
-      }
+    final shouldUpload = syncData && !DataMaintenance.syncSuppressed;
+    await DataMaintenance.run(() {
+      final operation =
+          _settingsWriteQueue.then((_) => _writeSettingsAtomically(snapshot));
+      _settingsWriteQueue = operation.then<void>((_) {}, onError: (_, __) {});
+      _settingsWriteResult = operation;
+      return operation;
     });
-    _settingsWriteQueue = operation.then<void>(
-      (_) {},
-      onError: (_, __) {},
-    );
-    return operation;
+    if (shouldUpload) Webdav.uploadData();
   }
 
   /// Wait until settings writes already requested by an import or UI update
   /// have reached disk before a dependent sync operation proceeds.
-  Future<void> waitForSettingsWrites() => _settingsWriteQueue;
+  Future<void> waitForSettingsWrites() => _settingsWriteResult;
 
   Future<List<String>?> _readSettingsFile(File file) async {
     if (!await file.exists()) {
@@ -287,13 +295,11 @@ class Appdata {
   }
 
   List<String>? _validSettingsList(Object? value) {
-    if (value is! List || value.isEmpty) {
+    try {
+      return SettingsSchema.decode(value, _defaultSettings, strict: true);
+    } on FormatException {
       return null;
     }
-    if (value.any((item) => item is! String)) {
-      return null;
-    }
-    return List<String>.from(value);
   }
 
   Future<void> _writeSettingsAtomically(List<String> snapshot) async {
@@ -336,28 +342,40 @@ class Appdata {
     }
   }
 
-  void writeFirstUse() async {
+  Future<void> writeFirstUse() async {
     var s = await SharedPreferences.getInstance();
     await s.setStringList("firstUse", firstUse);
   }
 
-  void writeHistory() async {
+  Future<void> writeHistory() async {
     var s = await SharedPreferences.getInstance();
     await s.setStringList("search", searchHistory);
     await s.setStringList("favoriteTags", favoriteTags.toList());
   }
 
   Future<void> writeData([bool sync = true]) async {
-    var s = await SharedPreferences.getInstance();
-    await s.setStringList("blockingKeyword", blockingKeyword);
-    await s.setStringList("firstUse", firstUse);
-    await updateSettings(false);
-    if (sync) {
-      await Webdav.uploadData();
+    if (DataMaintenance.busy && !DataMaintenance.ownsScope) {
+      return DataMaintenance.run(
+          () => identical(this, appdata) ? writeData(sync) : null);
     }
+    final shouldUpload = sync && !DataMaintenance.syncSuppressed;
+    await DataMaintenance.run(() async {
+      var s = await SharedPreferences.getInstance();
+      for (final entry in {
+        'blockingKeyword': List<String>.from(blockingKeyword),
+        'firstUse': List<String>.from(firstUse),
+        'favoriteTags': favoriteTags.toList(),
+      }.entries) {
+        if (!await s.setStringList(entry.key, entry.value)) {
+          throw FileSystemException('Failed to persist ${entry.key}');
+        }
+      }
+      await updateSettings(false);
+    });
+    if (shouldUpload) await Webdav.uploadData();
   }
 
-  Future<bool> readData() async {
+  Future<bool> readData({bool throwOnError = false}) async {
     var s = await SharedPreferences.getInstance();
     try {
       await readSettings(s);
@@ -366,56 +384,62 @@ class Appdata {
       blockingKeyword = s.getStringList("blockingKeyword") ?? [];
       if (s.getStringList("firstUse") != null) {
         var st = s.getStringList("firstUse")!;
-        for (int i = 0; i < st.length; i++) {
+        for (int i = 0; i < st.length && i < firstUse.length; i++) {
           firstUse[i] = st[i];
         }
       }
-      readImplicitData();
+      await readImplicitData();
       return firstUse[3] == "1";
     } catch (e) {
+      if (throwOnError) rethrow;
       return false;
     }
   }
 
-  Map<String, dynamic> toJson() => {
-        "settings": settings,
+  Map<String, dynamic> toJson({bool includeSensitive = false}) => {
+        "schemaVersion": SettingsSchema.version,
+        // User exports redact credentials. Sync can opt in because it is an
+        // authenticated, explicitly configured transport.
+        "settings": includeSensitive
+            ? List<String>.from(settings)
+            : redactSettingsForExport(settings),
         "firstUse": firstUse,
         "blockingKeywords": blockingKeyword,
         "favoriteTags": favoriteTags.toList(),
       };
 
-  bool readDataFromJson(Map<String, dynamic> json) {
-    try {
-      var newSettings = List<String>.from(json["settings"]);
-      var downloadPath = settings[22];
-      var authRequired = settings[13];
-      for (var i = 0; i < settings.length && i < newSettings.length; i++) {
-        settings[i] = newSettings[i];
-      }
-      settings[22] = downloadPath;
-      settings[13] = authRequired;
-      var newFirstUse = List<String>.from(json["firstUse"]);
-      for (var i = 0; i < firstUse.length && i < newFirstUse.length; i++) {
-        firstUse[i] = newFirstUse[i];
-      }
-      if (json["history"] != null) {
-        history.readDataFromJson(json["history"]);
-      }
-      // merge data
-      blockingKeyword = Set<String>.from(
-              ((json["blockingKeywords"] ?? []) + blockingKeyword) as List)
-          .toList();
-      favoriteTags =
-          Set.from((json["favoriteTags"] ?? []) + List.from(favoriteTags));
-      writeData(false);
-      return true;
-    } catch (e, s) {
-      LogManager.addLog(LogLevel.error, "Appdata.readDataFromJson",
-          "error reading appdata ${safeNetworkError(e)}\n$s");
-      readData();
-      return false;
-    }
-  }
+  Future<void> readDataFromJson(Map<String, dynamic> json,
+          {bool importHistory = true, bool persist = true}) =>
+      DataMaintenance.run(() async {
+        if (json['schemaVersion'] != null &&
+            json['schemaVersion'] != SettingsSchema.version) {
+          throw const FormatException('Unsupported settings schema');
+        }
+        var newSettings =
+            SettingsSchema.decode(json["settings"], _defaultSettings);
+        var newFirstUse = List<String>.from(json["firstUse"] ?? firstUse);
+        final keywords =
+            List<String>.from(json['blockingKeywords'] ?? const []);
+        final tags = List<String>.from(json['favoriteTags'] ?? const []);
+        var downloadPath = settings[22];
+        var authRequired = settings[13];
+        for (var i = 0; i < settings.length && i < newSettings.length; i++) {
+          settings[i] = newSettings[i];
+        }
+        settings[22] = downloadPath;
+        settings[13] = authRequired;
+        for (var i = 0; i < firstUse.length && i < newFirstUse.length; i++) {
+          firstUse[i] = newFirstUse[i];
+        }
+        if (importHistory && json["history"] != null) {
+          await history.readDataFromJson(json["history"]);
+        }
+        // Merge imported values with local values, then await the complete
+        // settings/database persistence chain before reporting success.
+        blockingKeyword = {...keywords, ...blockingKeyword}.toList();
+        favoriteTags = {...tags, ...favoriteTags};
+        if (persist) await writeData(false);
+      }, suppressSync: true, operationName: 'data-import');
 
   final appSettings = _Settings();
 }
@@ -425,29 +449,39 @@ var notifications = Notifications();
 
 /// clear all data
 Future<void> clearAppdata() async {
-  // Do not delete the files while a serialized settings write is still
-  // pending; otherwise that write can resurrect the data just cleared.
-  final oldAppdata = appdata;
-  await oldAppdata._settingsWriteQueue;
-  await Webdav.waitForIdle();
-  var s = await SharedPreferences.getInstance();
-  await s.clear();
-  var settingsFile = File("${App.dataPath}/settings");
-  if (await settingsFile.exists()) {
-    await settingsFile.delete();
-  }
-  for (final suffix in ['.bak', '.tmp']) {
-    final file = File("${settingsFile.path}$suffix");
-    if (await file.exists()) {
-      await file.delete();
+  return DataMaintenance.run(() async {
+    // Do not delete the files while a serialized settings write is still
+    // pending; otherwise that write can resurrect the data just cleared.
+    final oldAppdata = appdata;
+    await oldAppdata._settingsWriteQueue;
+    var s = await SharedPreferences.getInstance();
+    await s.clear();
+    // Credentials live outside ordinary settings and must follow the same
+    // explicit "clear all data" action.
+    try {
+      await SecretStoreRegistry.instance.delete(webdavUsernameSecret);
+      await SecretStoreRegistry.instance.delete(webdavPasswordSecret);
+    } catch (error, stack) {
+      Log.warning('Settings',
+          'Failed to clear WebDAV credentials.\n${safeNetworkError(error)}\n$stack');
     }
-  }
-  appdata.history.clearHistory();
-  appdata = Appdata();
-  await appdata.readData();
-  await eraseCache();
-  await JmNetwork().cookieJar.deleteAll();
-  await LocalFavoritesManager().clearAll();
+    var settingsFile = File("${App.dataPath}/settings");
+    if (await settingsFile.exists()) {
+      await settingsFile.delete();
+    }
+    for (final suffix in ['.bak', '.tmp']) {
+      final file = File("${settingsFile.path}$suffix");
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+    appdata.history.clearHistory();
+    appdata = Appdata();
+    await appdata.readData();
+    await eraseCache();
+    await JmNetwork().cookieJar.deleteAll();
+    await LocalFavoritesManager().clearAll();
+  }, suppressSync: true);
 }
 
 class _Settings {

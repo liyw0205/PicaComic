@@ -28,7 +28,7 @@ import 'package:pica_comic/network/picacg_network/picacg_download_model.dart';
 import 'package:pica_comic/pages/download_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_extensions.dart';
-import 'package:pica_comic/tools/io_tools.dart';
+import 'package:pica_comic/tools/directory_maintenance.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -69,6 +69,13 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///是否初始化
   bool _runInit = false;
+
+  static const int _downloadQueueVersion = 1;
+  static const String _downloadQueueFileName = 'newDownload.json';
+
+  // Queue snapshots are serialized so a completion callback cannot overwrite
+  // a newer snapshot with a slower write.
+  Future<void> _queueWriteTail = Future<void>.value();
 
   @override
   Database? _db;
@@ -121,6 +128,12 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///更换下载目录
   Future<String> updatePath(String newPath, {bool transform = true}) async {
+    // Stop network writes before copying the directory. Persist the paused
+    // progress so the destination can be resumed after a restart without
+    // relying on an in-memory queue.
+    if (isDownloading) await pause();
+    await _saveInfo();
+    await _queueWriteTail;
     if (transform) {
       var source = Directory(path!);
       final appPath = await getApplicationSupportDirectory();
@@ -128,9 +141,8 @@ class DownloadManager with _DownloadDb implements Listenable {
         newPath == "" ? "${appPath.path}${pathSep}download" : newPath,
       );
       try {
-        await copyDirectory(source, destination);
-        for (var i in source.listSync()) {
-          await i.delete(recursive: true);
+        if (source.absolute.path != destination.absolute.path) {
+          await migrateDirectory(source, destination);
         }
       } catch (e) {
         return e.toString();
@@ -146,60 +158,191 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///读取数据, 获取未完成的下载和已下载的漫画ID
   Future<void> _getInfo() async {
-    //读取数据
-    var file = File("$path${pathSep}newDownload.json");
-    if (!file.existsSync()) {
+    await _queueWriteTail;
+    final file = File("$path$pathSep$_downloadQueueFileName");
+    await _recoverQueueFiles(file);
+    if (!await file.exists()) {
       await _saveInfo();
-    } else {
-      try {
-        var json = const JsonDecoder().convert(file.readAsStringSync());
-        for (var item in json["downloading"]) {
-          downloading.add(
-              downloadingItemFromMap(item, _onFinish, _onError, _saveInfo));
-        }
-      } catch (e, s) {
-        LogManager.addLog(LogLevel.error, "IO",
-            "Failed to read downloaded information\n${safeNetworkError(e)}\n$s");
-        file.deleteSync();
-        await _saveInfo();
-      }
+      return;
     }
+
+    try {
+      final decoded = jsonDecode(await file.readAsString());
+      final envelope = _decodeQueueEnvelope(decoded);
+      final restored = <DownloadingItem>[];
+      for (final rawItem in envelope['downloading'] as List<Object?>) {
+        if (rawItem is! Map) {
+          throw const FormatException('Invalid download task record');
+        }
+        restored.add(downloadingItemFromMap(
+          Map<String, dynamic>.from(rawItem),
+          _onFinish,
+          _onError,
+          _saveInfo,
+        ));
+      }
+      downloading.addAll(restored);
+
+      // A legacy snapshot has no marker. Rewrite it only after every task has
+      // been decoded successfully, keeping migration all-or-nothing.
+      if (!envelope.containsKey('version')) {
+        try {
+          await _preserveLegacyQueueFile(file);
+          await _saveInfo();
+        } catch (e, s) {
+          // A migration backup or replacement failure must not turn a valid
+          // legacy queue into an empty queue.
+          LogManager.addLog(LogLevel.warning, "IO",
+              "Failed to migrate download information\n${safeNetworkError(e)}\n$s");
+        }
+      }
+    } catch (e, s) {
+      LogManager.addLog(LogLevel.error, "IO",
+          "Failed to read downloaded information\n${safeNetworkError(e)}\n$s");
+      await _moveQueueFileAside(file, 'corrupt');
+      downloading.clear();
+      await _saveInfo();
+    }
+  }
+
+  Map<String, dynamic> _decodeQueueEnvelope(Object? value) {
+    if (value is! Map) {
+      throw const FormatException('Invalid download queue snapshot');
+    }
+    final envelope = Map<String, dynamic>.from(value);
+    final version = envelope['version'];
+    if (version != null && version != _downloadQueueVersion) {
+      throw FormatException('Unsupported download queue version: $version');
+    }
+    final state = envelope['state'];
+    if (state != null && state != 'committed') {
+      throw const FormatException('Uncommitted download queue snapshot');
+    }
+    if (envelope['downloading'] is! List) {
+      throw const FormatException('Missing download queue records');
+    }
+    return envelope;
+  }
+
+  Future<bool> _isValidQueueFile(File file) async {
+    if (!await file.exists()) return false;
+    try {
+      _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _recoverQueueFiles(File target) async {
+    final temporary = File('${target.path}.tmp');
+    final backup = File('${target.path}.bak');
+    final targetValid = await _isValidQueueFile(target);
+
+    if (targetValid) {
+      // A valid target is the last committed snapshot. Temporary and backup
+      // files are remnants of an earlier atomic replacement.
+      if (await temporary.exists()) await temporary.delete();
+      if (await backup.exists()) await backup.delete();
+      return;
+    }
+
+    // A complete temporary snapshot is newer than the previous backup. This
+    // is the expected state after the target was moved aside but before the
+    // temporary file was renamed into place.
+    if (await _isValidQueueFile(temporary)) {
+      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
+      await temporary.rename(target.path);
+      if (await backup.exists()) {
+        try {
+          await backup.delete();
+        } catch (e, s) {
+          LogManager.addLog(LogLevel.warning, 'IO',
+              'Failed to remove stale download snapshot backup\n${safeNetworkError(e)}\n$s');
+        }
+      }
+      return;
+    }
+
+    if (await _isValidQueueFile(backup)) {
+      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
+      await backup.rename(target.path);
+      return;
+    }
+
+    // Keep an incomplete temporary file as evidence for diagnostics and a
+    // future manual recovery instead of silently deleting it.
+    if (await temporary.exists()) {
+      await _moveQueueFileAside(temporary, 'corrupt');
+    }
+  }
+
+  Future<void> _moveQueueFileAside(File file, String reason) async {
+    if (!await file.exists()) return;
+    final destination = File(
+      '${file.path}.$reason.${DateTime.now().microsecondsSinceEpoch}',
+    );
+    try {
+      await file.rename(destination.path);
+    } catch (_) {
+      // Rename can fail on some platforms when another reader has the file
+      // open. A copy still preserves the original before replacement.
+      await file.copy(destination.path);
+    }
+  }
+
+  Future<void> _preserveLegacyQueueFile(File file) async {
+    var destination = File('${file.path}.legacy-v1');
+    if (await destination.exists()) {
+      destination = File(
+          '${file.path}.legacy-v1.${DateTime.now().microsecondsSinceEpoch}');
+    }
+    await file.copy(destination.path);
   }
 
   Future<void> _initDb() async {
     var oldData = <String, DownloadedItem>{};
-    if (!File("$path/download.db").existsSync()) {
-      for (var entry in Directory(path!).listSync()) {
-        if (entry is Directory) {
-          var infoFile = File("${entry.path}/info.json");
-          if (infoFile.existsSync()) {
-            var id = entry.name;
-            var json = infoFile.readAsStringSync();
-            var time = infoFile.lastModifiedSync();
-            var comic = _getComicFromJson(id, json, time);
-            if (comic != null) {
-              infoFile.delete();
-              var directory = comic.name;
-              int i = -1;
-              while (entry is Directory) {
-                try {
-                  entry = entry.renameX(directory);
-                  break;
-                } catch (e) {
-                  i++;
-                  if (i > 20) {
-                    // it seems that the error is unrelated to the directory name
-                    Log.error("IO",
-                        "Failed to rename downloaded directory: ${safeNetworkError(e)}");
-                    break;
-                  }
-                  directory = comic.name + i.toString();
-                }
-              }
-              oldData[entry.name] = comic;
+    final databaseFile = File("$path/download.db");
+    if (!await databaseFile.exists()) {
+      await for (var entity in Directory(path!).list()) {
+        if (entity is! Directory) continue;
+        final infoFile = File("${entity.path}/info.json");
+        if (!await infoFile.exists()) continue;
+
+        final id = entity.name;
+        final json = await infoFile.readAsString();
+        final time = await infoFile.lastModified();
+        final comic = _getComicFromJson(id, json, time);
+        if (comic == null) continue;
+
+        try {
+          await infoFile.delete();
+        } catch (e, s) {
+          LogManager.addLog(LogLevel.warning, "IO",
+              "Failed to remove legacy download metadata: ${safeNetworkError(e)}\n$s");
+        }
+
+        var directory = comic.name;
+        var renamedEntity = entity;
+        var i = -1;
+        while (true) {
+          try {
+            final target =
+                '${entity.parent.path}${Platform.pathSeparator}${sanitizeFileName(directory)}';
+            renamedEntity = await renamedEntity.rename(target);
+            break;
+          } catch (e) {
+            i++;
+            if (i > 20) {
+              // It seems that the error is unrelated to the directory name.
+              Log.error("IO",
+                  "Failed to rename downloaded directory: ${safeNetworkError(e)}");
+              break;
             }
+            directory = comic.name + i.toString();
           }
         }
+        oldData[renamedEntity.name] = comic;
       }
     }
     _db = sqlite3.open("$path/download.db");
@@ -221,6 +364,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       }
     }
     downloading.clear();
+    await _queueWriteTail;
     _db?.dispose();
     _db = null;
   }
@@ -237,13 +381,63 @@ class DownloadManager with _DownloadDb implements Listenable {
   ///储存当前的下载队列信息, 每完成一张图片的下载调用一次
   Future<void> _saveInfo() async {
     notifyListeners();
-    var data = <String, dynamic>{};
-    data["downloading"] = <Map<String, dynamic>>[];
+    final data = <String, dynamic>{
+      'version': _downloadQueueVersion,
+      'state': 'committed',
+      'generation': DateTime.now().microsecondsSinceEpoch,
+      'downloading': <Map<String, dynamic>>[],
+    };
     for (var item in downloading) {
-      data["downloading"].add(item.toMap());
+      (data['downloading'] as List<Map<String, dynamic>>).add(item.toMap());
     }
-    var file = File("$path${pathSep}newDownload.json");
-    await file.writeAsString(const JsonEncoder().convert(data));
+    final targetPath = "$path$pathSep$_downloadQueueFileName";
+    final encoded = const JsonEncoder().convert(data);
+    final write = _queueWriteTail.then<void>((_) async {
+      await _writeQueueSnapshot(File(targetPath), encoded);
+    });
+    _queueWriteTail = write.catchError((Object error, StackTrace stack) {
+      LogManager.addLog(LogLevel.error, 'IO',
+          'Failed to save download information\n${safeNetworkError(error)}\n$stack');
+    });
+    return write;
+  }
+
+  /// Queue additions happen from synchronous UI callbacks. Keep their
+  /// persistence failure observable in logs without creating an unhandled
+  /// future while retaining the awaitable `_saveInfo` API for lifecycle code.
+  void _saveInfoDetached() {
+    unawaited(_saveInfo().catchError((Object error, StackTrace stack) {
+      LogManager.addLog(LogLevel.error, 'IO',
+          'Failed to persist download queue\n${safeNetworkError(error)}\n$stack');
+    }));
+  }
+
+  Future<void> _writeQueueSnapshot(File target, String encoded) async {
+    final temporary = File('${target.path}.tmp');
+    final backup = File('${target.path}.bak');
+    await temporary.writeAsString(encoded, flush: true);
+
+    // Keep the previous committed file until the replacement has completed;
+    // startup recovery can restore it if the process stops between renames.
+    if (await backup.exists()) await backup.delete();
+    if (await target.exists()) await target.rename(backup.path);
+    try {
+      await temporary.rename(target.path);
+    } catch (_) {
+      if (!await target.exists() && await backup.exists()) {
+        await backup.rename(target.path);
+      }
+      rethrow;
+    }
+    // Cleanup is best-effort: a valid target is enough to recover on startup.
+    if (await backup.exists()) {
+      try {
+        await backup.delete();
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.warning, 'IO',
+            'Failed to remove download snapshot backup\n${safeNetworkError(e)}\n$s');
+      }
+    }
   }
 
   /// move comic to first
@@ -262,6 +456,7 @@ class DownloadManager with _DownloadDb implements Listenable {
     _removeDownloadingIdentity(item);
     downloading.addFirst(item);
     if (wasDownloading) start();
+    await _saveInfo();
   }
 
   bool _removeDownloadingIdentity(DownloadingItem item) {
@@ -285,16 +480,29 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   ///当一个下载任务完成时, 调用此函数
-  void _onFinish() async {
-    var task = downloading.removeFirst();
+  Future<void> _onFinish() async {
+    final task = downloading.firstOrNull;
+    if (task == null) return;
+    if (!_removeDownloadingIdentity(task)) return;
     final nextTask = downloading.firstOrNull;
     final controlGeneration = _downloadControlGeneration;
-    _addToDb(await task.toDownloadedItem(), task.directory!);
-    await _saveInfo();
+    try {
+      // Commit the durable comic record before removing the queue snapshot.
+      // If either conversion or queue persistence fails, restore the task so
+      // restart/retry can safely replay an idempotent database upsert.
+      _addToDb(await task.toDownloadedItem(), task.directory!);
+      await _saveInfo();
+    } catch (_) {
+      if (!downloading.any((queued) => identical(queued, task))) {
+        downloading.addFirst(task);
+        notifyListeners();
+      }
+      rethrow;
+    }
     StateController.findOrNull<DownloadPageLogic>()?.refresh();
     if (downloading.isEmpty) {
       isDownloading = false;
-      notifications.endProgress();
+      await notifications.endProgress();
     } else if (isDownloading &&
         controlGeneration == _downloadControlGeneration &&
         (nextTask == null || identical(downloading.firstOrNull, nextTask))) {
@@ -316,11 +524,19 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   ///出现错误时调用此函数
-  void _onError() {
-    unawaited(pause());
+  Future<void> _onError() async {
     _error = true;
-    notifications.sendNotification("下载出错".tl, "点击查看详情".tl);
     notifyListeners();
+    try {
+      await pause();
+    } finally {
+      try {
+        await notifications.sendNotification("下载出错".tl, "点击查看详情".tl);
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.warning, "Download",
+            "Failed to send download error notification\n${safeNetworkError(e)}\n$s");
+      }
+    }
   }
 
   ///开始或继续下载
@@ -381,7 +597,7 @@ class DownloadManager with _DownloadDb implements Listenable {
 
     if (downloading.isEmpty) {
       isDownloading = false;
-      notifications.endProgress();
+      await notifications.endProgress();
     } else if (shouldResume) {
       start();
     }
@@ -395,17 +611,21 @@ class DownloadManager with _DownloadDb implements Listenable {
   ///删除已下载的漫画
   Future<void> delete(List<String> ids) async {
     for (var id in ids) {
-      _deleteFromDb(id);
       var comic = Directory("$path/${getDirectory(id)}");
       try {
-        comic.delete(recursive: true);
+        await comic.delete(recursive: true);
       } catch (e) {
         if (e is PathNotFoundException) {
           //忽略
         } else {
+          // Keep the durable database row when the filesystem operation
+          // fails; it is the only record that can make the deletion
+          // retryable after a restart.
           rethrow;
         }
       }
+      _deleteFromDb(id);
+      _DownloadDb.clearDirectoryCache(id);
     }
   }
 
@@ -415,11 +635,12 @@ class DownloadManager with _DownloadDb implements Listenable {
       if (comic.downloadedEps.length == 1) {
         return "Delete Error: only one downloaded episode";
       }
-      if (Directory("$path/${getDirectory(comic.id)}/${ep + 1}").existsSync()) {
-        Directory("$path/${getDirectory(comic.id)}/${ep + 1}")
-            .deleteSync(recursive: true);
+      final episodeDirectory =
+          Directory("$path/${getDirectory(comic.id)}/${ep + 1}");
+      if (await episodeDirectory.exists()) {
+        await episodeDirectory.delete(recursive: true);
       }
-      var size = Directory("$path/${getDirectory(comic.id)}").getMBSizeSync();
+      var size = await Directory("$path/${getDirectory(comic.id)}").getMBSize();
       comic.downloadedEps.remove(ep);
       comic.comicSize = size;
       _addToDb(comic, comic.directory ?? getDirectory(comic.id));
@@ -497,8 +718,8 @@ class DownloadManager with _DownloadDb implements Listenable {
 
 DownloadingItem downloadingItemFromMap(
     Map<String, dynamic> map,
-    void Function() whenFinish,
-    void Function() whenError,
+    DownloadProgressCallback whenFinish,
+    DownloadProgressCallback whenError,
     Future<void> Function() updateInfo) {
   switch (map["type"]) {
     case 0:
@@ -535,7 +756,7 @@ extension AddDownloadExt on DownloadManager {
   void addPicDownload(ComicItem comic, List<int> downloadEps) {
     downloading.addLast(PicDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, comic.id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -544,7 +765,7 @@ extension AddDownloadExt on DownloadManager {
     final id = getGalleryId(gallery.link);
     downloading.addLast(
         EhDownloadingItem(gallery, _onFinish, _onError, _saveInfo, id, type));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -552,7 +773,7 @@ extension AddDownloadExt on DownloadManager {
   void addJmDownload(JmComicInfo comic, List<int> downloadEps) {
     downloading.addLast(JmDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, "jm${comic.id}"));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -561,7 +782,7 @@ extension AddDownloadExt on DownloadManager {
     final id = "hitomi${comic.id}";
     downloading.addLast(HitomiDownloadingItem(
         comic, cover, link, _onFinish, _onError, _saveInfo, id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -570,7 +791,7 @@ extension AddDownloadExt on DownloadManager {
     final id = "Ht${comic.id}";
     downloading
         .addLast(DownloadingHtComic(comic, _onFinish, _onError, _saveInfo, id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -578,7 +799,7 @@ extension AddDownloadExt on DownloadManager {
     final id = "nhentai${comic.id}";
     downloading.addLast(
         NhentaiDownloadingItem(comic, _onFinish, _onError, _saveInfo, id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -586,7 +807,7 @@ extension AddDownloadExt on DownloadManager {
     var id = generateId(comic.sourceKey, comic.comicId);
     downloading.addLast(CustomDownloadingItem(
         comic, downloadEps, _onFinish, _onError, _saveInfo, id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 
@@ -602,7 +823,7 @@ extension AddDownloadExt on DownloadManager {
     };
     downloading.addLast(
         FavoriteDownloading(comic, _onFinish, _onError, _saveInfo, id));
-    _saveInfo();
+    _saveInfoDetached();
     if (!isDownloading) start();
   }
 }
@@ -705,12 +926,28 @@ abstract mixin class _DownloadDb {
     return result.first['count(*)'];
   }
 
+  static const _orderColumns = <String, String>{
+    'time': 'time',
+    'title': 'title',
+    'subtitle': 'subtitle',
+    'size': 'size',
+  };
+
   /// order: time, title, subtitle, size
   List<DownloadedItem> getAll(
       [String order = 'time', String direction = 'desc']) {
+    final column = _orderColumns[order];
+    if (column == null) {
+      throw ArgumentError.value(order, 'order', 'Unsupported download sort');
+    }
+    final normalizedDirection = direction.toLowerCase();
+    if (normalizedDirection != 'asc' && normalizedDirection != 'desc') {
+      throw ArgumentError.value(direction, 'direction', 'Expected ASC or DESC');
+    }
+    final sqlDirection = normalizedDirection.toUpperCase();
     var result = _db!.select('''
       select * from download
-      order by $order $direction
+      order by $column $sqlDirection, id ASC
     ''');
     return result
         .map(
@@ -721,6 +958,8 @@ abstract mixin class _DownloadDb {
   }
 
   static final _cache = <String, String>{};
+
+  static void clearDirectoryCache(String id) => _cache.remove(id);
 
   String getDirectory(String id) {
     var directory = _cache[id];

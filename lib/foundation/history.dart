@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/webdav.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -148,7 +149,7 @@ base class History extends LinkedListEntry<History> {
             .split(',')
             .where((element) => element != "")
             .map((e) => int.parse(e))),
-        maxPage = row["max_page"];
+        maxPage = row.keys.contains("max_page") ? row["max_page"] : null;
 
   static Future<History> findOrCreate(
     HistoryMixin model, {
@@ -160,7 +161,7 @@ base class History extends LinkedListEntry<History> {
       return history;
     }
     history = History.fromModel(model: model, ep: ep, page: page);
-    HistoryManager().addHistory(history);
+    await HistoryManager().addHistory(history);
     return history;
   }
 
@@ -170,7 +171,7 @@ base class History extends LinkedListEntry<History> {
       return history;
     }
     history = History.fromModel(model: model, ep: 0, page: 0);
-    HistoryManager().addHistory(history);
+    await HistoryManager().addHistory(history);
     return history;
   }
 }
@@ -185,9 +186,32 @@ class HistoryManager {
 
   late Database _db;
 
+  bool _isOpen = false;
+
+  void close() {
+    if (_isOpen) {
+      _db.dispose();
+      _isOpen = false;
+    }
+    _cachedHistory.clear();
+  }
+
+  Future<void> snapshotTo(String path) => DataMaintenance.run(() {
+        _db.execute('VACUUM INTO ?;', [path]);
+      });
+
+  bool _deferWrite(void Function() operation) {
+    if (!DataMaintenance.busy) return false;
+    DataMaintenance.run(operation).catchError((Object error, StackTrace stack) {
+      LogManager.addLog(LogLevel.error, 'HistoryManager', '$error\n$stack');
+    });
+    return true;
+  }
+
   int get length => _db.select("select count(*) from history;").first[0] as int;
 
-  Map<String, bool>? _cachedHistory;
+  static const _historyExistenceCacheLimit = 1024;
+  final Map<String, bool> _cachedHistory = {};
 
   Future<void> tryUpdateDb() async {
     var file = File("${App.dataPath}/history_temp.db");
@@ -196,53 +220,96 @@ class HistoryManager {
           LogLevel.info, "HistoryManager.tryUpdateDb", "db file not exist");
       return;
     }
-    var db = sqlite3.open(file.path);
-    var newHistory0 = db.select("""
-      select * from history
-      order by time DESC;
-    """);
-    var newHistory =
-        newHistory0.map((element) => History.fromRow(element)).toList();
-    if (file.existsSync()) {
-      var skips = 0;
-      for (var history in newHistory) {
-        if (findSync(history.target) == null) {
-          addHistory(history);
-          LogManager.addLog(LogLevel.info, "HistoryManager",
-              "merge history ${history.target}");
-        } else {
-          skips++;
-        }
-      }
-      LogManager.addLog(LogLevel.info, "HistoryManager",
-          "merge history, skipped $skips, added ${newHistory.length - skips}");
-
-      //import favorite images
-      skips = 0;
-      ImageFavoriteManager.init();
-      var newImages0 = db.select("select * from image_favorites;");
-      var newImages = newImages0.map((e) =>
-          ImageFavorite(e["id"], e["cover"], e["title"], e["ep"], e["page"], jsonDecode(e["other"]))).toList();
-      for (var image in newImages) {
-        if (ImageFavoriteManager.exist(image.id, image.ep, image.page)) {
-          skips++;
-        } else {
-          ImageFavoriteManager.add(image);
-          LogManager.addLog(LogLevel.info, "HistoryManager",
-              "merge favorite image ep ${image.ep} page ${image.page} @ ${image.id}");
-        }
-      }
-      LogManager.addLog(LogLevel.info, "HistoryManager",
-          "merge favorite images, skipped $skips, added ${newImages.length - skips}");
-    }
-    db.dispose();
-    file.deleteSync();
+    await mergeFrom(file.path);
+    _deleteImportedSource(file);
   }
 
-  Future<void> init() async {
-    _db = sqlite3.open("${App.dataPath}/history.db");
+  void _deleteImportedSource(File file) {
+    try {
+      file.deleteSync();
+    } catch (error, stack) {
+      // The merge is already committed; cleanup must not turn a successful
+      // import into a startup failure. Keep the source for a later retry.
+      LogManager.addLog(
+          LogLevel.warning,
+          'HistoryManager',
+          'Failed to remove imported source ${file.path}; retaining it for '
+              'retry.\n$error\n$stack');
+    }
+  }
 
-    _db.execute("""
+  /// Merge a validated archive into this connection without modifying its input.
+  Future<void> mergeFrom(String sourcePath) => DataMaintenance.run(() {
+        final source = sqlite3.open(sourcePath, mode: OpenMode.readOnly);
+        try {
+          final histories = source
+              .select('select * from history;')
+              .map(History.fromRow)
+              .toList();
+          final hasImages = source.select(
+            "select 1 from sqlite_master where type = 'table' and name = ?;",
+            ['image_favorites'],
+          ).isNotEmpty;
+          final images = hasImages
+              ? source.select('select * from image_favorites;').map((row) {
+                  final favorite = ImageFavorite(
+                      row['id'],
+                      row['cover'],
+                      row['title'],
+                      row['ep'],
+                      row['page'],
+                      Map<String, dynamic>.from(jsonDecode(row['other'])));
+                  return favorite;
+                }).toList()
+              : <ImageFavorite>[];
+          _transaction(() {
+            for (final history in histories) {
+              _insertHistory(history, updateTime: false);
+            }
+            for (final image in images) {
+              _db.execute('''
+            insert or ignore into image_favorites
+              (id, title, cover, ep, page, other) values (?, ?, ?, ?, ?, ?);
+          ''', [
+                image.id,
+                image.title,
+                image.imagePath,
+                image.ep,
+                image.page,
+                jsonEncode(image.otherInfo)
+              ]);
+            }
+          });
+        } finally {
+          source.dispose();
+          _cachedHistory.clear();
+        }
+      }, suppressSync: true, operationName: 'history-import');
+
+  void _transaction(void Function() operation) {
+    _db.execute('BEGIN IMMEDIATE;');
+    try {
+      operation();
+      _db.execute('COMMIT;');
+    } catch (_) {
+      _db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  Future<void> init({String? databasePath, bool importLegacy = true}) async {
+    close();
+    _db = sqlite3.open(databasePath ?? "${App.dataPath}/history.db");
+    _isOpen = true;
+    _db.createFunction(
+      functionName: 'pica_lower',
+      argumentCount: const AllowedArgumentCount(1),
+      deterministic: true,
+      function: (arguments) => (arguments.single as String?)?.toLowerCase(),
+    );
+
+    _transaction(() {
+      _db.execute("""
         create table if not exists history  (
           target text primary key,
           title text,
@@ -257,49 +324,68 @@ class HistoryManager {
         );
       """);
 
-    // 检查是否有max_page字段, 如果没有则添加
-    var res = _db.select("""
+      // 检查是否有max_page字段, 如果没有则添加
+      var res = _db.select("""
       PRAGMA table_info(history);
     """);
-    if (res.every((row) => row["name"] != "max_page")) {
-      _db.execute("""
+      if (res.every((row) => row["name"] != "max_page")) {
+        _db.execute("""
         alter table history
         add column max_page int;
       """);
-    }
+      }
+
+      _db.execute('''
+      create index if not exists history_time_target on history(time DESC, target);
+    ''');
+      ImageFavoriteManager._init(_db);
+      if ((_db.select('PRAGMA user_version;').single[0] as int) < 1) {
+        _db.execute('PRAGMA user_version = 1;');
+      }
+    });
 
     // 迁移早期版本的数据
-    var file = File("${App.dataPath}/history.json");
-    if (file.existsSync()) {
-      readDataFromJson(jsonDecode(file.readAsStringSync()));
-      file.deleteSync();
+    if (importLegacy) {
+      var file = File("${App.dataPath}/history.json");
+      if (file.existsSync()) {
+        await readDataFromJson(jsonDecode(file.readAsStringSync()));
+        _deleteImportedSource(file);
+      }
     }
-
-    ImageFavoriteManager.init();
   }
 
-  void readDataFromJson(List<dynamic> json) {
-    var history = LinkedList<History>();
-    for (var h in json) {
-      history.add(History.fromMap((h as Map<String, dynamic>)));
-    }
-    // do not clear previous history
-    for (var element in history) {
-      if (findSync(element.target) == null) addHistory(element);
-    }
-    vacuum();
-  }
+  Future<void> readDataFromJson(List<dynamic> json) => DataMaintenance.run(() {
+        final histories = json
+            .map((h) => History.fromMap(Map<String, dynamic>.from(h as Map)))
+            .toList();
+        try {
+          _transaction(() {
+            for (final history in histories) {
+              _insertHistory(history, updateTime: false);
+            }
+          });
+        } finally {
+          _cachedHistory.clear();
+        }
+      }, suppressSync: true, operationName: 'history-import');
 
-  void saveData() async {
-    Webdav.uploadData();
+  Future<void> saveData() async {
+    DataMaintenance.recordSyncRequest();
+    if (!DataMaintenance.syncSuppressed) await Webdav.uploadData();
   }
 
   /// add history. if exists, update time.
   ///
   /// This function would be called when user start reading.
-  Future<void> addHistory(History newItem) async {
+  Future<void> addHistory(History newItem) => DataMaintenance.run(() {
+        _insertHistory(newItem);
+        _rememberHistoryPresence(newItem.target, true);
+        return saveData();
+      });
+
+  void _insertHistory(History newItem, {bool updateTime = true}) {
     var res = _db.select("""
-      select * from history
+      select 1 from history
       where target == ?;
     """, [newItem.target]);
     if (res.isEmpty) {
@@ -318,49 +404,51 @@ class HistoryManager {
         newItem.readEpisode.join(','),
         newItem.maxPage
       ]);
-    } else {
+    } else if (updateTime) {
       _db.execute("""
         update history
-        set time = ${DateTime.now().millisecondsSinceEpoch}
+        set time = ?
         where target == ?;
-      """, [newItem.target]);
+      """, [DateTime.now().millisecondsSinceEpoch, newItem.target]);
     }
-    saveData();
-    updateCache();
   }
 
   ///退出阅读器时调用此函数, 修改阅读位置
-  Future<void> saveReadHistory(History history,
-      [bool updateMePage = true]) async {
-    _db.execute("""
+  Future<void> saveReadHistory(History history, [bool updateMePage = true]) =>
+      DataMaintenance.run(() async {
+        _db.execute("""
         update history
-        set time = ${DateTime.now().millisecondsSinceEpoch}, ep = ?, page = ?, readEpisode = ?, max_page = ?
+        set time = ?, ep = ?, page = ?, readEpisode = ?, max_page = ?
         where target == ?;
     """, [
-      history.ep,
-      history.page,
-      history.readEpisode.join(','),
-      history.maxPage,
-      history.target
-    ]);
-    if (updateMePage) {
-      scheduleMicrotask(() {
-        StateController.findOrNull(tag: "me_page")?.update();
+          DateTime.now().millisecondsSinceEpoch,
+          history.ep,
+          history.page,
+          history.readEpisode.join(','),
+          history.maxPage,
+          history.target
+        ]);
+        if (updateMePage) {
+          scheduleMicrotask(() {
+            StateController.findOrNull(tag: "me_page")?.update();
+          });
+        }
+        await saveData();
       });
-    }
-  }
 
   void clearHistory() {
+    if (_deferWrite(clearHistory)) return;
     _db.execute("delete from history;");
-    updateCache();
+    _cachedHistory.clear();
   }
 
-  void remove(String id) async {
+  void remove(String id) {
+    if (_deferWrite(() => remove(id))) return;
     _db.execute("""
       delete from history
-      where target == '$id';
-    """);
-    updateCache();
+      where target == ?;
+    """, [id]);
+    _rememberHistoryPresence(id, false);
   }
 
   Future<History?> find(String target) async {
@@ -368,20 +456,21 @@ class HistoryManager {
   }
 
   void updateCache() {
-    _cachedHistory = {};
-    var res = _db.select("""
-        select * from history;
-      """);
-    for (var element in res) {
-      _cachedHistory![element["target"] as String] = true;
+    // Presence is populated lazily by findSync. Keeping this method as a
+    // cache reset preserves its historical API without scanning the table.
+    _cachedHistory.clear();
+  }
+
+  void _rememberHistoryPresence(String target, bool exists) {
+    _cachedHistory.remove(target);
+    _cachedHistory[target] = exists;
+    if (_cachedHistory.length > _historyExistenceCacheLimit) {
+      _cachedHistory.remove(_cachedHistory.keys.first);
     }
   }
 
   History? findSync(String target) {
-    if(_cachedHistory == null) {
-      updateCache();
-    }
-    if (!_cachedHistory!.containsKey(target)) {
+    if (_cachedHistory[target] == false) {
       return null;
     }
 
@@ -390,20 +479,50 @@ class HistoryManager {
       where target == ?;
     """, [target]);
     if (res.isEmpty) {
+      _rememberHistoryPresence(target, false);
       return null;
     }
+    _rememberHistoryPresence(target, true);
     return History.fromRow(res.first);
   }
 
   List<History> getAll() {
     var res = _db.select("""
       select * from history
-      order by time DESC;
+      order by time DESC, target ASC;
     """);
     return res.map((element) => History.fromRow(element)).toList();
   }
 
+  /// Keyset pagination stays stable when preceding rows are deleted or added.
+  List<History> getPage({int limit = 60, History? after, String keyword = ''}) {
+    if (limit <= 0) return [];
+    final conditions = <String>[];
+    final parameters = <Object?>[];
+    if (keyword.isNotEmpty) {
+      conditions.add(
+          '(instr(pica_lower(title), ?) > 0 or instr(pica_lower(subtitle), ?) > 0)');
+      parameters.addAll([keyword.toLowerCase(), keyword.toLowerCase()]);
+    }
+    if (after != null) {
+      conditions.add('(time <= ? and (time < ? or target > ?))');
+      parameters.addAll([
+        after.time.millisecondsSinceEpoch,
+        after.time.millisecondsSinceEpoch,
+        after.target
+      ]);
+    }
+    parameters.add(limit);
+    final rows = _db.select('''
+      select * from history
+      ${conditions.isEmpty ? '' : 'where ${conditions.join(' and ')}'}
+      order by time DESC, target ASC limit ?;
+    ''', parameters);
+    return rows.map(History.fromRow).toList();
+  }
+
   void vacuum() {
+    if (_deferWrite(vacuum)) return;
     _db.execute("""
       vacuum;
     """);
@@ -411,15 +530,21 @@ class HistoryManager {
 
   /// 获取最近一周的阅读数据, 用于生成图表, List中的元素是当天阅读的漫画数量
   List<int> getWeekData(int days) {
+    if (days <= 0) return [];
+    final now = DateTime.now();
     var res = _db.select("""
-      select * from history
-      where time > ${DateTime.now().add(Duration(days: 1 - days)).millisecondsSinceEpoch}
+      select time from history
+      where time > ? and time <= ?
       order by time ASC;
-    """);
+    """, [
+      now.subtract(Duration(days: days)).millisecondsSinceEpoch,
+      now.millisecondsSinceEpoch
+    ]);
     var data = List<int>.filled(days, 0);
     for (var element in res) {
       var time = DateTime.fromMillisecondsSinceEpoch(element["time"] as int);
-      data[DateTime.now().difference(time).inDays]++;
+      final index = now.difference(time).inDays;
+      if (index >= 0 && index < days) data[index]++;
     }
     return data.reversed.toList();
   }
@@ -428,7 +553,7 @@ class HistoryManager {
   List<History> getRecent() {
     var res = _db.select("""
       select * from history
-      order by time DESC
+      order by time DESC, target ASC
       limit 20;
     """);
     return res.map((element) => History.fromRow(element)).toList();

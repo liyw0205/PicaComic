@@ -36,7 +36,11 @@ class FavoriteDownloading extends DownloadingItem {
   Future<DownloadingItem>? _pendingDownloadLogic;
 
   @override
-  void start() async {
+  void start() {
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
     final generation = ++_startGeneration;
     final manager = DownloadManager();
     try {
@@ -60,7 +64,12 @@ class FavoriteDownloading extends DownloadingItem {
     } catch (e, s) {
       if (!_isActiveStart(generation, manager)) return;
       Log.error("Download", "${safeNetworkError(e)}\n$s");
-      onError?.call();
+      try {
+        await onError?.call();
+      } catch (callbackError, callbackStack) {
+        Log.error(
+            "Download", "${safeNetworkError(callbackError)}\n$callbackStack");
+      }
     }
   }
 

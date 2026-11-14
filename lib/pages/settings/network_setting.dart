@@ -57,34 +57,27 @@ class _NetworkSettingsState extends State<NetworkSettings> {
               setState(() {
                 appdata.settings[vpnAutoSwitchSettingIndex] = value ? "1" : "0";
               });
-              appdata.updateSettings();
-              setNetworkProxy();
+              unawaited(_persistVpnSetting());
             },
           ),
         ),
         ListTile(
-          title: Row(
-            children: [
-              const Text("Hosts"),
-              const SizedBox(
-                width: 2,
-              ),
-              InkWell(
-                borderRadius: const BorderRadius.all(Radius.circular(18)),
-                onTap: () => showDialogMessage(
-                  context,
-                  "警告".tl,
-                  "${"此功能已不再受支持".tl}\n${"请勿反馈相关问题".tl}"
-                ),
-                child: const Icon(
-                  Icons.warning_amber_rounded,
-                  color: Colors.red,
-                  size: 18,
-                ),
-              )
-            ]
+            title: Row(children: [
+          const Text("Hosts"),
+          const SizedBox(
+            width: 2,
+          ),
+          InkWell(
+            borderRadius: const BorderRadius.all(Radius.circular(18)),
+            onTap: () => showDialogMessage(
+                context, "警告".tl, "${"此功能已不再受支持".tl}\n${"请勿反馈相关问题".tl}"),
+            child: const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 18,
+            ),
           )
-        ),
+        ])),
         ListTile(
           leading: const Icon(Icons.dns),
           title: Text("启用".tl),
@@ -94,10 +87,7 @@ class _NetworkSettingsState extends State<NetworkSettings> {
               setState(() {
                 appdata.settings[58] = value ? "1" : "0";
               });
-              appdata.updateSettings();
-              if (value) {
-                HttpProxyServer.reload();
-              }
+              unawaited(_persistHostsSetting(value));
             },
           ),
         ),
@@ -117,9 +107,29 @@ class _NetworkSettingsState extends State<NetworkSettings> {
         //     launchUrlString("https://github.com/user/repo/blob/master/help.md");
         //   },
         // ),
-        Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
+        Padding(
+            padding:
+                EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom))
       ],
     );
+  }
+
+  Future<void> _persistVpnSetting() async {
+    try {
+      await appdata.updateSettings();
+      await setNetworkProxy();
+    } catch (e) {
+      if (mounted) showToast(message: e.toString());
+    }
+  }
+
+  Future<void> _persistHostsSetting(bool enabled) async {
+    try {
+      await appdata.updateSettings();
+      if (enabled) await HttpProxyServer.reload();
+    } catch (e) {
+      if (mounted) showToast(message: e.toString());
+    }
   }
 }
 
@@ -133,40 +143,77 @@ class EditRuleView extends StatefulWidget {
 class _EditRuleViewState extends State<EditRuleView> {
   final file = File("${App.dataPath}/rule.json");
 
-  late TextEditingController controller;
+  late final TextEditingController controller;
+  late final Future<void> _loadFuture;
+  bool _disposed = false;
+  bool _loaded = false;
 
   @override
   void initState() {
-    HttpProxyServer.createConfigFile();
-    controller = TextEditingController(text: file.readAsStringSync());
     super.initState();
+    controller = TextEditingController();
+    _loadFuture = _load();
+  }
+
+  Future<void> _load() async {
+    await HttpProxyServer.ensureConfigFile();
+    final contents = await file.readAsString();
+    if (_disposed) return;
+    controller.text = contents;
+    _loaded = true;
+  }
+
+  Future<void> _save(String contents) {
+    return writeTextFileAtomically(file, contents);
+  }
+
+  Future<void> _saveAndReport(String contents) async {
+    try {
+      await _save(contents);
+    } catch (e, s) {
+      LogManager.addLog(
+          LogLevel.error, "Network Proxy", "Failed to save rule.json.\n$e\n$s");
+    }
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    if (_loaded) {
+      // dispose cannot be async, but the captured text is independent of the
+      // controller and the write helper preserves the previous valid file.
+      unawaited(_saveAndReport(controller.text));
+    }
+    controller.dispose();
     super.dispose();
-    file.writeAsStringSync(controller.text, mode: FileMode.writeOnly);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("rule.json"),
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(8, 0, 8, MediaQuery.of(context).padding.bottom),
-          child: TextField(
-            keyboardType: TextInputType.multiline,
-            maxLines: null,
-            decoration: const InputDecoration(
-                border: InputBorder.none
-            ),
-            controller: controller,
-          ),
-        )
-      )
-    );
+        appBar: AppBar(
+          title: const Text("rule.json"),
+        ),
+        body: FutureBuilder<void>(
+            future: _loadFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text(snapshot.error.toString()));
+              }
+              return SingleChildScrollView(
+                  child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                    8, 0, 8, MediaQuery.of(context).padding.bottom),
+                child: TextField(
+                  keyboardType: TextInputType.multiline,
+                  maxLines: null,
+                  decoration: const InputDecoration(border: InputBorder.none),
+                  controller: controller,
+                ),
+              ));
+            }));
   }
 }

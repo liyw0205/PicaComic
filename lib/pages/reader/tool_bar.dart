@@ -1,7 +1,8 @@
 part of pica_reader;
 
 extension ToolBar on ComicReadingPage {
-  bool get isReversed => appdata.settings[9] == "2" || appdata.settings[9] == "6";
+  bool get isReversed =>
+      appdata.settings[9] == "2" || appdata.settings[9] == "6";
 
   ///构建底部工具栏
   Widget buildBottomToolBar(
@@ -156,11 +157,12 @@ extension ToolBar on ComicReadingPage {
                                   logic.order,
                                   logic.index,
                                   otherInfo);
-                              if (!ImageFavoriteManager.exist(id, logic.order, logic.index)) {
-                                ImageFavoriteManager.add(favorite);
+                              if (!ImageFavoriteManager.exist(
+                                  id, logic.order, logic.index)) {
+                                await ImageFavoriteManager.add(favorite);
                                 showToast(message: "已添加至图片收藏".tl);
                               } else {
-                                ImageFavoriteManager.delete(favorite);
+                                await ImageFavoriteManager.delete(favorite);
                                 showToast(message: "已取消图片收藏".tl);
                               }
                             }

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 4.2.20+4220
+version: 4.2.21+4221
 environment:
   sdk: '>=3.3.0'
 
@@ -32,7 +32,7 @@ dependencies:
   dio: 5.4.1
   shared_preferences: ^2.0.16
   dynamic_color: ^1.6.9
-  crypto: any
+  crypto: ^3.0.5
   pointycastle: ^3.7.3
   uuid: ^3.0.7
   photo_view:
@@ -48,33 +48,34 @@ dependencies:
   flutter_local_notifications: ^17.2.2
   share_plus: ^7.0.0
   local_auth: ^2.3.0
-  html: any
-  dio_cookie_manager: any
+  flutter_secure_storage: ^9.2.4
+  html: ^0.15.4
+  dio_cookie_manager: ^3.1.1
   image: 4.1.0
   shimmer_animation: ^2.1.0
-  cookie_jar: any
+  cookie_jar: ^4.0.8
   workmanager: ^0.8.0
   flutter_localizations:
     sdk: flutter
-  intl: any
+  intl: ^0.20.2
   flutter_displaymode: 0.6.0
   app_links: 3.4.3
   flutter_reorderable_grid_view: 5.0.1
   webdav_client:
     git:
       url: https://github.com/wgh136/webdav_client
-      ref: main
+      ref: f2875f9327dabea1732373fb8b24a71917360f46
   dio_http2_adapter: 2.3.1+1
   socks5_proxy: ^2.1.1
   archive: 3.6.1
   sqlite3: 2.1.0
-  sqlite3_flutter_libs: any
+  sqlite3_flutter_libs: ^0.5.24
   zip_flutter:
     git:
       url: https://github.com/wgh136/zip_flutter
       ref: 64bb624
   collection: ^1.18.0
-  window_manager:
+  window_manager: ^0.4.2
   pdf: ^3.10.8
   flutter_qjs:
     git:
@@ -104,7 +105,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^2.0.0
   flutter_to_arch:
-    git: https://github.com/wgh136/flutter_to_arch
+    git:
+      url: https://github.com/wgh136/flutter_to_arch
+      ref: 15bfead0380fda79b0256b37c73b886b0882f1bf
 
 flutter_to_arch:
   name: Pica Comic

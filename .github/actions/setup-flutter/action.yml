@@ -1,0 +1,17 @@
+name: Set up project Flutter
+description: Install the Flutter version declared in .flutter-version
+runs:
+  using: composite
+  steps:
+    - name: Read pinned Flutter version
+      id: sdk
+      shell: bash
+      run: |
+        version="$(tr -d '\r\n' < .flutter-version)"
+        [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+        flutter-version: ${{ steps.sdk.outputs.version }}
+        architecture: x64

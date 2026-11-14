@@ -333,6 +333,8 @@ class _CommentsPage extends StatefulWidget {
 
 class _CommentsPageState extends State<_CommentsPage> {
   bool _loading = true;
+  bool _loadingInitial = false;
+  bool _loadingMore = false;
   List<Comment>? _comments;
   String? _error;
   int _page = 1;
@@ -340,43 +342,68 @@ class _CommentsPageState extends State<_CommentsPage> {
   var controller = TextEditingController();
   bool sending = false;
 
-  void firstLoad() async {
-    var res = await widget.source.commentsLoader!(
-        widget.data.comicId, widget.data.subId, 1, widget.replyId);
-    if (res.error) {
+  Future<void> firstLoad() async {
+    if (_loadingInitial) return;
+    _loadingInitial = true;
+    try {
+      var res = await widget.source.commentsLoader!(
+          widget.data.comicId, widget.data.subId, 1, widget.replyId);
+      if (!mounted) return;
+      if (res.error) {
+        setState(() {
+          _error = res.errorMessage;
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _comments = res.data;
+          _loading = false;
+          maxPage = res.subData;
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
-        _error = res.errorMessage;
+        _error = safeNetworkError(error);
         _loading = false;
       });
-    } else {
-      setState(() {
-        _comments = res.data;
-        _loading = false;
-        maxPage = res.subData;
-      });
+    } finally {
+      _loadingInitial = false;
     }
   }
 
-  void loadMore() async {
-    var res = await widget.source.commentsLoader!(
-        widget.data.comicId, widget.data.subId, _page + 1, widget.replyId);
-    if (res.error) {
-      showToast(message: res.errorMessage ?? "Unknown Error");
-    } else {
-      setState(() {
-        _comments!.addAll(res.data);
-        _page++;
-        if (maxPage == null && res.data.isEmpty) {
-          maxPage = _page;
-        }
-      });
+  Future<void> loadMore() async {
+    if (_loadingMore || _comments == null) return;
+    _loadingMore = true;
+    final page = _page + 1;
+    try {
+      var res = await widget.source.commentsLoader!(
+          widget.data.comicId, widget.data.subId, page, widget.replyId);
+      if (!mounted) return;
+      if (res.error) {
+        showToast(message: res.errorMessage ?? "Unknown Error");
+      } else {
+        setState(() {
+          _comments!.addAll(res.data);
+          _page = page;
+          if (maxPage == null && res.data.isEmpty) {
+            maxPage = _page;
+          }
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        showToast(message: safeNetworkError(error));
+      }
+    } finally {
+      _loadingMore = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      firstLoad();
+      unawaited(firstLoad());
       return const Center(
         child: CircularProgressIndicator(),
       );
@@ -386,6 +413,7 @@ class _CommentsPageState extends State<_CommentsPage> {
         retry: () {
           setState(() {
             _loading = true;
+            _error = null;
           });
         },
         withAppbar: false,
@@ -401,7 +429,7 @@ class _CommentsPageState extends State<_CommentsPage> {
               itemBuilder: (context, index) {
                 if (index == _comments!.length) {
                   if (_page < (maxPage ?? _page + 1)) {
-                    loadMore();
+                    unawaited(loadMore());
                     return const ListLoadingIndicator();
                   } else {
                     return const SizedBox();
@@ -512,22 +540,31 @@ class _CommentsPageState extends State<_CommentsPage> {
                           setState(() {
                             sending = true;
                           });
-                          var b = await widget.source.sendCommentFunc!(
-                              widget.data.comicId,
-                              widget.data.subId,
-                              controller.text,
-                              widget.replyId);
-                          if (!b.error) {
-                            controller.text = "";
-                            setState(() {
-                              sending = false;
-                              _loading = true;
-                              _comments?.clear();
-                              _page = 1;
-                              maxPage = null;
-                            });
-                          } else {
-                            showToast(message: b.errorMessage ?? "Error");
+                          try {
+                            var b = await widget.source.sendCommentFunc!(
+                                widget.data.comicId,
+                                widget.data.subId,
+                                controller.text,
+                                widget.replyId);
+                            if (!mounted) return;
+                            if (!b.error) {
+                              controller.text = "";
+                              setState(() {
+                                sending = false;
+                                _loading = true;
+                                _comments?.clear();
+                                _page = 1;
+                                maxPage = null;
+                              });
+                            } else {
+                              showToast(message: b.errorMessage ?? "Error");
+                              setState(() {
+                                sending = false;
+                              });
+                            }
+                          } catch (error) {
+                            if (!mounted) return;
+                            showToast(message: safeNetworkError(error));
                             setState(() {
                               sending = false;
                             });
@@ -587,6 +624,8 @@ class ThumbnailsData {
 
 class ComicPageLogic<T extends Object> extends StateController {
   bool loading = true;
+  bool _requestInFlight = false;
+  int _requestGeneration = 0;
   T? data;
   String? message;
   bool showAppbarTitle = false;
@@ -601,26 +640,43 @@ class ComicPageLogic<T extends Object> extends StateController {
   int colorIndex = 0;
   bool? favoriteOnPlatform;
 
-  void get(Future<Res<T>> Function() loadData,
+  Future<void> get(Future<Res<T>> Function() loadData,
       Future<bool> Function(T) loadFavorite, String Function() getId) async {
-    var [res, _] = await Future.wait(
-        [loadData(), Future.delayed(const Duration(milliseconds: 300))]);
-    if (res.error) {
-      message = res.errorMessage;
-      if (message == "Exit") {
+    if (isDisposed || _requestInFlight) return;
+    _requestInFlight = true;
+    final generation = ++_requestGeneration;
+    try {
+      var [res, _] = await Future.wait(
+          [loadData(), Future.delayed(const Duration(milliseconds: 300))]);
+      if (isDisposed || generation != _requestGeneration) return;
+      if (res.error) {
+        message = res.errorMessage ?? "Network Error";
         loading = false;
+        update();
         return;
       }
-    } else {
       data = res.data;
       favorite = await loadFavorite(res.data);
+      if (isDisposed || generation != _requestGeneration) return;
+      loading = false;
+      history = await HistoryManager().find(getId());
+      if (isDisposed || generation != _requestGeneration) return;
+      update();
+    } catch (error) {
+      if (isDisposed || generation != _requestGeneration) return;
+      message = safeNetworkError(error);
+      loading = false;
+      update();
+    } finally {
+      if (generation == _requestGeneration) {
+        _requestInFlight = false;
+      }
     }
-    loading = false;
-    history = await HistoryManager().find(getId());
-    update();
   }
 
   void refresh_() {
+    _requestGeneration++;
+    _requestInFlight = false;
     data = null;
     message = null;
     loading = true;
@@ -793,7 +849,7 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
             _logic.width = constraints.maxWidth;
             _logic.height = constraints.maxHeight;
             if (logic.loading) {
-              logic.get(loadData, loadFavorite, () => id);
+              unawaited(logic.get(loadData, loadFavorite, () => id));
               return buildLoading(context);
             } else if (logic.message != null) {
               return NetworkError(
@@ -1100,7 +1156,7 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
                 res += ":$text";
               }
               appdata.favoriteTags.add(res);
-              appdata.writeHistory();
+              unawaited(appdata.writeHistory());
             },
           )
       ];
@@ -1916,10 +1972,10 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
             widget.setFavorite(false);
           }
           for (var id in selected) {
-            LocalFavoritesManager().deleteComic(
+            unawaited(LocalFavoritesManager().deleteComic(
               id,
               widget.localFavoriteItem,
-            );
+            ));
           }
           showToast(message: "取消收藏成功".tl);
         },

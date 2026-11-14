@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
@@ -653,7 +655,7 @@ class PreSearchPage extends StatelessWidget {
               onPressed: () {
                 appdata.searchHistory.remove(history);
                 logic.update(["history"]);
-                appdata.writeHistory();
+                unawaited(appdata.writeHistory());
                 App.globalBack();
               },
               child: Text("确认".tl),
@@ -698,7 +700,7 @@ class PreSearchPage extends StatelessWidget {
               onPressed: () {
                 appdata.favoriteTags.remove(tag);
                 searchController.update();
-                appdata.writeHistory();
+                unawaited(appdata.writeHistory());
                 App.globalBack();
               },
               child: Text("确认".tl),
@@ -741,7 +743,7 @@ class PreSearchPage extends StatelessWidget {
               ),
               onPressed: () {
                 appdata.searchHistory.clear();
-                appdata.writeHistory();
+                unawaited(appdata.writeHistory());
                 logic.update(["history"]);
                 App.globalBack();
               },
@@ -769,7 +771,7 @@ class PreSearchPage extends StatelessWidget {
               ),
               onPressed: () {
                 appdata.favoriteTags.clear();
-                appdata.writeHistory();
+                unawaited(appdata.writeHistory());
                 logic.update();
                 App.globalBack();
               },

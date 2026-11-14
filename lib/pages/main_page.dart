@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/base.dart';
@@ -97,7 +99,7 @@ class MainPageState extends State<MainPage> {
         //检查是否打卡
         if (network.user?.isPunched == false && appdata.settings[6] == "1") {
           if (App.isMobile) {
-            runBackgroundService();
+            unawaited(runBackgroundService());
           } else {
             network.user?.isPunched = true;
             network.punchIn().then((b) {
@@ -116,7 +118,10 @@ class MainPageState extends State<MainPage> {
     var s = await SharedPreferences.getInstance();
     var lastCheck = s.getInt("lastCheckUpdate");
     if (lastCheck != null) {
-      if (DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(lastCheck)).inDays < 1) {
+      if (DateTime.now()
+              .difference(DateTime.fromMillisecondsSinceEpoch(lastCheck))
+              .inDays <
+          1) {
         return;
       }
     }
@@ -191,8 +196,8 @@ class MainPageState extends State<MainPage> {
     _navigatorKey = GlobalKey();
     App.mainNavigatorKey = _navigatorKey;
     _login();
-    notifications.requestPermission();
-    notifications.cancelAll();
+    unawaited(notifications.requestPermission());
+    unawaited(notifications.cancelAll());
     _checkUpdates();
     _checkDownload();
 

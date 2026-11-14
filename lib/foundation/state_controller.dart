@@ -17,6 +17,7 @@ abstract class StateController {
 
   static T put<T extends StateController>(T controller,
       {Object? tag, bool autoRemove = false}) {
+    controller._ensureCanRegister();
     _controllers.add(StateControllerWrapped(controller, autoRemove, tag));
     return controller;
   }
@@ -65,6 +66,10 @@ abstract class StateController {
           continue;
         }
         _controllers.removeAt(i);
+        if (!_controllers.any((candidate) =>
+            identical(candidate.controller, element.controller))) {
+          element.controller.dispose();
+        }
         return;
       }
     }
@@ -74,29 +79,66 @@ abstract class StateController {
       void Function() onUpdate, Object? tag,
       {void Function()? refresh}) {
     var controller = SimpleController(refresh_: refresh);
-    controller.stateUpdaters.add(Pair(null, onUpdate));
+    controller.subscribe(onUpdate);
     _controllers.add(StateControllerWrapped(controller, false, tag));
     return controller;
   }
 
-  List<Pair<Object?, void Function()>> stateUpdaters = [];
+  final _stateUpdaters = <int, Pair<Object?, void Function()>>{};
+  int _nextSubscriptionToken = 0;
+  bool _disposed = false;
+
+  /// Whether this controller has been disposed and can no longer be observed.
+  bool get isDisposed => _disposed;
+
+  /// A read-only snapshot kept for compatibility with existing diagnostics.
+  /// New listeners must use [subscribe] so they receive a removable token.
+  List<Pair<Object?, void Function()>> get stateUpdaters =>
+      List.unmodifiable(_stateUpdaters.values);
+
+  /// Registers a listener and returns its one-shot removal token.
+  StateControllerSubscription subscribe(void Function() updater, {Object? id}) {
+    _ensureCanRegister();
+    final token = ++_nextSubscriptionToken;
+    _stateUpdaters[token] = Pair(id, updater);
+    return StateControllerSubscription._(this, token);
+  }
+
+  void _ensureCanRegister() {
+    if (_disposed) {
+      throw StateError('Cannot register a disposed StateController');
+    }
+  }
+
+  void _removeSubscription(int token) {
+    _stateUpdaters.remove(token);
+  }
 
   void update([List<Object>? ids]) {
-    if (ids == null) {
-      for (var element in stateUpdaters) {
-        element.right();
+    if (_disposed) {
+      return;
+    }
+    final entries = _stateUpdaters.entries.toList(growable: false);
+    for (final entry in entries) {
+      // A listener may dispose itself (or the controller) while an update is
+      // running. Do not invoke a token that was removed earlier in this pass.
+      if (_disposed || !_stateUpdaters.containsKey(entry.key)) {
+        continue;
       }
-    } else {
-      for (var element in stateUpdaters) {
-        if (ids.contains(element.left)) {
-          element.right();
-        }
+      final updater = entry.value;
+      if (ids == null || ids.contains(updater.left)) {
+        updater.right();
       }
     }
   }
 
   void dispose() {
-    _controllers.removeWhere((element) => element.controller == this);
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    _stateUpdaters.clear();
+    _controllers.removeWhere((element) => identical(element.controller, this));
   }
 
   void refresh() {
@@ -165,20 +207,26 @@ class _StateBuilderState<T extends StateController>
     } catch (e) {
       throw "Controller Not Found";
     }
-    controller.stateUpdaters.add(Pair(widget.id, () {
+    _subscription = controller.subscribe(() {
       if (mounted) {
         setState(() {});
       }
-    }));
+    }, id: widget.id);
     widget.initStateWrapped(controller);
     super.initState();
   }
 
+  late final StateControllerSubscription _subscription;
+
   @override
   void dispose() {
-    widget.disposeWrapped(controller);
-    StateController.remove<T>(widget.tag, true);
-    super.dispose();
+    _subscription.dispose();
+    try {
+      widget.disposeWrapped(controller);
+    } finally {
+      StateController.remove<T>(widget.tag, true);
+      super.dispose();
+    }
   }
 
   @override
@@ -219,4 +267,23 @@ abstract class StateWithController<T extends StatefulWidget> extends State<T> {
   }
 
   Object? get tag;
+}
+
+/// A one-shot, immutable token for a [StateController.subscribe] call.
+class StateControllerSubscription {
+  final StateController _controller;
+  final int token;
+  bool _disposed = false;
+
+  StateControllerSubscription._(this._controller, this.token);
+
+  bool get isDisposed => _disposed;
+
+  void dispose() {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    _controller._removeSubscription(token);
+  }
 }

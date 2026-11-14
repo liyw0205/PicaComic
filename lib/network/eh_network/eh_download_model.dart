@@ -209,7 +209,11 @@ class EhDownloadingItem extends DownloadingItem {
             updateInfo?.call();
           },
           () {
-            if (_isArchiveRunActive(run)) onError?.call();
+            if (_isArchiveRunActive(run)) {
+              unawaited(Future<void>.sync(() => onError?.call()).catchError(
+                  (error, stack) => log("${safeNetworkError(error)}\n$stack",
+                      "Download", LogLevel.error)));
+            }
           },
           () {
             if (_isArchiveRunActive(run)) {
@@ -221,14 +225,16 @@ class EhDownloadingItem extends DownloadingItem {
       } catch (e, s) {
         if (!_isArchiveRunActive(run)) return;
         log("${safeNetworkError(e)}\n$s", "Download", LogLevel.error);
-        onError?.call();
+        await onError?.call();
         return;
       }
     }
   }
 
-  void finish() async {
-    onFinish?.call();
+  void finish() {
+    unawaited(Future<void>.sync(() => onFinish?.call()).catchError((error,
+            stack) =>
+        log("${safeNetworkError(error)}\n$stack", "Download", LogLevel.error)));
   }
 
   bool _isArchiveRunActive(int run) =>

@@ -13,7 +13,9 @@ import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/update.dart';
 import 'package:pica_comic/network/network_logging.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 import 'package:pica_comic/tools/extensions.dart';
+import 'package:pica_comic/tools/atomic_file.dart';
 import '../base.dart';
 import '../foundation/js_engine.dart';
 import '../network/base_comic.dart';
@@ -57,6 +59,10 @@ class ComicSource {
 
   static List<ComicSource> sources = [];
 
+  /// Keeps a source-specific failure visible without preventing other sources
+  /// from starting. The value is intentionally a short, non-sensitive summary.
+  static final Map<String, String> initFailures = <String, String>{};
+
   static ComicSource? find(String key) =>
       sources.firstWhereOrNull((element) => element.key == key);
 
@@ -64,26 +70,46 @@ class ComicSource {
       sources.firstWhereOrNull((element) => element.key.hashCode == key);
 
   static Future<void> init() async {
+    sources.clear();
+    initFailures.clear();
     for (var source in builtInSources) {
       if (appdata.appSettings.isComicSourceEnabled(source)) {
-        var s = builtIn.firstWhere((e) => e.key == source);
-        sources.add(s);
-        await s.loadData();
-        s.initData?.call(s);
+        try {
+          var s = builtIn.firstWhere((e) => e.key == source);
+          // Keep the source discoverable while its migration hook runs; some
+          // built-in hooks resolve their own source through ComicSource.find.
+          sources.add(s);
+          SourceNetworkPolicy.instance.configure(s.key);
+          await s.loadData();
+          await s.initData?.call(s);
+        } catch (e) {
+          final key = source;
+          sources.removeWhere((candidate) => candidate.key == key);
+          initFailures[key] = e.runtimeType.toString();
+          log('Source $key initialization failed: ${e.runtimeType}',
+              'ComicSource', LogLevel.error);
+        }
       }
     }
     final path = "${App.dataPath}/comic_source";
     if (!(await Directory(path).exists())) {
-      Directory(path).create();
+      await Directory(path).create(recursive: true);
       return;
     }
     await for (var entity in Directory(path).list()) {
       if (entity is File && entity.path.endsWith(".js")) {
         try {
+          if ((await entity.stat()).size > ComicSourceParser.maxSourceBytes) {
+            throw ComicSourceParseException("Source file exceeds 1 MiB limit");
+          }
           var source = await ComicSourceParser()
               .parse(await entity.readAsString(), entity.absolute.path);
           sources.add(source);
+          SourceNetworkPolicy.instance.configure(source.key);
         } catch (e, s) {
+          final key =
+              entity.uri.pathSegments.last.replaceFirst(RegExp(r'\.js$'), '');
+          initFailures[key] = e.runtimeType.toString();
           log("${safeNetworkError(e)}\n$s", "ComicSource", LogLevel.error);
         }
       }

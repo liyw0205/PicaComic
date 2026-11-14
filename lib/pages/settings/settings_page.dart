@@ -25,6 +25,7 @@ import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/pages/logs_page.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
+import 'package:pica_comic/tools/atomic_file.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import '../../comic_source/comic_source.dart';
@@ -488,7 +489,7 @@ class _SettingsPageState extends State<SettingsPage> implements PopEntry {
             leading: const Icon(Icons.folder),
             title: Text("设置下载目录".tl),
             trailing: const Icon(Icons.arrow_right),
-            onTap: () => setDownloadFolder(),
+            onTap: () => unawaited(setDownloadFolder()),
           ),
         ListTile(
           leading: const Icon(Icons.sd_storage_outlined),

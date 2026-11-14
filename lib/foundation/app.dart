@@ -49,9 +49,17 @@ class App {
   /// **Warning: The end of String is not '/'**
   static late final String dataPath;
 
+  static bool _pathsInitialized = false;
+
   static Future<void> init() async {
-    cachePath = (await getApplicationCacheDirectory()).path;
-    dataPath = (await getApplicationSupportDirectory()).path;
+    if (_pathsInitialized) return;
+    // Resolve both before assigning either late final, so a provider failure
+    // leaves the whole step safe to retry.
+    final cache = (await getApplicationCacheDirectory()).path;
+    final data = (await getApplicationSupportDirectory()).path;
+    cachePath = cache;
+    dataPath = data;
+    _pathsInitialized = true;
   }
 
   static back(BuildContext context) {
@@ -69,29 +77,35 @@ class App {
   static off(BuildContext context, Widget Function() page) {
     LogManager.addLog(LogLevel.info, "App Status",
         "Going to Page /${page.runtimeType.toString().replaceFirst("() => ", "")}");
-    Navigator.of(context).pushReplacement(AppPageRoute(builder: (context) => page()));
+    Navigator.of(context)
+        .pushReplacement(AppPageRoute(builder: (context) => page()));
   }
 
   static globalOff(Widget Function() page) {
     LogManager.addLog(LogLevel.info, "App Status",
         "Going to Page /${page.runtimeType.toString().replaceFirst("() => ", "")}");
-    Navigator.of(globalContext!).pushReplacement(AppPageRoute(builder: (context) => page()));
+    Navigator.of(globalContext!)
+        .pushReplacement(AppPageRoute(builder: (context) => page()));
   }
 
   static offAll(Widget Function() page) {
-    Navigator.of(globalContext!)
-        .pushAndRemoveUntil(AppPageRoute(builder: (context) => page()), (route) => false);
+    Navigator.of(globalContext!).pushAndRemoveUntil(
+        AppPageRoute(builder: (context) => page()), (route) => false);
   }
 
-  static Future<T?> to<T extends Object?>(BuildContext context, Widget Function() page,
+  static Future<T?> to<T extends Object?>(
+      BuildContext context, Widget Function() page,
       [bool enableIOSGesture = true]) {
     LogManager.addLog(LogLevel.info, "App Status",
         "Going to Page /${page.runtimeType.toString().replaceFirst("() => ", "")}");
-    return Navigator.of(context).push<T>(AppPageRoute(builder: (context) => page()));
+    return Navigator.of(context)
+        .push<T>(AppPageRoute(builder: (context) => page()));
   }
 
-  static Future<T?> globalTo<T extends Object?>(Widget Function() page, {bool preventDuplicates = false}) {
-    return Navigator.of(globalContext!).push<T>(AppPageRoute(builder: (context) => page()));
+  static Future<T?> globalTo<T extends Object?>(Widget Function() page,
+      {bool preventDuplicates = false}) {
+    return Navigator.of(globalContext!)
+        .push<T>(AppPageRoute(builder: (context) => page()));
   }
 
   static bool get enablePopGesture => isIOS;
@@ -108,7 +122,8 @@ class App {
 
   static Locale get locale {
     Locale deviceLocale = PlatformDispatcher.instance.locale;
-    if (deviceLocale.languageCode == "zh" && deviceLocale.scriptCode == "Hant") {
+    if (deviceLocale.languageCode == "zh" &&
+        deviceLocale.scriptCode == "Hant") {
       deviceLocale = const Locale("zh", "TW");
     }
     return switch (appdata.settings[50]) {
@@ -119,11 +134,11 @@ class App {
     };
   }
 
-
   /// size of screen
   static Size screenSize(BuildContext context) => MediaQuery.of(context).size;
 
-  static ColorScheme colors(BuildContext context) => Theme.of(context).colorScheme;
+  static ColorScheme colors(BuildContext context) =>
+      Theme.of(context).colorScheme;
 }
 
 enum UiModes {

@@ -245,11 +245,11 @@ class HtmangaNetwork {
     }
   }
 
-  Future<Res<List<HtComicBrief>>> search(String keyword, int page) {
+  Future<Res<List<HtComicBrief>>> search(String keyword, int page) async {
     if (keyword != "") {
       appdata.searchHistory.remove(keyword);
       appdata.searchHistory.add(keyword);
-      appdata.writeHistory();
+      await appdata.writeHistory();
     }
     Future.delayed(const Duration(milliseconds: 300),
             () => StateController.find<PreSearchController>().update())

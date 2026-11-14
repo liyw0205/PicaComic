@@ -18,12 +18,13 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
 import com.google.android.gms.common.GoogleApiAvailability
-import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity: FlutterFragmentActivity() {
     var volumeListen = VolumeListen()
     var listening = false
-    private val nativeCurlExecutor = Executors.newCachedThreadPool()
+    private val nativeCurlExecutor = NativeCurlExecutor(4, 64)
 
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -73,21 +74,40 @@ class MainActivity: FlutterFragmentActivity() {
             when (call.method) {
                 "available" -> res.success(NativeCurl.isAvailable())
                 "cancel" -> {
-                    NativeCurl.cancelRequest(call.arguments?.toString() ?: "")
+                    nativeCurlExecutor.cancel(call.arguments?.toString() ?: "")
                     res.success(null)
                 }
                 "fetch" -> {
                     val arguments = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
-                    NativeCurl.registerRequest(arguments["requestId"]?.toString() ?: "")
-                    nativeCurlExecutor.execute {
-                        try {
-                            val result = NativeCurl.fetch(arguments)
-                            runOnUiThread { res.success(result) }
-                        } catch (e: Throwable) {
-                            runOnUiThread {
-                                res.error("native_curl_error", e.message, e.stackTraceToString())
-                            }
+                    val id = arguments["requestId"]?.toString() ?: ""
+                    if (id.isEmpty() || !NativeCurl.registerRequest(id)) {
+                        res.error("native_curl_error", "Invalid or duplicate request ID", null)
+                        return@setMethodCallHandler
+                    }
+                    val completed = AtomicBoolean(false)
+                    fun complete(result: Map<String, Any?>) {
+                        runOnUiThread {
+                            if (completed.compareAndSet(false, true)) res.success(result)
                         }
+                    }
+                    try {
+                        nativeCurlExecutor.submit(id, (arguments["priority"] as? Int ?: 0).coerceIn(0, 2), {
+                            try {
+                                complete(NativeCurl.fetch(arguments))
+                            } catch (e: Throwable) {
+                                runOnUiThread {
+                                    if (completed.compareAndSet(false, true)) {
+                                        res.error("native_curl_error", e.message, e.stackTraceToString())
+                                    }
+                                }
+                            }
+                        }, {
+                            NativeCurl.cancelRequest(id)
+                            complete(mapOf("error" to "Native curl request cancelled", "curlCode" to 42))
+                        }, { NativeCurl.releaseRequest(id) })
+                    } catch (_: RejectedExecutionException) {
+                        NativeCurl.releaseRequest(id)
+                        complete(mapOf("error" to "Native curl queue is full or closed", "curlCode" to 89))
                     }
                 }
                 else -> res.notImplemented()
@@ -156,7 +176,7 @@ class MainActivity: FlutterFragmentActivity() {
     }
 
     override fun onDestroy() {
-        nativeCurlExecutor.shutdownNow()
+        nativeCurlExecutor.close()
         super.onDestroy()
     }
 

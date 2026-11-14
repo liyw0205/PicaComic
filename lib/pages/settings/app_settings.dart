@@ -547,7 +547,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   }
 }
 
-void setDownloadFolder() async {
+Future<void> setDownloadFolder() async {
   if (DownloadManager().downloading.isNotEmpty) {
     showToast(message: "请在下载任务完成后进行操作".tl);
     return;
@@ -1017,11 +1017,8 @@ void importDataSetting(BuildContext context) {
           ));
 }
 
-void syncDataSettings(BuildContext context) {
-  var configs = ["", "", "", ""];
-  if (appdata.settings[45] != "") {
-    configs = appdata.settings[45].split(';');
-  }
+Future<void> syncDataSettings(BuildContext context) async {
+  final configs = await Webdav.configForSettings() ?? ["", "", "", ""];
   String url = configs[0];
   String username = configs[1];
   String pwd = configs[2];
@@ -1100,9 +1097,18 @@ void syncDataSettings(BuildContext context) {
               child: Text("提交".tl),
               onPressed: () async {
                 if (url.isEmpty) {
-                  appdata.settings[45] = "$url;$username;$pwd;$path";
-                  appdata.updateSettings();
-                  App.globalBack();
+                  final saved = await Webdav.saveConfig(
+                    url: url,
+                    username: username,
+                    password: pwd,
+                    path: path,
+                    sync: false,
+                  );
+                  if (saved) {
+                    App.globalBack();
+                  } else {
+                    showToast(message: "Failed to save Webdav settings");
+                  }
                   return;
                 }
                 var dialog = showLoadingDialog(context,
@@ -1114,10 +1120,19 @@ void syncDataSettings(BuildContext context) {
                   dialog.close();
                   showToast(message: "Failed to sync data");
                 } else {
-                  appdata.settings[45] = "$url;$username;$pwd;$path";
-                  appdata.updateSettings();
+                  final saved = await Webdav.saveConfig(
+                    url: url,
+                    username: username,
+                    password: pwd,
+                    path: path,
+                    sync: false,
+                  );
                   dialog.close();
-                  App.globalBack();
+                  if (saved) {
+                    App.globalBack();
+                  } else {
+                    showToast(message: "Failed to save Webdav settings");
+                  }
                 }
               },
             ),

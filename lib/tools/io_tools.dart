@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:archive/archive_io.dart' show ZipFileEncoder;
+import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/tools/data_backup.dart';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -8,7 +11,6 @@ import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
-import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
@@ -116,9 +118,14 @@ Future<bool> exportComics(List<DownloadedItem> comics) async {
 
 Future<bool> exportPdf(String pdfPath) async {
   try {
+    final source = File(pdfPath);
+    if (!await source.exists()) {
+      return false;
+    }
+    var saved = false;
     if (App.isMobile) {
       var params = SaveFileDialogParams(sourceFilePath: pdfPath);
-      await FlutterFileDialog.saveFile(params: params);
+      saved = await FlutterFileDialog.saveFile(params: params) != null;
     } else {
       final FileSaveLocation? result = await getSaveLocation(
         suggestedName: File(pdfPath).name,
@@ -131,12 +138,13 @@ Future<bool> exportPdf(String pdfPath) async {
         const String mimeType = 'application/pdf';
         final XFile textFile = XFile(pdfPath, mimeType: mimeType);
         await textFile.saveTo(result.path);
+        saved = true;
       }
     }
-    if (File(pdfPath).existsSync()) {
-      File(pdfPath).delete();
+    if (saved && await source.exists()) {
+      await source.delete();
     }
-    return true;
+    return saved;
   } catch (e) {
     return false;
   }
@@ -232,18 +240,17 @@ Future<void> eraseCache() async {
 
 Future<void> copyDirectory(Directory source, Directory destination) async {
   try {
-    List<FileSystemEntity> contents = source.listSync();
-    for (FileSystemEntity content in contents) {
+    await destination.create(recursive: true);
+    await for (final content in source.list()) {
       String newPath = destination.path +
           Platform.pathSeparator +
           content.path.split(Platform.pathSeparator).last;
 
       if (content is File) {
-        content.copySync(newPath);
+        await content.copy(newPath);
       } else if (content is Directory) {
         Directory newDirectory = Directory(newPath);
-        newDirectory.createSync();
-        copyDirectory(content.absolute, newDirectory.absolute);
+        await copyDirectory(content.absolute, newDirectory.absolute);
       }
     }
   } catch (e, s) {
@@ -265,7 +272,7 @@ Future<void> moveDirectory(Directory source, Directory destination) async {
       } else if (content is Directory) {
         Directory newDirectory =
             Directory(destination.path + Platform.pathSeparator + content.name);
-        newDirectory.createSync(recursive: true);
+        await newDirectory.create(recursive: true);
         await moveDirectory(content, newDirectory);
       }
     }
@@ -281,493 +288,315 @@ Future<void> checkDownloadPath() async {
   var path = appdata.settings[22];
   if (path != "") {
     var directory = Directory(path);
-    if (!directory.existsSync()) {
+    if (!await directory.exists()) {
       appdata.settings[22] = "";
-      appdata.updateSettings();
+      await appdata.updateSettings();
     }
   }
 }
 
-Future<String?> _exportData(String path, String appdataString,
-    String? downloadPath, String outPath) async {
-  var encode = ZipFile.open(outPath);
-  try {
-    var filePath = "$path${pathSep}appdata";
-    var file = File(filePath);
-    if (file.existsSync()) {
-      file.deleteSync();
-    }
-    file.createSync();
-    file.writeAsStringSync(appdataString);
-    encode.addFile(file.uri.pathSegments.last, file.path);
-    var localFavorite = File("$path${pathSep}local_favorite.db");
-    var history = File("$path${pathSep}history.db");
-    if (!localFavorite.existsSync()) {
-      localFavorite.createSync();
-    }
-    if (!history.existsSync()) {
-      history.createSync();
-    }
-    encode.addFile(
-        localFavorite.name, localFavorite.path.replaceAll("\\", "/"));
-    encode.addFile(history.name, history.path);
-    encode.addFile('cookies.db', "$path/cookies.db");
-    await for (var entry in Directory("$path/comic_source").list()) {
-      if (entry is File) {
-        encode.addFile('comic_source/${entry.name}', entry.path);
-      }
-    }
-    if (downloadPath != null) {
-      downloadPath = downloadPath.replaceAll('\\', '/');
-      var sourceFolder =
-          downloadPath.substring(0, downloadPath.lastIndexOf('/'));
-      void walk(String path) {
-        for (var entry in Directory(path).listSync()) {
-          if (entry is Directory) {
-            walk(entry.path);
-          } else {
-            var filePathInZip = entry.path.replaceFirst(sourceFolder, "");
-            if (filePathInZip.startsWith('/') ||
-                filePathInZip.startsWith('\\')) {
-              filePathInZip = filePathInZip.substring(1);
-            }
-            encode.addFile(filePathInZip, entry.path);
-          }
+Future<String> exportDataToFile(bool includeDownload, String outPath,
+        {Map<String, Object?>? revision, bool includeSensitive = false}) =>
+    DataMaintenance.run(() async {
+      await appdata.waitForSettingsWrites();
+      final stage = await Directory(App.cachePath).createTemp('data-export-');
+      final output =
+          File('$outPath.partial-${DateTime.now().microsecondsSinceEpoch}');
+      try {
+        await File('${stage.path}/appdata').writeAsString(
+            jsonEncode(appdata.toJson(includeSensitive: includeSensitive)),
+            flush: true);
+        await LocalFavoritesManager()
+            .snapshotTo('${stage.path}/local_favorite.db');
+        await HistoryManager().snapshotTo('${stage.path}/history.db');
+        // Cookies and source configuration can contain reusable credentials.
+        // They are included only for the authenticated sync archive; ordinary
+        // user exports remain portable without exposing login state.
+        if (includeSensitive) {
+          snapshotDatabase(
+              '${App.dataPath}/cookies.db', '${stage.path}/cookies.db');
+          final sources = Directory('${App.dataPath}/comic_source');
+          if (sources.existsSync())
+            await copyBackupEntity(sources.path, '${stage.path}/comic_source');
         }
+        if (includeDownload && DownloadManager().path != null) {
+          final downloads = Directory(DownloadManager().path!);
+          if (downloads.existsSync())
+            await copyBackupEntity(downloads.path, '${stage.path}/download');
+        }
+        await writeBackupManifest(stage, revision: revision);
+        await compute<List<String>, void>((paths) {
+          ZipFileEncoder().zipDirectory(Directory(paths[0]),
+              filename: paths[1], followLinks: false);
+        }, [stage.path, output.path]);
+        if (Platform.isWindows && File(outPath).existsSync())
+          File(outPath).deleteSync();
+        output.renameSync(outPath);
+        return outPath;
+      } finally {
+        if (stage.existsSync()) stage.deleteSync(recursive: true);
+        if (output.existsSync()) output.deleteSync();
       }
-
-      walk(downloadPath);
-    }
-    return null;
-  } catch (e) {
-    return e.toString();
-  } finally {
-    encode.close();
-  }
-}
-
-Future<String> exportDataToFile(bool includeDownload, String outPath) async {
-  var path = App.dataPath;
-  try {
-    var appdataString = const JsonEncoder().convert(appdata.toJson());
-    var downloadPath = includeDownload ? DownloadManager().path : null;
-    var res = await compute<List<String?>, String?>(
-        (message) =>
-            _exportData(message[0]!, message[1]!, message[2], message[3]!),
-        [path, appdataString, downloadPath, outPath]);
-
-    if (res != null) {
-      throw Exception(res);
-    }
-  } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
-    rethrow;
-  }
-  return outPath;
-}
+    }, suppressSync: true);
 
 Future<bool> runExportData(bool includeDownload) async {
+  Directory? work;
   try {
-    var outPath = '${App.cachePath}/userdata.picadata';
+    work = await Directory(App.cachePath).createTemp('data-share-');
+    var outPath = '${work.path}/userdata.picadata';
     if (App.isDesktop) {
-      final FileSaveLocation? result =
-          await getSaveLocation(suggestedName: 'userData.picadata');
-      if (result == null) {
-        return true;
-      }
+      final result = await getSaveLocation(suggestedName: 'userData.picadata');
+      if (result == null) return true;
       outPath = result.path;
     }
-    if (await File(outPath).exists()) {
-      await File(outPath).delete();
-    }
     await exportDataToFile(includeDownload, outPath);
-
-    var dialog = showLoadingDialog(
-      App.globalContext!,
-      barrierDismissible: false,
-      allowCancel: false,
-    );
-
     if (App.isMobile) {
-      var params = SaveFileDialogParams(sourceFilePath: outPath);
-      await FlutterFileDialog.saveFile(params: params);
-      File(outPath).delete();
+      await FlutterFileDialog.saveFile(
+          params: SaveFileDialogParams(sourceFilePath: outPath));
     }
-
-    dialog.close();
-  } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
-    return false;
-  }
-  return true;
-}
-
-FileSystemEntity? _importEntityAt(String entityPath) {
-  final type = FileSystemEntity.typeSync(entityPath, followLinks: false);
-  if (type == FileSystemEntityType.file) {
-    return File(entityPath);
-  }
-  if (type == FileSystemEntityType.directory) {
-    return Directory(entityPath);
-  }
-  return null;
-}
-
-void _deleteImportEntity(String entityPath) {
-  final entity = _importEntityAt(entityPath);
-  if (entity is File) {
-    entity.deleteSync();
-  } else if (entity is Directory) {
-    entity.deleteSync(recursive: true);
-  }
-}
-
-void _writeImportRollbackManifest(String manifestPath,
-    List<List<String>> rollbackEntries, List<String> createdTargets) {
-  File(manifestPath).writeAsStringSync(const JsonEncoder().convert({
-    "entries": rollbackEntries,
-    "created": createdTargets,
-  }));
-}
-
-void _restoreImportRollback(String manifestPath) {
-  final manifest = File(manifestPath);
-  if (!manifest.existsSync()) {
-    return;
-  }
-  final decoded = const JsonDecoder().convert(manifest.readAsStringSync());
-  if (decoded is! Map) {
-    throw const FormatException("Invalid import rollback manifest");
-  }
-
-  final created = (decoded["created"] as List<dynamic>? ?? const [])
-      .whereType<String>()
-      .toList();
-  final entries = (decoded["entries"] as List<dynamic>? ?? const [])
-      .whereType<List<dynamic>>()
-      .where((entry) => entry.length == 2)
-      .map((entry) => [entry[0].toString(), entry[1].toString()])
-      .toList();
-
-  // Remove targets that did not exist before the import first. Existing
-  // targets are restored below from their renamed backups.
-  for (final target in created.reversed) {
-    _deleteImportEntity(target);
-  }
-  for (final entry in entries.reversed) {
-    final backup = _importEntityAt(entry[1]);
-    if (backup == null) {
-      continue;
-    }
-    _deleteImportEntity(entry[0]);
-    Directory(entry[0]).parent.createSync(recursive: true);
-    backup.renameSync(entry[0]);
-  }
-}
-
-void _discardImportRollback(String manifestPath) {
-  final manifest = File(manifestPath);
-  if (!manifest.existsSync()) {
-    return;
-  }
-  final decoded = const JsonDecoder().convert(manifest.readAsStringSync());
-  if (decoded is Map) {
-    final entries = (decoded["entries"] as List<dynamic>? ?? const [])
-        .whereType<List<dynamic>>()
-        .where((entry) => entry.length == 2);
-    for (final entry in entries) {
-      try {
-        _deleteImportEntity(entry[1].toString());
-      } catch (_) {
-        // A stale backup is safer than discarding an otherwise valid import.
-      }
-    }
-  }
-  try {
-    manifest.deleteSync();
-  } catch (_) {
-    // Cleanup failure must not turn a completed import into a rollback.
-  }
-}
-
-/// import data, filePath is used for webdav
-Future<bool> importData([String? filePath]) async {
-  final enableCheck = filePath != null;
-  var path = (await getApplicationSupportDirectory()).path;
-  if (filePath == null) {
-    if (App.isMobile) {
-      var params = const OpenFileDialogParams();
-      filePath = await FlutterFileDialog.pickFile(params: params);
-    } else {
-      const XTypeGroup typeGroup = XTypeGroup(
-        label: 'data',
-      );
-      final XFile? file =
-          await openFile(acceptedTypeGroups: <XTypeGroup>[typeGroup]);
-      filePath = file?.path;
-    }
-    if (filePath == null) {
-      LogManager.addLog(LogLevel.error, "importData", "filePath is null");
-      return false;
-    }
-  }
-  final previousSettings = List<String>.from(appdata.settings);
-  final previousFirstUse = List<String>.from(appdata.firstUse);
-  final previousBlockingKeyword = List<String>.from(appdata.blockingKeyword);
-  final previousFavoriteTags = Set<String>.from(appdata.favoriteTags);
-
-  Future<void> restoreAppdataSnapshot() async {
-    appdata.settings = List<String>.from(previousSettings);
-    appdata.firstUse = List<String>.from(previousFirstUse);
-    appdata.blockingKeyword = List<String>.from(previousBlockingKeyword);
-    appdata.favoriteTags = Set<String>.from(previousFavoriteTags);
-    await appdata.writeData(false);
-  }
-
-  SingleInstanceCookieJar.instance?.dispose();
-  await DownloadManager().dispose();
-  String data = '';
-  final tempPath = "$path/dataTemp-${DateTime.now().microsecondsSinceEpoch}";
-  final rollbackSuffix = '.restore-${DateTime.now().microsecondsSinceEpoch}';
-  final rollbackManifestPath = '$tempPath/import-rollback.json';
-  var computeFailed = false;
-  var initializationFailed = false;
-  try {
-    data = await compute<List<String>, String>((data) async {
-      var path = data[0];
-      final tempPath = data[5];
-      final rollbackSuffix = data[6];
-      Directory(tempPath).createSync(recursive: true);
-      ZipFile.openAndExtract(data[1], tempPath);
-      var downloadPath = Directory(data[2]);
-      List<FileSystemEntity> contents = Directory(tempPath).listSync();
-      for (FileSystemEntity item in contents) {
-        if (item is Directory) {
-          if (item.name != "comic_source" && item.name != "download") {
-            item.renameSync('$tempPath/download');
-          }
-        }
-      }
-      final json = File("$tempPath/appdata").readAsStringSync();
-      final decoded = const JsonDecoder().convert(json);
-      if (decoded is! Map || decoded["settings"] is! List) {
-        throw const FormatException("Invalid appdata payload");
-      }
-      final settings = decoded["settings"] as List;
-      final versionValue = settings.elementAtOrNull(46) ?? "1";
-      final fileVersion = int.tryParse(versionValue.toString());
-      if (fileVersion == null) {
-        throw const FormatException("Invalid appdata version");
-      }
-      if (fileVersion <= int.parse(data[3]) && data[4] == "1") {
-        return json;
-      }
-      final rollbackEntries = <List<String>>[];
-      final createdTargets = <String>[];
-      final rollbackManifestPath = '$tempPath/import-rollback.json';
-
-      void markTarget(String targetPath) {
-        if (_importEntityAt(targetPath) == null &&
-            !createdTargets.contains(targetPath)) {
-          createdTargets.add(targetPath);
-        }
-        _writeImportRollbackManifest(
-            rollbackManifestPath, rollbackEntries, createdTargets);
-      }
-
-      void backupEntity(String entityPath) {
-        final entity = _importEntityAt(entityPath);
-        if (entity == null) {
-          _writeImportRollbackManifest(
-              rollbackManifestPath, rollbackEntries, createdTargets);
-          return;
-        }
-        final backupPath = '$entityPath$rollbackSuffix';
-        _deleteImportEntity(backupPath);
-        Directory(backupPath).parent.createSync(recursive: true);
-        // Persist the intended move before renaming. If the process stops
-        // between rename and the next manifest write, recovery still knows
-        // where the original entity was moved.
-        rollbackEntries.add([entityPath, backupPath]);
-        _writeImportRollbackManifest(
-            rollbackManifestPath, rollbackEntries, createdTargets);
-        entity.renameSync(backupPath);
-        _writeImportRollbackManifest(
-            rollbackManifestPath, rollbackEntries, createdTargets);
-      }
-
-      try {
-        var localFavorite = File('$tempPath/localFavorite');
-        if (localFavorite.existsSync()) {
-          markTarget('$path/localFavorite');
-          backupEntity('$path/localFavorite');
-          localFavorite.copySync('$path/localFavorite');
-        } else {
-          var localFavorite2 = File('$tempPath/local_favorite.db');
-          if (localFavorite2.existsSync()) {
-            markTarget('$path/local_favorite_temp.db');
-            backupEntity('$path/local_favorite_temp.db');
-            localFavorite2.copySync('$path/local_favorite_temp.db');
-          }
-        }
-
-        var history = File('$tempPath/history.db');
-        if (history.existsSync()) {
-          markTarget('$path/history_temp.db');
-          backupEntity('$path/history_temp.db');
-          history.copySync('$path/history_temp.db');
-        }
-
-        var comicSource = Directory('$tempPath/comic_source');
-        if (comicSource.existsSync()) {
-          markTarget('$path/comic_source');
-          backupEntity('$path/comic_source');
-          comicSource.renameSync('$path/comic_source');
-        }
-
-        var cookies = File('$tempPath/cookies.db');
-        if (cookies.existsSync()) {
-          markTarget('$path/cookies.db');
-          backupEntity('$path/cookies.db');
-          cookies.copySync('$path/cookies.db.importing');
-          File('$path/cookies.db.importing').renameSync('$path/cookies.db');
-        }
-
-        var downloadData = Directory("$tempPath/download");
-        if (downloadData.existsSync()) {
-          markTarget(downloadPath.path);
-          backupEntity(downloadPath.path);
-          downloadPath.createSync(recursive: true);
-          await moveDirectory(downloadData, downloadPath);
-        }
-      } catch (_) {
-        try {
-          _restoreImportRollback(rollbackManifestPath);
-        } catch (_) {
-          // Keep the original replacement error; any remaining restore paths
-          // are left for manual recovery.
-        }
-        rethrow;
-      }
-      return json;
-    }, [
-      path,
-      filePath,
-      DownloadManager().path!,
-      appdata.settings[46],
-      (enableCheck ? "1" : "0"),
-      tempPath,
-      rollbackSuffix,
-    ]);
-  } catch (e, s) {
-    computeFailed = true;
-    Log.error("importData", "${safeNetworkError(e)}\n$s");
-    return false;
-  } finally {
-    try {
-      await ComicSource.reload();
-      SingleInstanceCookieJar.instance?.init();
-      await DownloadManager().init();
-    } catch (e, s) {
-      initializationFailed = true;
-      Log.error(
-          "importData",
-          "Failed to reinitialize after import: "
-              "${safeNetworkError(e)}\n$s");
-      if (!computeFailed) {
-        try {
-          _restoreImportRollback(rollbackManifestPath);
-        } catch (rollbackError, rollbackStack) {
-          Log.error(
-              "importData",
-              "Failed to rollback after reinitialization: "
-                  "${safeNetworkError(rollbackError)}\n$rollbackStack");
-        }
-      }
-    }
-    if (computeFailed || initializationFailed) {
-      try {
-        await Directory(tempPath).delete(recursive: true);
-      } catch (_) {
-        // Cleanup failure must not hide the import result.
-      }
-    }
-  }
-  if (initializationFailed) {
-    return false;
-  }
-  try {
-    var json = const JsonDecoder().convert(data);
-    int fileVersion =
-        int.parse((json["settings"] as List).elementAtOrNull(46) ?? "1");
-    int appVersion = int.parse(appdata.settings[46]);
-    if (fileVersion <= appVersion && enableCheck) {
-      LogManager.addLog(
-          LogLevel.info,
-          "Appdata",
-          "The data file version is $fileVersion, while the app data version is "
-              "$appVersion\nStop importing data");
-      _discardImportRollback(rollbackManifestPath);
-      return false;
-    }
-    var dataReadRes = appdata.readDataFromJson(json);
-    if (!dataReadRes) {
-      LogManager.addLog(
-          LogLevel.error, "Appdata", "appdata.readDataFromJson(json) failed");
-      throw const FormatException("Failed to apply imported appdata");
-    }
-    await LocalFavoritesManager().readData();
-    LocalFavoritesManager().updateUI();
-    await HistoryManager().tryUpdateDb();
-    // readDataFromJson schedules its serialized settings write internally;
-    // wait for it before deleting the pre-import rollback snapshot.
-    await appdata.waitForSettingsWrites();
-    _discardImportRollback(rollbackManifestPath);
     return true;
   } catch (e, s) {
-    LogManager.addLog(
-        LogLevel.error, "importData", "${safeNetworkError(e)}\n$s");
-    try {
-      SingleInstanceCookieJar.instance?.dispose();
-      await DownloadManager().dispose();
-      _restoreImportRollback(rollbackManifestPath);
-      await ComicSource.reload();
-      SingleInstanceCookieJar.instance?.init();
-      await DownloadManager().init();
-    } catch (rollbackError, rollbackStack) {
-      LogManager.addLog(
-          LogLevel.error,
-          "importData",
-          "Failed to rollback imported data: "
-              "${safeNetworkError(rollbackError)}\n$rollbackStack");
-    }
-    try {
-      await appdata.waitForSettingsWrites();
-      await restoreAppdataSnapshot();
-      // Re-read the restored files so an unawaited readData() from a failed
-      // import cannot leave the in-memory settings on the imported snapshot.
-      await appdata.readData();
-    } catch (restoreError, restoreStack) {
-      LogManager.addLog(
-          LogLevel.error,
-          "importData",
-          "Failed to restore appdata snapshot: "
-              "${safeNetworkError(restoreError)}\n$restoreStack");
-    }
+    Log.error('IO', '${safeNetworkError(e)}\n$s');
     return false;
   } finally {
-    try {
-      await Directory(tempPath).delete(recursive: true);
-    } catch (_) {
-      // Cleanup failure must not hide the import result.
+    if (work != null && await work.exists()) {
+      try {
+        await work.delete(recursive: true);
+      } catch (e, s) {
+        Log.warning('IO',
+            'Failed to remove export staging directory.\n${safeNetworkError(e)}\n$s');
+      }
     }
   }
 }
 
-void saveLog(String log) async {
+enum DataImportResult { imported, skipped, cancelled, failed }
+
+Future<bool> importData([String? filePath]) async {
+  final result =
+      await importDataResult(filePath, checkVersion: filePath != null);
+  return result == DataImportResult.imported ||
+      result == DataImportResult.skipped;
+}
+
+Future<DataImportResult> importDataResult(String? filePath,
+    {bool checkVersion = false, bool preserveSettings = false}) async {
+  if (filePath == null) {
+    if (App.isMobile) {
+      filePath = await FlutterFileDialog.pickFile(
+          params: const OpenFileDialogParams());
+    } else {
+      filePath = (await openFile(acceptedTypeGroups: [
+        const XTypeGroup(label: 'data'),
+      ]))
+          ?.path;
+    }
+    if (filePath == null) return DataImportResult.cancelled;
+  }
+  final selected = filePath;
+  return DataMaintenance.run(() async {
+    final work = await Directory(App.cachePath).createTemp('data-import-');
+    final extracted = Directory('${work.path}/input');
+    DataRestoreTransaction? transaction;
+    var stopped = false;
+    var committed = false;
+    final trustedRestoreRoots = <String>[
+      if (DownloadManager().path != null) DownloadManager().path!,
+    ];
+
+    Future<void> reopen() async {
+      final favorites = LocalFavoritesManager().init(importLegacy: false);
+      final histories = HistoryManager().init(importLegacy: false);
+      SingleInstanceCookieJar.instance?.init();
+      await favorites;
+      await histories;
+      await ComicSource.reload();
+      await DownloadManager().init();
+      stopped = false;
+    }
+
+    void closeDatabases() {
+      LocalFavoritesManager().close();
+      HistoryManager().close();
+      SingleInstanceCookieJar.instance?.dispose();
+    }
+
+    try {
+      await recoverPendingDataRestore(App.dataPath,
+          trustedAllowedRoots: trustedRestoreRoots);
+      await compute<List<String>, void>((paths) async {
+        await extractDataBackup(paths[0], Directory(paths[1]));
+      }, [selected, extracted.path]);
+      final payload = Map<String, dynamic>.from(
+          jsonDecode(await File('${extracted.path}/appdata').readAsString())
+              as Map);
+      final settings = payload['settings'] as List;
+      final version =
+          int.tryParse(settings.elementAtOrNull(46)?.toString() ?? '0');
+      if (version == null)
+        throw const FormatException('Invalid backup revision');
+      if (checkVersion &&
+          version <= (int.tryParse(appdata.settings[46]) ?? 0)) {
+        return DataImportResult.skipped;
+      }
+      final candidate = Appdata()
+        ..settings = List.of(appdata.settings)
+        ..firstUse = List.of(appdata.firstUse)
+        ..blockingKeyword = List.of(appdata.blockingKeyword)
+        ..favoriteTags = Set.of(appdata.favoriteTags);
+      await candidate.readDataFromJson(payload,
+          importHistory: false, persist: false);
+      if (preserveSettings) {
+        candidate.settings = List.of(appdata.settings);
+        candidate.firstUse = List.of(appdata.firstUse);
+      }
+      candidate.settings[45] = appdata.settings[45];
+      final mergedFavoritePath = '${work.path}/local_favorite.db';
+      final mergedHistoryPath = '${work.path}/history.db';
+      await LocalFavoritesManager().snapshotTo(mergedFavoritePath);
+      await HistoryManager().snapshotTo(mergedHistoryPath);
+      final favorites = LocalFavoritesManager.create();
+      final histories = HistoryManager.create();
+      try {
+        await favorites.init(
+            databasePath: mergedFavoritePath, importLegacy: false);
+        await histories.init(
+            databasePath: mergedHistoryPath, importLegacy: false);
+        if (File('${extracted.path}/local_favorite.db').existsSync()) {
+          await favorites.mergeFrom('${extracted.path}/local_favorite.db');
+        }
+        if (File('${extracted.path}/localFavorite').existsSync()) {
+          await favorites.mergeLegacyJson('${extracted.path}/localFavorite');
+        }
+        if (File('${extracted.path}/history.db').existsSync()) {
+          await histories.mergeFrom('${extracted.path}/history.db');
+        }
+        if (payload['history'] != null) {
+          await histories.readDataFromJson(payload['history'] as List);
+        }
+      } finally {
+        favorites.close();
+        histories.close();
+      }
+      checkBackupDatabase(mergedFavoritePath, 'folder_order');
+      checkBackupDatabase(mergedHistoryPath, 'history');
+      await File('${work.path}/settings')
+          .writeAsString(jsonEncode(candidate.settings), flush: true);
+      await File('${work.path}/settings.bak')
+          .writeAsString(jsonEncode(appdata.settings), flush: true);
+      final replacements = <String, String>{
+        '${App.dataPath}/local_favorite.db': mergedFavoritePath,
+        '${App.dataPath}/history.db': mergedHistoryPath,
+        '${App.dataPath}/settings': '${work.path}/settings',
+        '${App.dataPath}/settings.bak': '${work.path}/settings.bak',
+      };
+      for (final name in ['comic_source', 'cookies.db']) {
+        final path = '${extracted.path}/$name';
+        if (FileSystemEntity.typeSync(path) != FileSystemEntityType.notFound) {
+          replacements['${App.dataPath}/$name'] = path;
+        }
+      }
+      final dirs = extracted
+          .listSync()
+          .whereType<Directory>()
+          .where((e) =>
+              e.uri.pathSegments.where((p) => p.isNotEmpty).last !=
+              'comic_source')
+          .toList();
+      if (dirs.length > 1)
+        throw const FormatException('Ambiguous download directory');
+      if (dirs.isNotEmpty && DownloadManager().path != null) {
+        final mergedDownloads = '${work.path}/downloads';
+        if (Directory(DownloadManager().path!).existsSync()) {
+          await copyBackupEntity(DownloadManager().path!, mergedDownloads);
+        } else {
+          Directory(mergedDownloads).createSync();
+        }
+        await copyBackupEntity(dirs.single.path, mergedDownloads);
+        replacements[DownloadManager().path!] = mergedDownloads;
+      }
+      await appdata.waitForSettingsWrites();
+      await DownloadManager().dispose();
+      stopped = true;
+      transaction = await DataRestoreTransaction.prepare(
+          App.dataPath, replacements,
+          allowedRoots: trustedRestoreRoots);
+      closeDatabases();
+      transaction.apply();
+      // Reopen synchronously before the first await after replacing files.
+      final favoriteInit = LocalFavoritesManager().init(importLegacy: false);
+      final historyInit = HistoryManager().init(importLegacy: false);
+      SingleInstanceCookieJar.instance?.init();
+      await favoriteInit;
+      await historyInit;
+      appdata.settings = candidate.settings;
+      appdata.firstUse = candidate.firstUse;
+      appdata.blockingKeyword = candidate.blockingKeyword;
+      appdata.favoriteTags = candidate.favoriteTags;
+      await appdata.writeData(false);
+      await ComicSource.reload();
+      await DownloadManager().init();
+      stopped = false;
+      transaction.commit();
+      committed = true;
+      try {
+        await transaction.recover();
+      } catch (e, s) {
+        Log.warning('IO',
+            'Restore committed; cleanup deferred.\n${safeNetworkError(e)}\n$s');
+      }
+      LocalFavoritesManager().updateUI();
+      return DataImportResult.imported;
+    } catch (e, s) {
+      Log.error('importData', '${safeNetworkError(e)}\n$s');
+      if (!committed && transaction != null) {
+        try {
+          await DownloadManager().dispose();
+          stopped = true;
+          closeDatabases();
+          await transaction.recover();
+          await appdata.readData(throwOnError: true);
+          await reopen();
+        } catch (recoveryError, recoveryStack) {
+          Log.error(
+              'importData',
+              'Recovery retained for next startup.\n'
+                  '${safeNetworkError(recoveryError)}\n$recoveryStack');
+        }
+      } else if (!committed &&
+          File('${App.dataPath}/data-restore/journal.json').existsSync()) {
+        try {
+          await DownloadManager().dispose();
+          stopped = true;
+          closeDatabases();
+          await recoverPendingDataRestore(App.dataPath,
+              trustedAllowedRoots: trustedRestoreRoots);
+          await appdata.readData(throwOnError: true);
+          await reopen();
+        } catch (error, stack) {
+          Log.error(
+              'importData',
+              'Recovery retained for next startup.\n'
+                  '${safeNetworkError(error)}\n$stack');
+        }
+      } else if (stopped) {
+        try {
+          await reopen();
+        } catch (error, stack) {
+          Log.error('importData', '${safeNetworkError(error)}\n$stack');
+        }
+      }
+      return DataImportResult.failed;
+    } finally {
+      if (work.existsSync()) work.deleteSync(recursive: true);
+    }
+  }, suppressSync: true, operationName: 'data-import');
+}
+
+Future<void> saveLog(String log) async {
   var path = (await getTemporaryDirectory()).path;
   var file = File("$path${pathSep}logs.txt");
-  file.writeAsStringSync(log);
+  await file.writeAsString(log, flush: true);
   if (App.isMobile) {
     var params =
         SaveFileDialogParams(sourceFilePath: "$path${pathSep}logs.txt");
@@ -784,10 +613,8 @@ Future<void> exportStringDataAsFile(String data, String fileName) async {
   if (App.isMobile) {
     var cachePath = (await getApplicationCacheDirectory()).path;
     var file = File("$cachePath$pathSep$fileName");
-    if (!file.existsSync()) {
-      file.createSync();
-    }
-    file.writeAsStringSync(data);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(data, flush: true);
     var params = SaveFileDialogParams(sourceFilePath: file.path);
     await FlutterFileDialog.saveFile(params: params);
   } else {
@@ -823,7 +650,7 @@ Future<String?> getDataFromUserSelectedFile(List<String> extensions) async {
   if (filePath == null) {
     return null;
   }
-  return File(filePath).readAsStringSync();
+  return File(filePath).readAsString();
 }
 
 extension FileExtension on File {

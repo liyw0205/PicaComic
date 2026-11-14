@@ -46,16 +46,15 @@ class ShowImagePageWithHero extends StatelessWidget {
         title: Text("图片".tl),
         actions: [
           Tooltip(
-            message: "保存".tl,
-            child: IconButton(
-              icon: const Icon(Icons.download),
-              onPressed: () async{
-                var file = await ImageManager().getFile(url);
-                if(file != null){
-                  saveImage(file);
-                }
-              }
-          ))
+              message: "保存".tl,
+              child: IconButton(
+                  icon: const Icon(Icons.download),
+                  onPressed: () async {
+                    var file = await ImageManager().getFile(url);
+                    if (file != null) {
+                      await saveImage(file);
+                    }
+                  }))
         ],
       ),
       body: Hero(
@@ -76,4 +75,3 @@ class ShowImagePageWithHero extends StatelessWidget {
     );
   }
 }
-

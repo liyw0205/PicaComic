@@ -18,6 +18,7 @@ import 'package:pica_comic/components/scrollable_list/src/scrollable_positioned_
 import 'package:pica_comic/components/window_frame.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_loader/file_image_loader.dart';
+import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 import 'package:pica_comic/foundation/image_loader/stream_image_provider.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/download.dart';
@@ -43,6 +44,7 @@ import 'package:pica_comic/network/picacg_network/methods.dart';
 import 'package:pica_comic/tools/translations.dart';
 
 import '../jm/jm_comments_page.dart';
+import 'reader_image_controller.dart';
 
 part 'eps_view.dart';
 
@@ -201,7 +203,7 @@ class ComicReadingPage extends StatelessWidget {
     return StateBuilder<ComicReadingPageLogic>(initState: (logic) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
       if (appdata.settings[14] == "1") {
-        setKeepScreenOn();
+        unawaited(setKeepScreenOn());
       }
       if (appdata.settings[76] == "1") {
         SystemChrome.setPreferredOrientations([
@@ -222,6 +224,7 @@ class ComicReadingPage extends StatelessWidget {
                 ?.setDarkTheme());
       }
     }, dispose: (logic) {
+      logic.releaseImageTasks();
       //清除缓存并减小最大缓存
       BaseImageProvider.clearCache();
       BaseImageProvider.setCacheSizeLimit(50 * 1024 * 1024);
@@ -232,14 +235,14 @@ class ComicReadingPage extends StatelessWidget {
         logic.listenVolume!.stop();
       }
       if (appdata.settings[14] == "1") {
-        cancelKeepScreenOn();
+        unawaited(cancelKeepScreenOn());
       }
       logic.runningAutoPageTurning = false;
       ComicImage.clear();
       StateController.remove<ComicReadingPageLogic>();
       // 更新本地收藏
-      LocalFavoritesManager()
-          .onReadEnd(readingData.favoriteId, readingData.favoriteType);
+      unawaited(LocalFavoritesManager()
+          .onReadEnd(readingData.favoriteId, readingData.favoriteType));
       // 保存历史记录
       if (history != null) {
         _updateHistory(logic, true);
@@ -247,9 +250,6 @@ class ComicReadingPage extends StatelessWidget {
       // 退出全屏
       if (logic.isFullScreen) {
         logic.fullscreen();
-      }
-      if (!DownloadManager().isDownloading) {
-        ImageManager.clearTasks();
       }
       // 更新漫画详情页面
       Future.microtask(() {
@@ -600,7 +600,7 @@ class ComicReadingPage extends StatelessWidget {
     var file = await _getFileFromStream(
         readingData.loadImage(logic.order, index, logic.urls[index]));
 
-    shareImage(file);
+    await shareImage(file);
   }
 
   Future<String?> _persistentCurrentImage() async {
@@ -632,7 +632,7 @@ class ComicReadingPage extends StatelessWidget {
     var file = await _getFileFromStream(
         readingData.loadImage(logic.order, index, logic.urls[index]));
 
-    saveImage(file);
+    await saveImage(file);
   }
 
   Widget? buildEpChangeButton(ComicReadingPageLogic logic) {

@@ -12,6 +12,8 @@ class ComicSourceParseException implements Exception {
 }
 
 class ComicSourceParser {
+  static const maxSourceBytes = 1024 * 1024;
+
   /// comic source key
   String? _key;
 
@@ -22,14 +24,14 @@ class ComicSourceParser {
       fileName = "$fileName.js";
     }
     var file = File("${App.dataPath}/comic_source/$fileName");
-    if (file.existsSync()) {
+    if (await file.exists()) {
       int i = 0;
-      while (file.existsSync()) {
+      while (await file.exists()) {
         file = File("${App.dataPath}/comic_source/$fileName($i).js");
         i++;
       }
     }
-    await file.writeAsString(js);
+    await writeTextFileAtomically(file, js);
     try {
       return await parse(js, file.path);
     } catch (e) {
@@ -39,7 +41,12 @@ class ComicSourceParser {
   }
 
   Future<ComicSource> parse(String js, String filePath) async {
+    _key = null;
+    _name = null;
     js = js.replaceAll("\r\n", "\n");
+    if (utf8.encode(js).length > maxSourceBytes) {
+      throw ComicSourceParseException("Source file exceeds 1 MiB limit");
+    }
     var line1 = js
         .split('\n')
         .firstWhereOrNull((element) => element.removeAllBlank.isNotEmpty);
@@ -50,81 +57,117 @@ class ComicSourceParser {
     }
     var className = line1.split("class")[1].split("extends ComicSource").first;
     className = className.trim();
-    JsEngine().runCode("""
-      (() => {
-        $js
-        this['temp'] = new $className()
-      }).call()
-    """);
-    _name = JsEngine().runCode("this['temp'].name") ??
-        (throw ComicSourceParseException('name is required'));
-    var key = JsEngine().runCode("this['temp'].key") ??
-        (throw ComicSourceParseException('key is required'));
-    var version = JsEngine().runCode("this['temp'].version") ??
-        (throw ComicSourceParseException('version is required'));
-    var minAppVersion = JsEngine().runCode("this['temp'].minAppVersion");
-    var url = JsEngine().runCode("this['temp'].url");
-    var matchBriefIdRegex =
-        JsEngine().runCode("this['temp'].comic.matchBriefIdRegex");
-    if (minAppVersion != null) {
-      if (compareSemVer(minAppVersion, appVersion.split('-').first)) {
-        throw ComicSourceParseException(
-            "minAppVersion $minAppVersion is required");
+    String? installedKey;
+    try {
+      JsEngine().runCode("""
+        (() => {
+          $js
+          this['temp'] = new $className()
+        }).call()
+      """);
+      _name = JsEngine().runCode("this['temp'].name") ??
+          (throw ComicSourceParseException('name is required'));
+      var key = JsEngine().runCode("this['temp'].key") ??
+          (throw ComicSourceParseException('key is required'));
+      var version = JsEngine().runCode("this['temp'].version") ??
+          (throw ComicSourceParseException('version is required'));
+      var minAppVersion = JsEngine().runCode("this['temp'].minAppVersion");
+      var url = JsEngine().runCode("this['temp'].url");
+      var matchBriefIdRegex =
+          JsEngine().runCode("this['temp'].comic.matchBriefIdRegex");
+      if (minAppVersion != null) {
+        if (compareSemVer(minAppVersion, appVersion.split('-').first)) {
+          throw ComicSourceParseException(
+              "minAppVersion $minAppVersion is required");
+        }
       }
-    }
-    for (var source in ComicSource.sources) {
-      if (source.key == key) {
-        throw ComicSourceParseException("key($key) already exists");
+      for (var source in ComicSource.sources) {
+        if (source.key == key) {
+          throw ComicSourceParseException("key($key) already exists");
+        }
       }
+      _key = key;
+      _checkKeyValidation();
+
+      JsEngine().runCode("""
+        ComicSource.sources.$_key = this['temp'];
+      """);
+      installedKey = key;
+
+      final account = _loadAccountConfig();
+      final explorePageData = _loadExploreData();
+      final categoryPageData = _loadCategoryData();
+      final categoryComicsData = _loadCategoryComicsData();
+      final searchData = _loadSearchData();
+      final loadComicFunc = _parseLoadComicFunc();
+      final loadComicPagesFunc = _parseLoadComicPagesFunc();
+      final getImageLoadingConfigFunc = _parseImageLoadingConfigFunc();
+      final getThumbnailLoadingConfigFunc = _parseThumbnailLoadingConfigFunc();
+      final favoriteData = _loadFavoriteData();
+      final commentsLoader = _parseCommentsLoader();
+      final sendCommentFunc = _parseSendCommentFunc();
+
+      var source = ComicSource(
+          _name!,
+          key,
+          account,
+          categoryPageData,
+          categoryComicsData,
+          favoriteData,
+          explorePageData,
+          searchData,
+          [],
+          loadComicFunc,
+          loadComicPagesFunc,
+          getImageLoadingConfigFunc,
+          getThumbnailLoadingConfigFunc,
+          matchBriefIdRegex,
+          filePath,
+          url ?? "",
+          version ?? "1.0.0",
+          commentsLoader,
+          sendCommentFunc);
+
+      await source.loadData();
+
+      unawaited(Future<void>.delayed(const Duration(milliseconds: 50), () {
+        try {
+          if (ComicSource.sources
+              .any((candidate) => identical(candidate, source))) {
+            JsEngine().runCode("ComicSource.sources.$key.init()");
+          }
+        } catch (e, s) {
+          log("Source init failed: ${safeNetworkError(e)}\n$s", "ComicSource",
+              LogLevel.warning);
+        }
+      }));
+
+      return source;
+    } catch (_) {
+      _removeTemporarySource(installedKey);
+      rethrow;
+    } finally {
+      _clearTemporaryObject();
     }
-    _key = key;
-    _checkKeyValidation();
+  }
 
-    JsEngine().runCode("""
-      ComicSource.sources.$_key = this['temp'];
-    """);
+  void _removeTemporarySource(String? key) {
+    if (key == null) return;
+    try {
+      JsEngine().runCode("delete ComicSource.sources.$key;");
+    } catch (e, s) {
+      log("Failed to clear temporary source: ${safeNetworkError(e)}\n$s",
+          "ComicSource", LogLevel.warning);
+    }
+  }
 
-    final account = _loadAccountConfig();
-    final explorePageData = _loadExploreData();
-    final categoryPageData = _loadCategoryData();
-    final categoryComicsData = _loadCategoryComicsData();
-    final searchData = _loadSearchData();
-    final loadComicFunc = _parseLoadComicFunc();
-    final loadComicPagesFunc = _parseLoadComicPagesFunc();
-    final getImageLoadingConfigFunc = _parseImageLoadingConfigFunc();
-    final getThumbnailLoadingConfigFunc = _parseThumbnailLoadingConfigFunc();
-    final favoriteData = _loadFavoriteData();
-    final commentsLoader = _parseCommentsLoader();
-    final sendCommentFunc = _parseSendCommentFunc();
-
-    var source = ComicSource(
-        _name!,
-        key,
-        account,
-        categoryPageData,
-        categoryComicsData,
-        favoriteData,
-        explorePageData,
-        searchData,
-        [],
-        loadComicFunc,
-        loadComicPagesFunc,
-        getImageLoadingConfigFunc,
-        getThumbnailLoadingConfigFunc,
-        matchBriefIdRegex,
-        filePath,
-        url ?? "",
-        version ?? "1.0.0",
-        commentsLoader,
-        sendCommentFunc);
-
-    await source.loadData();
-
-    Future.delayed(const Duration(milliseconds: 50), () {
-      JsEngine().runCode("ComicSource.sources.$_key.init()");
-    });
-
-    return source;
+  void _clearTemporaryObject() {
+    try {
+      JsEngine().runCode("delete this['temp'];");
+    } catch (e, s) {
+      log("Failed to clear parser temporary object: ${safeNetworkError(e)}\n$s",
+          "ComicSource", LogLevel.warning);
+    }
   }
 
   _checkKeyValidation() {
@@ -157,7 +200,7 @@ class ComicSourceParser {
         var source =
             ComicSource.sources.firstWhere((element) => element.key == _key);
         source.data["account"] = <String>[account, pwd];
-        source.saveData();
+        await source.saveData();
         return const Res(true);
       } catch (e, s) {
         log("${safeNetworkError(e)}\n$s", "Network", LogLevel.error);

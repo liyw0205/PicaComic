@@ -912,7 +912,7 @@ class NhentaiNetwork {
       appdata.searchHistory.remove(keyword);
     }
     appdata.searchHistory.add(keyword);
-    appdata.writeHistory();
+    await appdata.writeHistory();
     keyword = withDefaultSearchLanguage(
         keyword, int.tryParse(appdata.settings[69]) ?? 0);
     final queryParameters = {

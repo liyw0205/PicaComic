@@ -1,7 +1,9 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/pages/downloading_page.dart';
 import '../foundation/app.dart';
+import '../network/network_logging.dart';
 
 class Notifications {
   FlutterLocalNotificationsPlugin? flutterLocalNotificationsPlugin;
@@ -42,12 +44,18 @@ class Notifications {
       android: initializationSettingsAndroid,
       iOS: initializationSettingsDarwin,
     );
-    await flutterLocalNotificationsPlugin!.initialize(initializationSettings,
-        onDidReceiveNotificationResponse: onDidReceiveNotificationResponse);
+    try {
+      await flutterLocalNotificationsPlugin!.initialize(initializationSettings,
+          onDidReceiveNotificationResponse: onDidReceiveNotificationResponse);
+    } catch (e, s) {
+      _logFailure('Initialize', e, s);
+    }
   }
 
+  // Plugin callbacks are typed as void Function(...). Keep this boundary
+  // synchronous; all work here is synchronous as well.
   void onDidReceiveNotificationResponse(
-      NotificationResponse notificationResponse) async {
+      NotificationResponse notificationResponse) {
     if (!(App.isAndroid || App.isIOS)) return;
     final String? payload = notificationResponse.payload;
     if (payload != "item y") {
@@ -56,13 +64,13 @@ class Notifications {
   }
 
   void onDidReceiveLocalNotification(
-      int id, String? title, String? body, String? payload) async {
+      int id, String? title, String? body, String? payload) {
     if (payload != "item y") {
       App.globalTo(() => const DownloadingPage());
     }
   }
 
-  void sendProgressNotification(
+  Future<void> sendProgressNotification(
       int progress, int total, String title, String content) async {
     if (!(App.isAndroid || App.isIOS)) return;
     AndroidNotificationDetails androidNotificationDetails =
@@ -77,30 +85,40 @@ class Notifications {
             onlyAlertOnce: true,
             autoCancel: false);
     DarwinNotificationDetails ios = const DarwinNotificationDetails(
-        presentSound: false, presentAlert: false, presentBadge: false,
+        presentSound: false,
+        presentAlert: false,
+        presentBadge: false,
         presentBanner: false);
     NotificationDetails notificationDetails =
         NotificationDetails(android: androidNotificationDetails, iOS: ios);
-    await flutterLocalNotificationsPlugin!.show(
-        progressId, title, content, notificationDetails,
-        payload: 'item x');
-  }
-
-  void endProgress() async {
-    if (!(App.isAndroid || App.isIOS)) return;
-    await flutterLocalNotificationsPlugin!.cancel(progressId);
-  }
-
-  void cancelAll() async {
-    if (!(App.isAndroid || App.isIOS)) return;
     try {
-      await flutterLocalNotificationsPlugin!.cancelAll();
-    } catch (e) {
-      // ignore
+      await flutterLocalNotificationsPlugin!.show(
+          progressId, title, content, notificationDetails,
+          payload: 'item x');
+    } catch (e, s) {
+      _logFailure('Progress notification', e, s);
     }
   }
 
-  void sendNotification(String title, String content) async {
+  Future<void> endProgress() async {
+    if (!(App.isAndroid || App.isIOS)) return;
+    try {
+      await flutterLocalNotificationsPlugin!.cancel(progressId);
+    } catch (e, s) {
+      _logFailure('End progress notification', e, s);
+    }
+  }
+
+  Future<void> cancelAll() async {
+    if (!(App.isAndroid || App.isIOS)) return;
+    try {
+      await flutterLocalNotificationsPlugin!.cancelAll();
+    } catch (e, s) {
+      _logFailure('Cancel notifications', e, s);
+    }
+  }
+
+  Future<void> sendNotification(String title, String content) async {
     if (!(App.isAndroid || App.isIOS)) return;
     AndroidNotificationDetails androidNotificationDetails =
         const AndroidNotificationDetails(
@@ -113,11 +131,16 @@ class Notifications {
     DarwinNotificationDetails ios = const DarwinNotificationDetails();
     NotificationDetails notificationDetails =
         NotificationDetails(android: androidNotificationDetails, iOS: ios);
-    await flutterLocalNotificationsPlugin!
-        .show(1145140, title, content, notificationDetails, payload: 'item x');
+    try {
+      await flutterLocalNotificationsPlugin!.show(
+          1145140, title, content, notificationDetails,
+          payload: 'item x');
+    } catch (e, s) {
+      _logFailure('Notification', e, s);
+    }
   }
 
-  void sendUnimportantNotification(String title, String content) async {
+  Future<void> sendUnimportantNotification(String title, String content) async {
     if (!(App.isAndroid || App.isIOS)) return;
     AndroidNotificationDetails androidNotificationDetails =
         const AndroidNotificationDetails(
@@ -133,7 +156,20 @@ class Notifications {
 
     NotificationDetails notificationDetails =
         NotificationDetails(android: androidNotificationDetails, iOS: ios);
-    await flutterLocalNotificationsPlugin!
-        .show(51515568, title, content, notificationDetails, payload: 'item y');
+    try {
+      await flutterLocalNotificationsPlugin!.show(
+          51515568, title, content, notificationDetails,
+          payload: 'item y');
+    } catch (e, s) {
+      _logFailure('Unimportant notification', e, s);
+    }
+  }
+
+  void _logFailure(String operation, Object error, StackTrace stack) {
+    LogManager.addLog(
+      LogLevel.warning,
+      'Notifications',
+      '$operation failed: ${safeNetworkError(error)}\n$stack',
+    );
   }
 }

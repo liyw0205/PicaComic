@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/jm_network/jm_image.dart';
@@ -18,63 +20,79 @@ class HistoryPage extends StatefulWidget {
 }
 
 class _HistoryPageState extends State<HistoryPage> {
-  final comics = HistoryManager().getAll();
-  bool searchInit = false;
+  static const _pageSize = 60;
+  final comics = <History>[];
+  final _scrollController = ScrollController();
+  final _searchFocus = FocusNode();
+  bool _hasMore = true;
+  int _totalCount = 0;
   bool searchMode = false;
   String keyword = "";
-  var results = <History>[];
   bool isModified = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _reload() {
+    comics.clear();
+    _hasMore = true;
+    _totalCount = HistoryManager().count();
+    _loadPage();
+  }
+
+  void _loadPage() {
+    final page = HistoryManager().getPage(
+      limit: _pageSize,
+      after: comics.isEmpty ? null : comics.last,
+      keyword: searchMode ? keyword : '',
+    );
+    comics.addAll(page);
+    _hasMore = page.length == _pageSize;
+  }
+
+  void _onScroll() {
+    if (_hasMore && _scrollController.position.extentAfter < 800) {
+      setState(_loadPage);
+    }
+  }
 
   @override
   void dispose() {
     if (isModified) {
-      appdata.history.saveData();
+      unawaited(appdata.history.saveData());
     }
+    _scrollController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   Widget buildTitle() {
     if (searchMode) {
-      final FocusNode focusNode = FocusNode();
-      focusNode.requestFocus();
-      bool focus = searchInit;
-      searchInit = false;
       return TextField(
-        focusNode: focus ? focusNode : null,
+        focusNode: _searchFocus,
         decoration:
-        InputDecoration(border: InputBorder.none, hintText: "搜索".tl),
+            InputDecoration(border: InputBorder.none, hintText: "搜索".tl),
         onChanged: (s) {
           setState(() {
             keyword = s.toLowerCase();
+            _reload();
           });
         },
       );
     } else {
-      return Text("${"历史记录".tl}(${comics.length})");
-    }
-  }
-
-  void find() {
-    results.clear();
-    if (keyword == "") {
-      results.addAll(comics);
-    } else {
-      for (var element in comics) {
-        if (element.title.toLowerCase().contains(keyword) ||
-            element.subtitle.toLowerCase().contains(keyword)) {
-          results.add(element);
-        }
-      }
+      return Text("${"历史记录".tl}($_totalCount)");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (searchMode) {
-      find();
-    }
     return Scaffold(
       body: SmoothCustomScrollView(
+        controller: _scrollController,
         slivers: [
           SliverAppbar(
             title: buildTitle(),
@@ -95,7 +113,7 @@ class _HistoryPageState extends State<HistoryPage> {
                               TextButton(
                                   onPressed: () {
                                     appdata.history.clearHistory();
-                                    setState(() => comics.clear());
+                                    setState(_reload);
                                     isModified = true;
                                     App.globalBack();
                                   },
@@ -111,17 +129,18 @@ class _HistoryPageState extends State<HistoryPage> {
                   onPressed: () {
                     setState(() {
                       searchMode = !searchMode;
-                      searchInit = true;
                       if (!searchMode) {
                         keyword = "";
                       }
+                      _reload();
                     });
+                    if (searchMode) _searchFocus.requestFocus();
                   },
                 ),
               )
             ],
           ),
-          if (!searchMode) buildComics(comics) else buildComics(results),
+          buildComics(comics),
           SliverPadding(
             padding:
                 EdgeInsets.only(top: MediaQuery.of(context).padding.bottom),
@@ -164,8 +183,7 @@ class _HistoryPageState extends State<HistoryPage> {
                             appdata.history.remove(comics_[i].target);
                             setState(() {
                               isModified = true;
-                              comics.removeWhere((element) =>
-                                  element.target == comics_[i].target);
+                              _reload();
                             });
                             App.globalBack();
                           },

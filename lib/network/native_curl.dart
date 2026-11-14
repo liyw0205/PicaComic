@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/image_loader/image_task_priority.dart';
 import 'package:pica_comic/foundation/log.dart';
 
 import 'http_client.dart';
@@ -96,6 +97,7 @@ class NativeCurlHttpClient {
     var finished = false;
     final pending = _channel.invokeMapMethod<String, dynamic>("fetch", {
       "requestId": requestId,
+      "priority": Zone.current[imageTaskPriorityZoneKey] as int? ?? 0,
       "method": options.method,
       "url": options.uri.toString(),
       "proxy": proxy,

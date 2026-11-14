@@ -6,8 +6,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 object NativeCurl {
     private val cancellations = ConcurrentHashMap<String, AtomicBoolean>()
 
-    fun registerRequest(id: String) {
-        cancellations[id] = AtomicBoolean(false)
+    fun registerRequest(id: String): Boolean =
+        cancellations.putIfAbsent(id, AtomicBoolean(false)) == null
+
+    fun releaseRequest(id: String) {
+        cancellations.remove(id)
     }
 
     fun cancelRequest(id: String) {
@@ -39,9 +42,6 @@ object NativeCurl {
     fun isAvailable(): Boolean = loaded
 
     fun fetch(arguments: Map<*, *>): Map<String, Any?> {
-        if (!loaded) {
-            return mapOf("error" to "native curl unavailable")
-        }
         val headers = mutableMapOf<String, String>()
         val rawHeaders = arguments["headers"]
         if (rawHeaders is Map<*, *>) {
@@ -54,6 +54,7 @@ object NativeCurl {
         val id = arguments["requestId"]?.toString() ?: ""
         val cancelled = cancellations[id] ?: AtomicBoolean(false)
         try {
+            if (!loaded) return mapOf("error" to "native curl unavailable")
             return fetchNative(
             arguments["method"]?.toString() ?: "GET",
             arguments["url"]?.toString() ?: "",
