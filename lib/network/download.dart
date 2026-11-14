@@ -766,7 +766,14 @@ class DownloadManager with _DownloadDb implements Listenable {
   ///删除已下载的漫画
   Future<void> delete(List<String> ids) async {
     for (var id in ids) {
-      var comic = Directory("$path/${getDirectory(id)}");
+      // Deletion is intentionally idempotent: the UI can retry after a
+      // successful delete without requiring the database row to still exist.
+      final directory = _directoryOrNull(id);
+      if (directory == null) {
+        _DownloadDb.clearDirectoryCache(id);
+        continue;
+      }
+      var comic = Directory("$path/$directory");
       try {
         await comic.delete(recursive: true);
       } catch (e) {
@@ -1101,19 +1108,29 @@ abstract mixin class _DownloadDb {
 
   static void clearDirectoryCache(String id) => _cache.remove(id);
 
-  String getDirectory(String id) {
+  String? _directoryOrNull(String id) {
     var directory = _cache[id];
     if (directory == null) {
       var result = _db!.select('''
       select directory from download
       where id = ?
     ''', [id]);
-      directory = result.first['directory'];
-      directory = _findAccurateDirectory(directory!);
+      if (result.isEmpty) return null;
+      directory = result.first['directory'] as String?;
+      if (directory == null || directory.isEmpty) return null;
+      directory = _findAccurateDirectory(directory);
       if (_cache.length > 50) {
         _cache.remove(_cache.keys.first);
       }
       _cache[id] = directory;
+    }
+    return directory;
+  }
+
+  String getDirectory(String id) {
+    final directory = _directoryOrNull(id);
+    if (directory == null) {
+      throw StateError('Downloaded comic not found: $id');
     }
     return directory;
   }

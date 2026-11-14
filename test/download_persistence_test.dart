@@ -314,6 +314,36 @@ void main() {
     expect(snapshot['downloading'], isEmpty);
   });
 
+  test('deleting an already deleted comic is idempotent', () async {
+    final db = sqlite3.open('${directory.path}/download.db');
+    db.execute('''
+      create table download (
+        id text primary key,
+        title text,
+        subtitle text,
+        time int,
+        directory text,
+        size int,
+        json text
+      )
+    ''');
+    db.execute(
+      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+      ['repeat-delete', 'title', '', 1, 'repeat-delete', 0, '{}'],
+    );
+    db.dispose();
+    await Directory('${directory.path}/repeat-delete').create();
+
+    await manager.init();
+    await manager.delete(['repeat-delete']);
+    expect(
+        await Directory('${directory.path}/repeat-delete').exists(), isFalse);
+    expect(manager.total, 0);
+
+    await expectLater(manager.delete(['repeat-delete']), completes);
+    expect(manager.total, 0);
+  });
+
   test('download sorting accepts only mapped columns and directions', () async {
     final db = sqlite3.open('${directory.path}/download.db');
     db.execute('''
