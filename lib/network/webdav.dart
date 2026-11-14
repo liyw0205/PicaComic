@@ -142,7 +142,10 @@ class Webdav {
   static Future<List<String>?> _config(String? config) async {
     final values = _parseConfig(config ?? appdata.settings[45]);
     if (values == null) return null;
-    if (config != null || values[1].isNotEmpty || values[2].isNotEmpty) {
+    // Only one-shot callers may provide credentials outside SecretStore.
+    // Legacy credentials in persisted settings must not bypass the migration
+    // boundary when secure storage is unavailable.
+    if (config != null) {
       return values;
     }
     String? username;

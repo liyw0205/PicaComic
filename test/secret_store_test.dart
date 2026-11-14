@@ -112,6 +112,33 @@ void main() {
         'secret');
   });
 
+  test('persisted WebDAV config uses credentials from secret storage',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousSetting = appdata.settings[45];
+    final store = MemorySecretStore();
+    final transport = _EmptySyncTransport();
+    List<String>? requestedConfig;
+    try {
+      appdata.settings[45] = 'https://dav.example;legacy-user;legacy-secret;/pica';
+      await store.write(webdavUsernameSecret, 'stored-user');
+      await store.write(webdavPasswordSecret, 'stored-secret');
+      SecretStoreRegistry.configure(store);
+      Webdav.transportFactory = (config) {
+        requestedConfig = List<String>.from(config);
+        return transport;
+      };
+
+      expect(await Webdav.downloadData(), isTrue);
+      expect(requestedConfig,
+          ['https://dav.example', 'stored-user', 'stored-secret', '/pica']);
+    } finally {
+      appdata.settings[45] = previousSetting;
+      Webdav.transportFactory = previousFactory;
+      SecretStoreRegistry.configure(MemorySecretStore());
+    }
+  });
+
   test('legacy migration rolls back secrets when settings cannot be written',
       () async {
     for (final entity in root.listSync()) {
@@ -146,6 +173,28 @@ void main() {
     var transportCreated = false;
     try {
       appdata.settings[45] = 'https://dav.example;;;/pica';
+      SecretStoreRegistry.configure(_UnavailableSecretStore());
+      Webdav.transportFactory = (_) {
+        transportCreated = true;
+        return _EmptySyncTransport();
+      };
+
+      expect(await Webdav.downloadData(), isFalse);
+      expect(transportCreated, isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
+    } finally {
+      appdata.settings[45] = previousSetting;
+      Webdav.transportFactory = previousFactory;
+      SecretStoreRegistry.configure(MemorySecretStore());
+    }
+  });
+
+  test('legacy credentials never bypass unavailable secret storage', () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousSetting = appdata.settings[45];
+    var transportCreated = false;
+    try {
+      appdata.settings[45] = 'https://dav.example;legacy-user;secret;/pica';
       SecretStoreRegistry.configure(_UnavailableSecretStore());
       Webdav.transportFactory = (_) {
         transportCreated = true;
