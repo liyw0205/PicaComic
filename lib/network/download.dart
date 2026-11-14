@@ -181,29 +181,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       final envelope = _decodeQueueEnvelope(decoded);
       final generation = _generationOf(envelope);
       if (generation > _queueGeneration) _queueGeneration = generation;
-      final restored = <DownloadingItem>[];
-      final restoredIds = <String>{};
-      for (final rawItem in envelope['downloading'] as List<Object?>) {
-        if (rawItem is! Map) {
-          throw const FormatException('Invalid download task record');
-        }
-        final rawMap = Map<String, dynamic>.from(rawItem);
-        final rawDirectory = rawMap['directory'];
-        if (rawDirectory != null &&
-            (rawDirectory is! String || !_isSafeQueueDirectory(rawDirectory))) {
-          throw const FormatException('Invalid download task directory');
-        }
-        final item = downloadingItemFromMap(
-          rawMap,
-          _onFinish,
-          _onError,
-          _saveInfo,
-        );
-        if (!restoredIds.add(item.id)) {
-          throw FormatException('Duplicate download task: ${item.id}');
-        }
-        restored.add(item);
-      }
+      final restored = _decodeQueueItems(envelope);
       // Replace stale in-memory state only after the whole snapshot decoded.
       // This makes retries and path changes all-or-nothing from the queue's
       // perspective.
@@ -280,10 +258,43 @@ class DownloadManager with _DownloadDb implements Listenable {
   Future<Map<String, dynamic>?> _readQueueSnapshot(File file) async {
     if (!await file.exists()) return null;
     try {
-      return _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
+      final snapshot =
+          _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
+      // A structurally valid envelope can still contain an unusable task. Do
+      // this validation before recovery chooses a winner, otherwise a newer
+      // bad snapshot could discard an older, fully recoverable backup.
+      _decodeQueueItems(snapshot);
+      return snapshot;
     } catch (_) {
       return null;
     }
+  }
+
+  List<DownloadingItem> _decodeQueueItems(Map<String, dynamic> envelope) {
+    final restored = <DownloadingItem>[];
+    final restoredIds = <String>{};
+    for (final rawItem in envelope['downloading'] as List<Object?>) {
+      if (rawItem is! Map) {
+        throw const FormatException('Invalid download task record');
+      }
+      final rawMap = Map<String, dynamic>.from(rawItem);
+      final rawDirectory = rawMap['directory'];
+      if (rawDirectory != null &&
+          (rawDirectory is! String || !_isSafeQueueDirectory(rawDirectory))) {
+        throw const FormatException('Invalid download task directory');
+      }
+      final item = downloadingItemFromMap(
+        rawMap,
+        _onFinish,
+        _onError,
+        _saveInfo,
+      );
+      if (!restoredIds.add(item.id)) {
+        throw FormatException('Duplicate download task: ${item.id}');
+      }
+      restored.add(item);
+    }
+    return restored;
   }
 
   Future<void> _recoverQueueFiles(File target) async {

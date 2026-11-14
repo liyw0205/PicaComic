@@ -187,6 +187,30 @@ void main() {
     );
   });
 
+  test('a newer invalid task snapshot falls back to a valid backup', () async {
+    await getQueueFile().writeAsString(
+      jsonEncode(committedQueue([
+        {'type': 999, 'id': 'invalid-newer'},
+      ], 20)),
+    );
+    await getQueueFile('.bak').writeAsString(
+      jsonEncode(committedQueue([fixtureTask('backup')], 19)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading.single.id, 'backup');
+    expect(jsonDecode(await getQueueFile().readAsString())['generation'], 19);
+    expect(await getQueueFile('.bak').exists(), isFalse);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+  });
+
   test('a malformed temporary snapshot is preserved when target is valid',
       () async {
     await getQueueFile().writeAsString(jsonEncode(committedQueue([], 10)));
