@@ -97,6 +97,14 @@ void main() {
       final lease = await policy.beforeRequest(request);
       policy.reportFailure(lease, const SocketException('offline'));
     }
+    var health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['state'], 'open');
+    expect(health['cooldownRemainingMs'], 10000);
+
+    now = now.add(const Duration(seconds: 1));
+    health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['state'], 'open');
+    expect(health['cooldownRemainingMs'], 9000);
     await expectLater(
       policy.beforeRequest(request),
       throwsA(isA<SourceNetworkException>().having(
@@ -106,10 +114,13 @@ void main() {
       )),
     );
 
-    now = now.add(const Duration(seconds: 11));
+    now = now.add(const Duration(seconds: 9));
+    health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['state'], 'degraded');
+    expect(health['cooldownRemainingMs'], 0);
     final lease = await policy.beforeRequest(request);
     policy.reportSuccess(lease);
-    final health = policy.diagnosticSummary()['fixture'] as Map;
+    health = policy.diagnosticSummary()['fixture'] as Map;
     expect(health['state'], 'healthy');
     expect(health['failures'], 2);
   });
@@ -221,5 +232,10 @@ void main() {
     expect((summary['source-b'] as Map)['state'], 'healthy');
     expect((summary['source-b'] as Map)['successes'], 1);
     now = now.add(const Duration(minutes: 2));
+    final recoveredLease = await policy.beforeRequest(requestA);
+    policy.reportSuccess(recoveredLease);
+    final recovered = policy.diagnosticSummary()['source-a'] as Map;
+    expect(recovered['state'], 'healthy');
+    expect(recovered['cooldownRemainingMs'], 0);
   });
 }

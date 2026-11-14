@@ -82,19 +82,22 @@ class SourceNetworkHealth {
   int consecutiveFailures = 0;
   DateTime? openedUntil;
 
-  String get state {
+  String get state => _stateAt(DateTime.now());
+
+  String _stateAt(DateTime now) {
     final until = openedUntil;
-    if (until != null && until.isAfter(DateTime.now())) return 'open';
+    if (until != null && until.isAfter(now)) return 'open';
     return consecutiveFailures == 0 ? 'healthy' : 'degraded';
   }
 
-  Map<String, Object?> toJson() {
+  Map<String, Object?> toJson({DateTime? now}) {
+    final observedAt = now ?? DateTime.now();
     final until = openedUntil;
     final remaining = until == null
         ? 0
-        : until.difference(DateTime.now()).inMilliseconds.clamp(0, 1 << 31);
+        : until.difference(observedAt).inMilliseconds.clamp(0, 1 << 31);
     return {
-      'state': state,
+      'state': _stateAt(observedAt),
       'requests': requests,
       'successes': successes,
       'failures': failures,
@@ -167,7 +170,7 @@ class SourceNetworkPolicy {
     final bucket = _bucket(key);
     final health = bucket.health;
     health.requests++;
-    final openedUntil = bucket.openedUntil;
+    final openedUntil = health.openedUntil;
     if (openedUntil != null && openedUntil.isAfter(_now())) {
       throw SourceNetworkException(
         kind: SourceNetworkErrorKind.circuitOpen,
@@ -186,7 +189,7 @@ class SourceNetworkPolicy {
         }
       }
       bucket.nextAllowed = _now().add(bucket.config.minInterval);
-      final openedAfterWait = bucket.openedUntil;
+      final openedAfterWait = health.openedUntil;
       if (openedAfterWait != null && openedAfterWait.isAfter(_now())) {
         throw SourceNetworkException(
           kind: SourceNetworkErrorKind.circuitOpen,
@@ -388,7 +391,7 @@ class SourceNetworkPolicy {
     }.contains(kind)) {
       health.consecutiveFailures++;
       if (health.consecutiveFailures >= lease._bucket.config.failureThreshold) {
-        lease._bucket.openedUntil =
+        health.openedUntil =
             _now().add(lease._bucket.config.circuitCooldown);
       }
     } else {
@@ -399,10 +402,13 @@ class SourceNetworkPolicy {
     lease.release();
   }
 
-  Map<String, Object?> diagnosticSummary() => {
-        for (final entry in _buckets.entries)
-          entry.key: entry.value.health.toJson(),
-      };
+  Map<String, Object?> diagnosticSummary() {
+    final now = _now();
+    return {
+      for (final entry in _buckets.entries)
+        entry.key: entry.value.health.toJson(now: now),
+    };
+  }
 
   void reset() {
     _buckets.clear();
@@ -511,7 +517,6 @@ class _SourceBucket {
   SourceNetworkConfig config;
   _AsyncLimiter limiter;
   DateTime nextAllowed = DateTime.fromMillisecondsSinceEpoch(0);
-  DateTime? openedUntil;
   final SourceNetworkHealth health = SourceNetworkHealth();
 }
 
