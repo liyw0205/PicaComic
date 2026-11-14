@@ -205,6 +205,36 @@ void main() {
     expect(File('$dataPath/data-restore/journal.json').existsSync(), isFalse);
   });
 
+  test('rollback does not delete a path created after prepare', () async {
+    final dataPath = '${root.path}/data';
+    final targetPath = '$dataPath/new-settings';
+    final transactionFuture = DataRestoreTransaction.prepare(
+        dataPath, {targetPath: '${root.path}/missing-source'});
+    await expectLater(transactionFuture, throwsA(isA<FormatException>()));
+
+    final target = File(targetPath)..writeAsStringSync('user-created');
+    await recoverPendingDataRestore(dataPath);
+
+    expect(await target.readAsString(), 'user-created');
+    expect(File('$dataPath/data-restore/journal.json').existsSync(), isFalse);
+  });
+
+  test('rollback replay accepts a completed new-target deletion', () async {
+    final dataPath = '${root.path}/data';
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {'$dataPath/settings': replacement.path});
+    transaction.apply();
+    final target = File('$dataPath/settings');
+    await target.delete();
+
+    await recoverPendingDataRestore(dataPath);
+
+    expect(target.existsSync(), isFalse);
+    expect(transaction.journal.existsSync(), isFalse);
+  });
+
   test('rollback preference failure retains journal and retry is idempotent',
       () async {
     final dataPath = '${root.path}/data';

@@ -1090,6 +1090,11 @@ class DataRestoreTransaction {
         final backup = entry['backup'] as String;
         final target = entry['target'] as String;
         final type = FileSystemEntity.typeSync(backup, followLinks: false);
+        final stagedType = FileSystemEntity.typeSync(entry['staged'] as String,
+            followLinks: false);
+        final untouched = state['phase'] == 'prepare' ||
+            (state['phase'] == 'replace' &&
+                stagedType != FileSystemEntityType.notFound);
         if (type != FileSystemEntityType.notFound) {
           // Persist intent before the rename. If the process stops between
           // the rename and this journal update, the backup remains available;
@@ -1105,11 +1110,17 @@ class DataRestoreTransaction {
           else
             File(backup).renameSync(target);
         } else if (entry['existed'] == false) {
+          // A missing original target must not be removed until its staged
+          // replacement has actually moved into place. This matters when a
+          // process dies during prepare and a user creates the path before
+          // the next startup. Persist completion after deletion so a retry
+          // can distinguish a completed removal from an interrupted one.
+          if (untouched) continue;
+          _deleteEntity(target);
           if (entry['restored'] != true) {
             entry['restored'] = true;
             _write();
           }
-          _deleteEntity(target);
         } else if (entry['restored'] != true &&
             FileSystemEntity.typeSync(target, followLinks: false) ==
                 FileSystemEntityType.notFound) {
