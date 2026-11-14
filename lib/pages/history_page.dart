@@ -29,6 +29,7 @@ class _HistoryPageState extends State<HistoryPage> {
   bool searchMode = false;
   String keyword = "";
   bool isModified = false;
+  bool _loadingPage = false;
 
   @override
   void initState() {
@@ -40,6 +41,7 @@ class _HistoryPageState extends State<HistoryPage> {
   void _reload() {
     comics.clear();
     _hasMore = true;
+    _loadingPage = false;
     _totalCount = HistoryManager().count();
     _loadPage();
   }
@@ -55,9 +57,13 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void _onScroll() {
-    if (_hasMore && _scrollController.position.extentAfter < 800) {
-      setState(_loadPage);
-    }
+    if (!mounted || !_hasMore || _loadingPage) return;
+    if (_scrollController.position.extentAfter >= 800) return;
+    _loadingPage = true;
+    setState(_loadPage);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadingPage = false;
+    });
   }
 
   @override
