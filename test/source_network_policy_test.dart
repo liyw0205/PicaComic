@@ -174,4 +174,52 @@ void main() {
     );
     first.release();
   });
+
+  test('a circuit opened for one source does not block another source',
+      () async {
+    var now = DateTime(2026, 1, 1);
+    final policy = SourceNetworkPolicy(now: () => now);
+    policy.configure(
+      'source-a',
+      const SourceNetworkConfig(
+        minInterval: Duration.zero,
+        failureThreshold: 1,
+        circuitCooldown: Duration(minutes: 1),
+      ),
+    );
+    policy.configure(
+      'source-b',
+      const SourceNetworkConfig(
+        minInterval: Duration.zero,
+        failureThreshold: 1,
+      ),
+    );
+    final requestA = RequestOptions(
+      path: 'https://source-a.test',
+      extra: {'sourceKey': 'source-a'},
+    );
+    final requestB = RequestOptions(
+      path: 'https://source-b.test',
+      extra: {'sourceKey': 'source-b'},
+    );
+
+    final failedLease = await policy.beforeRequest(requestA);
+    policy.reportFailure(failedLease, const SocketException('fixture offline'));
+    await expectLater(
+      policy.beforeRequest(requestA),
+      throwsA(isA<SourceNetworkException>().having(
+        (error) => error.kind,
+        'kind',
+        SourceNetworkErrorKind.circuitOpen,
+      )),
+    );
+
+    final healthyLease = await policy.beforeRequest(requestB);
+    policy.reportSuccess(healthyLease);
+    final summary = policy.diagnosticSummary();
+    expect((summary['source-a'] as Map)['state'], 'open');
+    expect((summary['source-b'] as Map)['state'], 'healthy');
+    expect((summary['source-b'] as Map)['successes'], 1);
+    now = now.add(const Duration(minutes: 2));
+  });
 }
