@@ -66,7 +66,11 @@ class FavoriteDownloading extends DownloadingItem {
       }
       manager.downloading.addFirst(logic);
       await updateInfo?.call();
-      if (!_isActiveStart(generation, manager)) return;
+      if (generation != _startGeneration ||
+          !identical(manager.downloading.firstOrNull, logic) ||
+          !manager.isDownloading) {
+        return;
+      }
       logic.start();
     } catch (e, s) {
       if (!_isActiveStart(generation, manager)) return;

@@ -221,7 +221,6 @@ void main() {
   });
 
   test('first start persists the directory before network work', () async {
-    await manager.init();
     final persistedDirectory = Completer<String?>();
     late _TestDownloadingItem item;
     item = _TestDownloadingItem(
@@ -253,7 +252,6 @@ void main() {
 
   test('favorite wrapper persists its assigned directory before replacement',
       () async {
-    await manager.init();
     final loadResult = Completer<DownloadingItem>();
     final replaced = Completer<void>();
     var writes = 0;
