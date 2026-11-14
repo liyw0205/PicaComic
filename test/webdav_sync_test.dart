@@ -6,11 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/foundation/history.dart';
+import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/foundation/secret_store.dart';
 import 'package:pica_comic/network/sync_revision.dart';
 import 'package:pica_comic/network/sync_transport.dart';
 import 'package:pica_comic/network/webdav.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 class _FakeSyncTransport implements SyncTransport {
   _FakeSyncTransport({
@@ -71,6 +74,88 @@ class _FakeSyncTransport implements SyncTransport {
   }
 }
 
+/// A shared remote store lets one test exercise two independent local state
+/// files without depending on an external WebDAV server.
+class _SharedSyncRemote {
+  _SharedSyncRemote({required this.etags});
+
+  final bool etags;
+  final Map<String, List<int>> archives = <String, List<int>>{};
+  final Map<String, String> metadata = <String, String>{};
+  final List<bool> casResults = <bool>[];
+  String? _etag;
+  int _etagVersion = 0;
+  int _pointerReads = 0;
+  bool returnStalePointerOnSecondRead = false;
+
+  List<String> get names => <String>[...archives.keys, ...metadata.keys];
+
+  SyncPointer pointer() {
+    _pointerReads++;
+    if (returnStalePointerOnSecondRead && _pointerReads == 2) {
+      return const SyncPointer('*');
+    }
+    if (!etags) return const SyncPointer(null);
+    return SyncPointer(_etag == null ? '*' : '"$_etag"');
+  }
+
+  bool compareAndSet(SyncPointer previous, String value) {
+    final expected = _etag == null ? '*' : '"$_etag"';
+    final accepted = !etags || previous.etag == expected;
+    casResults.add(accepted);
+    if (!accepted) return false;
+    metadata['sync-head.json'] = value;
+    if (etags) _etag = '${++_etagVersion}';
+    return true;
+  }
+}
+
+class _SharedSyncTransport implements SyncTransport {
+  _SharedSyncTransport(this.remote);
+
+  final _SharedSyncRemote remote;
+  bool closed = false;
+
+  @override
+  Future<bool> compareAndSetPointer(SyncPointer previous, String value) async =>
+      remote.compareAndSet(previous, value);
+
+  @override
+  void close() {
+    closed = true;
+  }
+
+  @override
+  Future<void> download(String name, String destination) async {
+    final bytes = remote.archives[name];
+    if (bytes == null) throw StateError('missing remote archive $name');
+    await File(destination).writeAsBytes(bytes);
+  }
+
+  @override
+  Future<List<String>> list() async => remote.names;
+
+  @override
+  Future<SyncPointer> pointer() async => remote.pointer();
+
+  @override
+  Future<String> readText(String name) async {
+    final value = remote.metadata[name];
+    if (value == null) throw StateError('missing remote metadata $name');
+    return value;
+  }
+
+  @override
+  Future<void> upload(String source, String name) async {
+    remote.archives[name] = await File(source).readAsBytes();
+  }
+
+  @override
+  Future<void> writeText(String name, String value) async {
+    remote.metadata[name] = value;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
@@ -80,6 +165,11 @@ void main() {
     App.dataPath = root.path;
     App.cachePath = root.path;
     SecretStoreRegistry.configure(MemorySecretStore());
+    await LocalFavoritesManager().init(importLegacy: false);
+    await HistoryManager().init(importLegacy: false);
+    final cookies = sqlite3.open('${root.path}/cookies.db');
+    cookies.execute('CREATE TABLE cookies (id TEXT);');
+    cookies.dispose();
   });
 
   setUp(RuntimeMetrics.reset);
@@ -220,6 +310,53 @@ void main() {
       expect(metric.active, 0);
     } finally {
       appdata.settings[45] = previousSetting;
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('stale ETag CAS keeps both client branches observable', () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    final remote = _SharedSyncRemote(etags: true)
+      ..returnStalePointerOnSecondRead = true;
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+
+      expect(await Webdav.uploadData('https://dav.example;;;etag-client-a'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.success);
+
+      // The second client publishes its immutable descriptor, but its stale
+      // pointer cannot replace the first client's head. The graph still
+      // exposes both roots instead of silently selecting one by clock time.
+      expect(await Webdav.uploadData('https://dav.example;;;etag-client-b'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.conflict);
+      expect(remote.archives, hasLength(2));
+      expect(remote.casResults, [true, false]);
+    } finally {
+      appdata.settings[46] = previousVersion;
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('without ETag, graph reread still reports concurrent client branches',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    final remote = _SharedSyncRemote(etags: false);
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+
+      expect(await Webdav.uploadData('https://dav.example;;;no-etag-client-a'),
+          isTrue);
+      expect(await Webdav.uploadData('https://dav.example;;;no-etag-client-b'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.conflict);
+      expect(remote.archives, hasLength(2));
+      expect(remote.casResults, [true, true]);
+    } finally {
+      appdata.settings[46] = previousVersion;
       Webdav.transportFactory = previousFactory;
     }
   });
