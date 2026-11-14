@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-14。代码基线：`40f8c426`，应用版本：`4.2.22+4222`。本文同时覆盖当前工作区尚未提交的 A15-A19 实现；它们需要在标准 Flutter/CI 环境完成回归后再单独提交。
+日期：2026-11-15。代码基线：`f5807a1a`，应用版本：`4.2.37+4237`。本轮已落地 A5、A7、A15 和 A19 的增量改动；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
 
 ## 1. 结论与评估边界
 
@@ -36,16 +36,16 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 | A2 | 异步落盘与导入同步边界 | 已落地，专项回归通过，待真实同步验收 | 避免假成功、反向上传和局部状态外传 | 2-3 人日 | 中高 |
 | A3 | 阅读器失败重试与任务释放 | 已落地，专项回归通过 | 修正失败预加载标记，减少无效工作 | 1-2 人日 | 中 |
 | A4 | 旧数据迁移收尾 | 已落地，专项回归通过，待设备验收 | 保留旧账号与 Cookie 原有语义 | 1-2 人日 | 中 |
-| A5 | 收藏/历史的数据正确性与查询 | P1/P2 | 避免漏收藏和部分迁移，改善大数据查询 | 3-5 人日 | 中 |
+| A5 | 收藏/历史的数据正确性与查询 | 查询边界已落地，性能测量待完成 | 避免漏收藏和部分迁移，改善大数据查询 | 3-5 人日 | 中 |
 | A6 | WebDAV 多设备版本协议 | 已实现，待真实 WebDAV 双客户端验收 | 避免同名覆盖和静默冲突 | 3-5 人日 | 高 |
-| A7 | 图片内存与原生网络资源 | 缩略图已落地，待测量 | 控制大图和并发任务的内存峰值 | 3-5 人日 | 中高 |
+| A7 | 图片内存与原生网络资源 | 缩略图、任务指标和 Android PSS 采样已落地，待设备测量 | 控制大图和并发任务的内存峰值 | 3-5 人日 | 中高 |
 | A8 | 设置校验与可恢复启动 | 已落地，专项回归通过，待设备测量 | 降低坏配置影响，缩短首屏等待 | 2-4 人日 | 中 |
 | A9 | 测试基线与可复现构建 | 基线已落地，native curl 已回归，待产物验收 | 让修复可回归、产物能力可核对 | 2-3 人日 | 低中 |
-| A15 | StateController 生命周期与通知成本 | 已实现，待 Widget/重复进出验收 | 避免监听器泄漏和无效通知 | 1-2 人日 | 中 |
+| A15 | StateController 生命周期与通知成本 | 已实现实例级清理、tag/id 重绑和 Widget 回归，待标准 runner 验收 | 避免监听器泄漏和无效通知 | 1-2 人日 | 中 |
 | A16 | UI 异步 I/O 与原子文件写入 | 已实现，待跨平台故障验收 | 降低首帧阻塞和半写文件风险 | 2-3 人日 | 中 |
 | A17 | PDF/分享流水线 | 已实现，专项测试待标准 Flutter runner 重跑 | 大文件导出不阻塞 UI，取消不破坏旧文件 | 2-4 人日 | 中 |
 | A18 | 缓存与下载目录维护 | 已落地，专项回归通过，待设备和中断验收 | 降低维护阻塞，迁移可恢复 | 2-3 人日 | 中 |
-| A19 | 来源网络策略 | 已实现，待来源 fixture 和设备网络验收 | 统一取消、限流、退避、熔断和错误分类 | 2-4 人日 | 中高 |
+| A19 | 来源网络策略 | 已实现并补充超时 fixture，待标准 runner 和设备网络验收 | 统一取消、限流、退避、熔断和错误分类 | 2-4 人日 | 中高 |
 
 ## 3. 具体方案
 
@@ -132,7 +132,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 ### A5. 先保证收藏/历史正确，再优化大数据查询
 
-**当前状态：** 收藏/历史主键、参数绑定、事务迁移、稳定排序分页和搜索限制已落地；数据库正确性与 1,000/10,000/50,000 行性能专项共 20 项已通过。真实设备主线程占用和更大数据集仍需测量。
+**当前状态：** 收藏/历史主键、参数绑定、事务迁移、稳定排序分页和搜索限制已落地；本轮统一历史关键词的 trim/lowercase 语义，并补充空白关键词分页回归。既有数据库正确性与 1,000/10,000/50,000 行性能专项共 20 项通过记录保留；真实设备主线程占用和更大数据集仍需测量。
 
 **P1 正确性依据：**
 
@@ -169,7 +169,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 ### A7. 测量并控制图片和原生网络的峰值资源
 
-**当前状态：** 普通封面与自定义封面已使用按布局尺寸和 DPR 计算的 `cacheWidth/cacheHeight`；内存压力会清理原始字节 LRU、Flutter image cache 和 live images。图片任务已接入 `RuntimeMetrics`，记录活动数、并发峰值、取消和完成耗时；原生 curl 也记录活动数、并发峰值、取消/失败和响应字节。阅读器原图路径保持不变。尚未有固定设备上的 RSS/PSS、首图 p95、取消延迟和原生并发基线，因此暂不承诺百分比收益。
+**当前状态：** 普通封面与自定义封面已使用按布局尺寸和 DPR 计算的 `cacheWidth/cacheHeight`；内存压力会清理原始字节 LRU、Flutter image cache 和 live images。图片任务已接入 `RuntimeMetrics`，记录活动数、并发峰值、取消和完成耗时；原生 curl 也记录活动数、并发峰值、取消/失败和响应字节。新增 Android `Debug.MemoryInfo` PSS/private dirty/native/dalvik 采样，并通过 `RuntimeMetrics.diagnosticSummaryWithMemory()` 提供显式诊断出口；阅读器原图路径保持不变。尚未有固定设备上的 RSS/PSS、首图 p95、取消延迟和原生并发基线，因此暂不承诺百分比收益。
 
 **依据：**Flutter 解码缓存上限为 200 MiB，见 `lib/main.dart:161`；原始字节 LRU 平时为 50 MiB，进入阅读器升至 100 MiB，见 `lib/foundation/image_loader/base_image_provider.dart:120` 和 `lib/pages/reader/comic_reading_page.dart:217`。原生单响应上限为 64 MiB，且通过 JNI 完整返回字节；见 `android/app/src/main/cpp/pica_curl.c:79`、`:410`。这些不是进程总内存上限，不能相加作为 RSS。
 
@@ -248,7 +248,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 | 检查 | 本轮结果 | 能证明的范围 |
 | --- | --- | --- |
-| Git 与版本核对 | HEAD 为 `40f8c426`，版本 `4.2.20+4220`；工作区包含迁移、启动、阅读器、数据库和工具链改动及专项测试 | 方案基线及与旧文档的差异 |
+| Git 与版本核对 | 本轮基线为 `f5807a1a`、版本 `4.2.37+4237`；工作区包含 A5/A7/A15/A19 改动及专项测试，发布后递增到 `4.2.38+4238` | 方案基线及本轮交付范围 |
 | `flutter --version` | Flutter 3.44.0 / Dart 3.12.2 | 本机工具版本 |
 | `flutter pub get` | 成功；新增 `flutter_secure_storage 9.2.4` 及平台实现并写入 lockfile | 依赖可解析；不替代各平台插件构建 |
 | Analyzer baseline | `bash tool/check-analyzer-baseline.sh` 通过：errors=0/0、warnings=0/0；存量提示仍保留在 baseline | 新增 error/warning 被阻断；不替代设备构建 |
@@ -256,6 +256,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 | Native curl 回归 | `test/native_curl/executor.sh` 通过；`test/native_curl/run.sh` 通过 6 项 JNI 检查 | 覆盖本机 executor 与 JNI 回归；不替代各 ABI APK 验收 |
 | 下载/WebDAV 定向分析 | `dart analyze` 目标源码与新增下载/WebDAV 测试无 error/warning；仅保留既有 info | 证明类型和接口可编译；不替代 Flutter runner 的行为测试 |
 | A17/A19 定向分析 | PDF 导出、来源网络策略及 WebDAV revision 测试源码 `dart analyze` 无 issue；新增 Flutter 用例尚未执行 | 证明 API、错误分类、取消和协议图可编译；行为仍需标准 Flutter runner、真实网络和设备验收 |
+| A5/A7/A15/A19 定向分析 | `dart format`、目标 `dart analyze` 和 `git diff --check` 通过；新增内存结构校验、历史空白搜索、重复 tag/tag 重绑及超时 fixture | 证明本轮 Dart API、边界校验和测试代码可编译；Flutter runner、Android 编译和设备行为仍需 CI 验收 |
 | 异步边界扫描 | `lib/` 声明级扫描为 64 个 `void ... async`、171 个 `Future<void> ... async`、52 个同步 I/O 命中 | 仅用于跟踪入口数量；必须结合生命周期和错误传播审查 |
 | 全量 Flutter 测试 | 上一轮记录为 147 项通过；本轮依赖更新后重跑受 Termux Flutter kernel/`impellerc` 环境阻塞 | 上一轮覆盖当前离线 Flutter 测试集；本轮需在标准 Linux/CI 重跑 |
 | Android Gradle/Kotlin | `:app:compileDebugKotlin` 触发 Flutter kernel SDK hash mismatch；使用缓存 Flutter 时又因 Termux ELF interpreter 不可执行失败 | 当前环境阻塞，需标准 Linux/CI runner 重跑；不修改业务逻辑规避 |
@@ -374,7 +375,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 ### A15. 收紧 StateController 的生命周期与通知成本（P1）
 
-**当前状态：** 已新增订阅 token/disposer；`StateBuilder.dispose` 会移除自身监听，控制器销毁时清空 updater，并在更新过程中跳过已注销监听。目标源码分析和差异检查已通过；标准 Flutter runner 仍需覆盖重复进出页面、重复 tag 和自注销场景。
+**当前状态：** 已新增订阅 token/disposer；`StateBuilder.dispose` 会移除自身监听，控制器销毁时清空 updater，并在更新过程中跳过已注销监听。清理改为按具体 controller 实例执行，避免重复 tag 时误删其他实例；tag/id 更新会解绑并重新订阅，新增重复 tag 和 tag 重绑 Widget 回归。目标源码分析和差异检查已通过；标准 Flutter runner 仍需覆盖重复进出页面和自注销场景。
 
 **历史触发原因（已处理）：**
 
@@ -422,7 +423,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 | --- | --- | --- | --- |
 | A17 PDF/分享流水线 | `lib/tools/pdf.dart` 已改为异步枚举/按页读取，支持取消、进度、隔离执行、原子替换和 `RuntimeMetrics`；`pdf.save()` 受第三方 API 限制仍一次性编码 | 标准 runner 验证封面/章节语义、500/2,000 页、超大图片、取消响应、空间不足和最终文件可打开性 | P1（大图/长篇用户） |
 | A18 缓存与下载目录维护 | 已接入 `directory_maintenance.dart`：异步分批清理、容量统计、SHA-256 校验、staging 目录和迁移 journal；`cache_auto_clear.dart` 已改为使用该维护入口 | 固定设备性能、剩余空间不足、进程中断恢复和跨平台目录替换验收 | P2 |
-| A19 来源网络策略 | `SourceNetworkPolicy` 已接入 `AppHttpAdapter` 和 JS source 请求，提供每来源/host 并发、间隔、响应体上限、GET/HEAD 重试、429 退避、熔断、错误分类和诊断计数；非幂等请求不自动重放 | 为内置来源补脱敏 fixture，验证 429/403/超时/取消/错误 JSON；在真实网络下确认取消、代理和原生 curl 路径的一致性 | P1（网络错误频发时升 P0） |
+| A19 来源网络策略 | `SourceNetworkPolicy` 已接入 `AppHttpAdapter` 和 JS source 请求，提供每来源/host 并发、间隔、响应体上限、GET/HEAD 重试、429 退避、熔断、错误分类和诊断计数；非幂等请求不自动重放；本轮补充 `TimeoutException` fixture | 为内置来源补脱敏 fixture，验证 429/403/超时/取消/错误 JSON；在真实网络下确认取消、代理和原生 curl 路径的一致性 | P1（网络错误频发时升 P0） |
 
 ### A17-A19 验收与交付
 
