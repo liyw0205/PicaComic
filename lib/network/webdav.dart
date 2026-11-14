@@ -375,8 +375,16 @@ class Webdav {
         await _saveState(configs, state);
       }
       final revisions = await _revisions(transport);
-      final previousPointer = await transport.pointer();
       final parents = List<String>.from(state['heads'] as List);
+      final remoteIds = revisions.map((revision) => revision.id).toSet();
+      if (parents.any((parent) => !remoteIds.contains(parent))) {
+        // Do not publish a child whose ancestry is already missing remotely.
+        // This commonly follows an interrupted upload or server-side archive
+        // retention; emitting it would leave an orphan descriptor that blocks
+        // every later graph validation.
+        throw StateError('Local sync parent is missing remotely');
+      }
+      final previousPointer = await transport.pointer();
       final id = const Uuid().v4();
       final metadata = <String, Object?>{
         'id': id,

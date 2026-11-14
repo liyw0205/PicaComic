@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
@@ -23,6 +25,7 @@ class _FakeSyncTransport implements SyncTransport {
   final List<String> names = <String>[];
   final Map<String, String> text = <String, String>{};
   final List<String> downloads = <String>[];
+  final List<String> uploads = <String>[];
   final List<SyncPointer> pointerWrites = <SyncPointer>[];
   bool closed = false;
 
@@ -55,7 +58,9 @@ class _FakeSyncTransport implements SyncTransport {
   Future<SyncPointer> pointer() async => pointerValue;
 
   @override
-  Future<void> upload(String source, String name) async {}
+  Future<void> upload(String source, String name) async {
+    uploads.add(name);
+  }
 
   @override
   Future<String> readText(String name) async => text[name]!;
@@ -146,6 +151,37 @@ void main() {
               .where((file) => file.path.contains('sync-'))
               .length,
           greaterThan(stateFilesBefore));
+    } finally {
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('stale local parent is rejected before publishing an orphan revision',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    const config = 'https://dav.example;;;/stale-parent';
+    final values = config.split(';');
+    final stateKey = sha256
+        .convert(utf8.encode('${values[0]};${values[1]};${values[3]}'))
+        .toString();
+    final stateFile = File('${root.path}/sync-$stateKey.json')
+      ..writeAsStringSync(jsonEncode({
+        'device': 'device-local',
+        'heads': ['missing-parent']
+      }));
+    final transport = _FakeSyncTransport();
+    try {
+      Webdav.transportFactory = (_) => transport;
+
+      expect(await Webdav.uploadData(config), isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
+      expect(transport.uploads, isEmpty);
+      expect(
+          await stateFile.readAsString(),
+          jsonEncode({
+            'device': 'device-local',
+            'heads': ['missing-parent']
+          }));
     } finally {
       Webdav.transportFactory = previousFactory;
     }
