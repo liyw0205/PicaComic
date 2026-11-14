@@ -293,58 +293,74 @@ class DownloadManager with _DownloadDb implements Listenable {
     final temporarySnapshot = await _readQueueSnapshot(temporary);
     final backupSnapshot = await _readQueueSnapshot(backup);
 
-    if (targetSnapshot != null) {
-      // A valid .tmp may have been fully flushed before the process stopped,
-      // but before the rename. Compare generations instead of discarding it.
-      if (temporarySnapshot != null &&
-          _generationOf(temporarySnapshot) > _generationOf(targetSnapshot)) {
-        await _moveQueueFileAside(target, 'stale');
-        await temporary.rename(target.path);
-      } else if (await temporary.exists()) {
-        await _moveQueueFileAside(
-          temporary,
-          temporarySnapshot == null ? 'corrupt' : 'stale',
-        );
+    final candidates = <String, Map<String, dynamic>?>{
+      'target': targetSnapshot,
+      'temporary': temporarySnapshot,
+      'backup': backupSnapshot,
+    };
+    String? winner;
+    for (final entry in candidates.entries) {
+      final snapshot = entry.value;
+      if (snapshot == null) continue;
+      if (winner == null) {
+        winner = entry.key;
+        continue;
+      }
+      final current = candidates[winner]!;
+      final generation = _generationOf(snapshot);
+      final currentGeneration = _generationOf(current);
+      // A committed target wins ties; otherwise prefer .tmp over .bak because
+      // the temporary file is written immediately before replacement.
+      final winsTie =
+          (generation == currentGeneration && entry.key == 'target') ||
+              (generation == currentGeneration &&
+                  entry.key == 'temporary' &&
+                  winner == 'backup');
+      if (generation > currentGeneration || winsTie) winner = entry.key;
+    }
+
+    if (winner == null) {
+      // Keep incomplete candidates as evidence for diagnostics and manual
+      // recovery instead of silently deleting them.
+      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
+      if (await temporary.exists()) {
+        await _moveQueueFileAside(temporary, 'corrupt');
       }
       if (await backup.exists()) {
-        if (backupSnapshot == null) {
-          await _moveQueueFileAside(backup, 'corrupt');
-        } else {
-          await backup.delete();
-        }
+        await _moveQueueFileAside(backup, 'corrupt');
       }
       return;
     }
 
-    // A complete temporary snapshot is newer than the previous backup. This
-    // is the expected state after the target was moved aside but before the
-    // temporary file was renamed into place.
-    if (temporarySnapshot != null) {
-      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
-      await temporary.rename(target.path);
-      if (await backup.exists()) {
-        if (backupSnapshot == null) {
-          await _moveQueueFileAside(backup, 'corrupt');
-        } else {
-          await backup.delete();
-        }
-      }
+    if (winner == 'target') {
+      await _discardQueueCandidate(temporary, temporarySnapshot);
+      await _discardQueueCandidate(backup, backupSnapshot);
       return;
     }
 
-    if (backupSnapshot != null) {
-      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
-      await backup.rename(target.path);
-      return;
+    final winnerFile = winner == 'temporary' ? temporary : backup;
+    if (await target.exists()) {
+      await _moveQueueFileAside(
+        target,
+        targetSnapshot == null ? 'corrupt' : 'stale',
+      );
     }
+    await winnerFile.rename(target.path);
+    if (winner != 'temporary') {
+      await _discardQueueCandidate(temporary, temporarySnapshot);
+    }
+    if (winner != 'backup') {
+      await _discardQueueCandidate(backup, backupSnapshot);
+    }
+  }
 
-    // Keep incomplete candidates as evidence for diagnostics and manual
-    // recovery instead of silently deleting them.
-    if (await temporary.exists()) {
-      await _moveQueueFileAside(temporary, 'corrupt');
-    }
-    if (await backup.exists()) {
-      await _moveQueueFileAside(backup, 'corrupt');
+  Future<void> _discardQueueCandidate(
+      File file, Map<String, dynamic>? snapshot) async {
+    if (!await file.exists()) return;
+    if (snapshot == null) {
+      await _moveQueueFileAside(file, 'corrupt');
+    } else {
+      await file.delete();
     }
   }
 
