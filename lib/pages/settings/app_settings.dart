@@ -1003,11 +1003,13 @@ void importDataSetting(BuildContext context) {
                   onPressed: () {
                     App.globalBack();
                     var dialog = showLoadingDialog(context, allowCancel: false);
-                    importData().then((v) {
+                    importDataResult(null).then((result) {
                       dialog.close();
-                      if (v) {
+                      if (result == DataImportResult.imported) {
                         showToast(message: "成功导入".tl);
-                      } else {
+                      } else if (result == DataImportResult.skipped) {
+                        showToast(message: "无需导入".tl);
+                      } else if (result == DataImportResult.failed) {
                         showToast(message: "导入失败".tl);
                       }
                     });
