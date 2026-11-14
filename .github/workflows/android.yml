@@ -121,8 +121,8 @@ jobs:
           while IFS= read -r apk; do
             found=1
             actual="$("$apksigner" verify --print-certs "$apk" 2>&1 |
-              awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' |
-              tr -d ':' | tr '[:lower:]' '[:upper:]')"
+              grep -Eio '([0-9a-f]{2}:){31}[0-9a-f]{2}|[0-9a-f]{64}' |
+              head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
             test -n "$actual"
             if [[ "$actual" != "$expected" ]]; then
               echo "Unexpected signing certificate in $apk" >&2

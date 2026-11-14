@@ -112,8 +112,8 @@ mkdir -p "$(dirname "$output")"
     fi
 
     signer="$("$apksigner" verify --print-certs "$apk" 2>&1 |
-      sed -n 's/.*Signer #1 certificate SHA-256 digest:[[:space:]]*//p' |
-      head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+      { grep -Eio '([0-9a-f]{2}:){31}[0-9a-f]{2}|[0-9a-f]{64}' || true; } |
+      head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
     if [[ ! "$signer" =~ ^[A-F0-9]{64}$ ]]; then
       echo "Unable to read signer SHA-256 for $apk" >&2
       exit 1
