@@ -91,4 +91,71 @@ void main() {
     expect(controller.isDisposed, isTrue);
     expect(controller.stateUpdaters, isEmpty);
   });
+
+  testWidgets('StateBuilder removes its own controller for duplicate tags',
+      (tester) async {
+    final first = _TestController();
+    final second = _TestController();
+
+    await tester.pumpWidget(Column(
+      children: [
+        StateBuilder<_TestController>(
+          key: const ValueKey('first'),
+          init: first,
+          tag: 'duplicate-tag',
+          builder: (_) => const SizedBox.shrink(),
+        ),
+        StateBuilder<_TestController>(
+          key: const ValueKey('second'),
+          init: second,
+          tag: 'duplicate-tag',
+          builder: (_) => const SizedBox.shrink(),
+        ),
+      ],
+    ));
+
+    await tester.pumpWidget(Column(
+      children: [
+        StateBuilder<_TestController>(
+          key: const ValueKey('second'),
+          init: second,
+          tag: 'duplicate-tag',
+          builder: (_) => const SizedBox.shrink(),
+        ),
+      ],
+    ));
+
+    expect(first.isDisposed, isTrue);
+    expect(second.isDisposed, isFalse);
+    expect(StateController.findAll<_TestController>(tag: 'duplicate-tag'),
+        [second]);
+    StateController.remove<_TestController>('duplicate-tag');
+  });
+
+  testWidgets('StateBuilder rebinds when its tag changes', (tester) async {
+    final first = _TestController();
+    final second = _TestController();
+
+    await tester.pumpWidget(StateBuilder<_TestController>(
+      init: first,
+      tag: 'first-tag',
+      builder: (_) => const SizedBox.shrink(),
+    ));
+
+    await tester.pumpWidget(StateBuilder<_TestController>(
+      init: second,
+      tag: 'second-tag',
+      builder: (_) => const SizedBox.shrink(),
+    ));
+
+    expect(first.isDisposed, isTrue);
+    expect(second.isDisposed, isFalse);
+    expect(
+      StateController.find<_TestController>(tag: 'second-tag'),
+      same(second),
+    );
+    expect(
+        StateController.findOrNull<_TestController>(tag: 'first-tag'), isNull);
+    StateController.remove<_TestController>('second-tag');
+  });
 }

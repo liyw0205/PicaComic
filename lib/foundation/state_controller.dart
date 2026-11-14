@@ -75,6 +75,26 @@ abstract class StateController {
     }
   }
 
+  /// Removes a specific registration instead of whichever registration happens
+  /// to be last for a type/tag pair. This matters when two StateBuilders own
+  /// controllers with the same tag and one of them is unmounted first.
+  static void _removeControllerInstance(StateController controller,
+      {bool check = false}) {
+    for (int i = _controllers.length - 1; i >= 0; i--) {
+      final element = _controllers[i];
+      if (!identical(element.controller, controller) ||
+          (check && !element.autoRemove)) {
+        continue;
+      }
+      _controllers.removeAt(i);
+      if (!_controllers.any(
+          (candidate) => identical(candidate.controller, element.controller))) {
+        element.controller.dispose();
+      }
+      return;
+    }
+  }
+
   static SimpleController putSimpleController(
       void Function() onUpdate, Object? tag,
       {void Function()? refresh}) {
@@ -196,9 +216,19 @@ class StateBuilder<T extends StateController> extends StatefulWidget {
 class _StateBuilderState<T extends StateController>
     extends State<StateBuilder> {
   late T controller;
+  late bool _ownsController;
+
+  void _subscribe() {
+    _subscription = controller.subscribe(() {
+      if (mounted) {
+        setState(() {});
+      }
+    }, id: widget.id);
+  }
 
   @override
   void initState() {
+    _ownsController = widget.init != null;
     if (widget.init != null) {
       StateController.put(widget.init!, tag: widget.tag, autoRemove: true);
     }
@@ -207,16 +237,43 @@ class _StateBuilderState<T extends StateController>
     } catch (e) {
       throw "Controller Not Found";
     }
-    _subscription = controller.subscribe(() {
-      if (mounted) {
-        setState(() {});
-      }
-    }, id: widget.id);
+    _subscribe();
     widget.initStateWrapped(controller);
     super.initState();
   }
 
-  late final StateControllerSubscription _subscription;
+  late StateControllerSubscription _subscription;
+
+  @override
+  void didUpdateWidget(covariant StateBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.tag == oldWidget.tag && widget.id == oldWidget.id) {
+      return;
+    }
+
+    final oldController = controller;
+    final oldOwnsController = _ownsController;
+    _subscription.dispose();
+
+    if (widget.tag != oldWidget.tag) {
+      if (oldOwnsController) {
+        StateController._removeControllerInstance(oldController, check: true);
+      }
+      _ownsController = widget.init != null;
+      if (widget.init != null) {
+        StateController.put(widget.init!, tag: widget.tag, autoRemove: true);
+      }
+      try {
+        controller = StateController.find<T>(tag: widget.tag);
+      } catch (e) {
+        throw "Controller Not Found";
+      }
+      _subscribe();
+      widget.initStateWrapped(controller);
+      return;
+    }
+    _subscribe();
+  }
 
   @override
   void dispose() {
@@ -224,7 +281,9 @@ class _StateBuilderState<T extends StateController>
     try {
       widget.disposeWrapped(controller);
     } finally {
-      StateController.remove<T>(widget.tag, true);
+      if (_ownsController) {
+        StateController._removeControllerInstance(controller, check: true);
+      }
       super.dispose();
     }
   }
