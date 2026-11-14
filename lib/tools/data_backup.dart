@@ -701,6 +701,80 @@ Future<String> _canonicalRestoreRoot(String root) async {
   }
 }
 
+String _canonicalRestoreRootSync(String root) {
+  if (!File(root).isAbsolute) {
+    throw const FormatException('Invalid restore root');
+  }
+
+  var cursor = Directory(root);
+  final missing = <String>[];
+  while (true) {
+    final type = FileSystemEntity.typeSync(cursor.path, followLinks: false);
+    if (type != FileSystemEntityType.notFound) {
+      if (type != FileSystemEntityType.directory) {
+        throw const FormatException('Invalid restore root');
+      }
+      var resolved = cursor.resolveSymbolicLinksSync();
+      for (final part in missing.reversed) {
+        resolved = '$resolved${Platform.pathSeparator}$part';
+      }
+      return resolved;
+    }
+    final parent = cursor.parent;
+    if (parent.path == cursor.path) {
+      throw const FormatException('Invalid restore root');
+    }
+    final segments = cursor.uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (segments.isEmpty) throw const FormatException('Invalid restore root');
+    missing.add(segments.last);
+    cursor = parent;
+  }
+}
+
+/// Checks a journal artifact against the current canonical restore roots.
+/// `allowedRoots` must have already passed the journal root identity check.
+bool _isSafeRestorePathSync(String dataPath, String target,
+    {Iterable<String> allowedRoots = const []}) {
+  if (!File(target).isAbsolute ||
+      target.contains('\u0000') ||
+      target
+          .replaceAll('\\', '/')
+          .split('/')
+          .any((part) => part == '.' || part == '..')) {
+    return false;
+  }
+  final roots = <String>[Directory(dataPath).resolveSymbolicLinksSync()]
+    ..addAll(allowedRoots);
+  final type = FileSystemEntity.typeSync(target, followLinks: false);
+  if (type == FileSystemEntityType.link) return false;
+  if (type != FileSystemEntityType.notFound) {
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      return false;
+    }
+    final resolved = type == FileSystemEntityType.directory
+        ? Directory(target).resolveSymbolicLinksSync()
+        : File(target).resolveSymbolicLinksSync();
+    return roots.any((root) => _isRestorePathWithin(root, resolved));
+  }
+  if (roots.any((root) => _isRestorePathWithin(root, target))) return true;
+  var ancestor = File(target).parent;
+  while (true) {
+    final ancestorType =
+        FileSystemEntity.typeSync(ancestor.path, followLinks: false);
+    if (ancestorType != FileSystemEntityType.notFound) {
+      if (ancestorType != FileSystemEntityType.directory) return false;
+      final resolved = ancestor.resolveSymbolicLinksSync();
+      return roots.any((root) => _isRestorePathWithin(root, resolved));
+    }
+    final parent = ancestor.parent;
+    if (parent.path == ancestor.path) return false;
+    ancestor = parent;
+  }
+}
+
 Future<List<String>> _canonicalRestoreRoots(Iterable<String> roots) async {
   final result = <String>[];
   for (final root in roots) {
@@ -776,6 +850,34 @@ class DataRestoreTransaction {
   final Map<String, dynamic> state;
   DataRestoreTransaction._(this.journal, this.state);
 
+  List<String> _validateRestoreRootIdentity() {
+    final persisted = state['allowedRoots'];
+    if (persisted == null) return const [];
+    if (persisted is! List || persisted.any((root) => root is! String)) {
+      throw const FormatException('Invalid restore roots');
+    }
+    final roots = <String>[];
+    for (final root in persisted.cast<String>()) {
+      final canonical = _canonicalRestoreRootSync(root);
+      if (_normaliseRestorePath(canonical) != _normaliseRestorePath(root)) {
+        throw const FormatException('Restore root changed before recovery');
+      }
+      roots.add(canonical);
+    }
+    return roots;
+  }
+
+  void _validateEntryBoundaries(Map entry, List<String> allowedRoots) {
+    final dataPath = journal.parent.parent.path;
+    for (final key in const ['target', 'staged', 'backup']) {
+      final path = entry[key];
+      if (path is! String ||
+          !_isSafeRestorePathSync(dataPath, path, allowedRoots: allowedRoots)) {
+        throw const FormatException('Restore path changed before operation');
+      }
+    }
+  }
+
   static Future<DataRestoreTransaction> prepare(
       String dataPath, Map<String, String> replacements,
       {Iterable<String> allowedRoots = const []}) async {
@@ -844,11 +946,13 @@ class DataRestoreTransaction {
 
   void apply({void Function(int)? afterReplace}) {
     final entries = (state['entries'] as List).cast<Map>();
+    final allowedRoots = _validateRestoreRootIdentity();
     // Validate every artifact before moving the first target. This keeps a
     // concurrently planted link or an overlapping target from turning a
     // partially-applied restore into an unsafe replacement.
     for (final entry in entries) {
       _validateRestoreEntryArtifacts(entry);
+      _validateEntryBoundaries(entry, allowedRoots);
       final target = entry['target'] as String;
       final existed = entry['existed'] == true;
       final targetType = FileSystemEntity.typeSync(target, followLinks: false);
@@ -910,8 +1014,10 @@ class DataRestoreTransaction {
 
   Future<void> recover() async {
     final entries = (state['entries'] as List).cast<Map>();
+    final allowedRoots = _validateRestoreRootIdentity();
     for (final entry in entries) {
       _validateRestoreEntryArtifacts(entry);
+      _validateEntryBoundaries(entry, allowedRoots);
       if (entry['existed'] == false &&
           FileSystemEntity.typeSync(entry['backup'] as String,
                   followLinks: false) !=

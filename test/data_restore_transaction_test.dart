@@ -421,6 +421,85 @@ void main() {
     expect(transaction.journal.existsSync(), isTrue);
   });
 
+  test('recovery rejects external roots that differ from current config',
+      () async {
+    final dataPath = '${root.path}/data';
+    final journalRoot = Directory('${root.path}/configured-downloads')
+      ..createSync();
+    final otherRoot = Directory('${root.path}/other-downloads')..createSync();
+    final target = File('${journalRoot.path}/settings')
+      ..writeAsStringSync('old');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path},
+        allowedRoots: [journalRoot.path]);
+    transaction.apply();
+
+    await expectLater(
+        recoverPendingDataRestore(dataPath,
+            trustedAllowedRoots: [otherRoot.path]),
+        throwsA(isA<FormatException>()));
+    expect(await target.readAsString(), 'new');
+    expect(transaction.journal.existsSync(), isTrue);
+  });
+
+  test('apply rejects an external root replaced by a symlink', () async {
+    final dataPath = '${root.path}/data';
+    final configuredRoot = Directory('${root.path}/configured-downloads')
+      ..createSync();
+    final originalRoot = Directory('${root.path}/original-downloads');
+    final attackerRoot = Directory('${root.path}/attacker')..createSync();
+    final target = File('${configuredRoot.path}/settings')
+      ..writeAsStringSync('old');
+    final attackerTarget = File('${attackerRoot.path}/settings')
+      ..writeAsStringSync('old-attacker');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path},
+        allowedRoots: [configuredRoot.path]);
+
+    await configuredRoot.rename(originalRoot.path);
+    await Link(configuredRoot.path).create(attackerRoot.path);
+    await expectLater(
+        () => transaction.apply(), throwsA(isA<FormatException>()));
+    expect(await attackerTarget.readAsString(), 'old-attacker');
+    expect(transaction.journal.existsSync(), isTrue);
+
+    await Link(configuredRoot.path).delete();
+    await originalRoot.rename(configuredRoot.path);
+    await transaction.recover();
+  });
+
+  test('recovery rejects an external root replaced by a symlink', () async {
+    final dataPath = '${root.path}/data';
+    final configuredRoot = Directory('${root.path}/configured-downloads')
+      ..createSync();
+    final originalRoot = Directory('${root.path}/original-downloads');
+    final attackerRoot = Directory('${root.path}/attacker')..createSync();
+    final target = File('${configuredRoot.path}/settings')
+      ..writeAsStringSync('old');
+    final attackerTarget = File('${attackerRoot.path}/settings')
+      ..writeAsStringSync('old-attacker');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path},
+        allowedRoots: [configuredRoot.path]);
+    transaction.apply();
+
+    await configuredRoot.rename(originalRoot.path);
+    await Link(configuredRoot.path).create(attackerRoot.path);
+    await expectLater(transaction.recover(), throwsA(isA<FormatException>()));
+    expect(await attackerTarget.readAsString(), 'old-attacker');
+    expect(transaction.journal.existsSync(), isTrue);
+
+    await Link(configuredRoot.path).delete();
+    await originalRoot.rename(configuredRoot.path);
+    await transaction.recover();
+  });
+
   test('recovery cleans a committed journal after external root removal',
       () async {
     final dataPath = '${root.path}/data';
