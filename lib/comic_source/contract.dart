@@ -86,7 +86,8 @@ class ComicSourceContract {
           'missing-file-path', 'source file path is empty'));
     }
     if (source.searchPageData != null &&
-        source.searchPageData!.loadPage == null) {
+        source.searchPageData!.loadPage == null &&
+        source.searchPageData!.overrideSearchResultBuilder == null) {
       violations.add(const ComicSourceContractViolation(
           'missing-search-loader', 'search metadata has no page loader'));
     }
@@ -220,7 +221,9 @@ class ComicSourceContract {
           } else {
             for (var index = 0; index < images.length; index++) {
               final image = images[index].trim();
-              if (image.isEmpty || Uri.tryParse(image) == null) {
+              if (image.isEmpty ||
+                  _hasWhitespace(image) ||
+                  Uri.tryParse(image) == null) {
                 violations.add(ComicSourceContractViolation(
                     'image-url-invalid', 'image $index is not a valid URL'));
               }
@@ -282,7 +285,9 @@ class ComicSourceContract {
     });
     detail.thumbnails?.asMap().forEach((index, thumbnail) {
       final value = thumbnail.trim();
-      if (value.isEmpty || Uri.tryParse(value) == null) {
+      if (value.isEmpty ||
+          _hasWhitespace(value) ||
+          Uri.tryParse(value) == null) {
         violations.add(ComicSourceContractViolation(
             'thumbnail-url-invalid', 'thumbnail $index is not a valid URL'));
       }
@@ -348,4 +353,6 @@ class ComicSourceContract {
     }
     return SourceNetworkErrorKind.unknown;
   }
+
+  static bool _hasWhitespace(String value) => RegExp(r'\s').hasMatch(value);
 }

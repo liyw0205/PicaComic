@@ -163,6 +163,30 @@ void main() {
     );
   });
 
+  test('a newer backup supersedes an older temporary snapshot', () async {
+    await getQueueFile().writeAsString('{"version":1');
+    await getQueueFile('.tmp').writeAsString(
+      jsonEncode(committedQueue([fixtureTask('temporary')], 20)),
+    );
+    await getQueueFile('.bak').writeAsString(
+      jsonEncode(committedQueue([fixtureTask('backup')], 21)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading.single.id, 'backup');
+    expect(jsonDecode(await getQueueFile().readAsString())['generation'], 21);
+    expect(await getQueueFile('.tmp').exists(), isFalse);
+    expect(await getQueueFile('.bak').exists(), isFalse);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+  });
+
   test('a malformed temporary snapshot is preserved when target is valid',
       () async {
     await getQueueFile().writeAsString(jsonEncode(committedQueue([], 10)));
@@ -176,7 +200,7 @@ void main() {
       directory
           .listSync()
           .whereType<File>()
-          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+          .where((file) => file.path.contains('newDownload.json.tmp.corrupt.')),
       hasLength(1),
     );
   });
