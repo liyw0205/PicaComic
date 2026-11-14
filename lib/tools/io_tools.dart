@@ -594,6 +594,10 @@ Future<DataImportResult> importDataResult(String? filePath,
 }
 
 Future<void> saveLog(String log) async {
+  // Keep this boundary defensive: callers outside LogsPage may still pass a
+  // raw LogManager string, so exported files must always receive a second
+  // redaction pass.
+  log = redactLogText(log);
   var path = (await getTemporaryDirectory()).path;
   var file = File("$path${pathSep}logs.txt");
   await file.writeAsString(log, flush: true);

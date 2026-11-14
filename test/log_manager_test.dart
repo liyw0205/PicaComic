@@ -158,4 +158,33 @@ void main() {
     expect(await logFile.readAsString(), contains('file writing recovered'));
     expect(LogManager.writeFailureCount, failuresBefore + 1);
   });
+
+  test('export and persisted logs redact free-form diagnostics', () async {
+    const secret = 'export-secret-value';
+    LogManager.addLog(
+      LogLevel.error,
+      'Network $secret',
+      'GET https://user:$secret@example.org/image?token=$secret&page=4\n'
+          'Authorization: Bearer $secret\napi_key=$secret',
+    );
+
+    final exported = LogManager.exportString();
+    expect(exported, isNot(contains(secret)));
+    expect(exported, contains('page=4'));
+    expect(exported, contains('Authorization: <redacted>'));
+    expect(exported, contains('api_key=<redacted>'));
+    await LogManager.flush();
+    final persisted = await logFile.readAsString();
+    expect(persisted, isNot(contains(secret)));
+    expect(persisted, contains('page=4'));
+  });
+
+  test('Android log destination stays under application data path', () {
+    final file = LogManager.logFileForDataPath('/private/app', isIOS: false)!;
+    expect(file.path, '/private/app${Platform.pathSeparator}log.txt');
+    expect(
+      LogManager.logFileForDataPath('/private/app', isIOS: true),
+      isNull,
+    );
+  });
 }

@@ -151,4 +151,18 @@ void main() {
     expect(summary, contains('page=3'));
     expect(summary, isNot(contains('private')));
   });
+
+  test('free-form log export redaction reuses network secret rules', () {
+    const secret = 'private-log-secret';
+    final text = redactLogText(
+      'GET https://user:$secret@example.org/file?token=$secret&page=3\n'
+      'X-Api-Key: $secret\nBearer $secret\n{"token":"$secret"}',
+    );
+
+    expect(text, isNot(contains(secret)));
+    expect(text, contains('page=3'));
+    expect(text, contains('X-Api-Key: <redacted>'));
+    expect(text, contains('Bearer <redacted>'));
+    expect(text, contains('"token":<redacted>'));
+  });
 }

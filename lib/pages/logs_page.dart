@@ -44,7 +44,7 @@ class _LogsPageState extends State<LogsPage> {
                       PopupMenuItem(
                         child: Text("导出".tl),
                         onTap: () =>
-                            unawaited(saveLog(LogManager().toString())),
+                            unawaited(saveLog(LogManager.exportString())),
                       ),
                     ]);
                   }),

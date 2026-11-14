@@ -163,15 +163,10 @@ Future<List<String>> _startupRestoreRoots() async {
 Future<void> _initializeLogging() async {
   // Finish a queue left by an earlier startup before switching destinations.
   await LogManager.flush();
-  io.File? logFile = io.File('${App.dataPath}/log.txt');
-  if (App.isAndroid) {
-    final externalDirectory = await getExternalStorageDirectory();
-    if (externalDirectory != null) {
-      logFile = io.File('${externalDirectory.path}/log.txt');
-    }
-  }
-  if (App.isIOS) logFile = null;
-  LogManager.logFile = logFile;
+  LogManager.logFile = LogManager.logFileForDataPath(
+    App.dataPath,
+    isIOS: App.isIOS,
+  );
   LogManager.addLog(LogLevel.info, 'App Status', 'Start initialization.');
   await LogManager.flush();
 }

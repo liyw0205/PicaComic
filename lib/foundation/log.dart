@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 
 void log(
@@ -20,6 +21,17 @@ class LogManager {
   // not provide a stable ordering on every supported filesystem.
   static Future<void> _writeQueue = Future<void>.value();
   static File? logFile;
+
+  /// Returns the application-private log destination for a platform.
+  ///
+  /// Android used to prefer [getExternalStorageDirectory], which made
+  /// diagnostics visible outside the app sandbox. Keep iOS disabled as
+  /// before, but use the already-private application support directory on
+  /// every other platform.
+  static File? logFileForDataPath(String dataPath, {required bool isIOS}) {
+    if (isIOS) return null;
+    return File('$dataPath${Platform.pathSeparator}log.txt');
+  }
 
   static List<Log> get logs => _logs;
 
@@ -92,9 +104,21 @@ class LogManager {
 
   @override
   String toString() {
+    return _formatLogs(redact: false);
+  }
+
+  /// Returns a shareable diagnostic snapshot with a second redaction pass.
+  ///
+  /// In-memory logs remain available to the diagnostics page, while exported
+  /// text is protected even when an older caller recorded raw network data.
+  static String exportString() => _formatLogs(redact: true);
+
+  static String _formatLogs({required bool redact}) {
     var res = "Logs\n\n";
-    for (var log in _logs) {
-      res += log.toString();
+    for (var entry in _logs) {
+      final title = redact ? redactLogText(entry.title) : entry.title;
+      final content = redact ? redactLogText(entry.content) : entry.content;
+      res += '${entry.level.name} $title ${entry.time} \n$content\n\n';
     }
     return res;
   }
@@ -103,6 +127,10 @@ class LogManager {
     final file = logFile;
     if (file == null) return;
 
+    // Protect the on-disk diagnostic copy even when an older caller bypasses
+    // the structured network logging helpers.
+    title = redactLogText(title);
+    content = redactLogText(content);
     final line =
         "${DateTime.now().toIso8601String()} ${level.name}\n$title: $content\n\n";
     _enqueue(() => _append(file, line));

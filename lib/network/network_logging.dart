@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 
-bool _sensitiveField(String name) {
+bool isSensitiveNetworkField(String name) {
   final key = name.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
   return key.contains('authorization') ||
       key.contains('cookie') ||
@@ -40,8 +40,9 @@ String safeNetworkUrl(String value) {
     // Uri.replace(queryParameters: ...) serializes `?page=` as `?page`, which
     // can merge with a caller-appended suffix and change the logged URL.
     final query = uri.queryParametersAll.entries.expand((entry) {
-      final values =
-          _sensitiveField(entry.key) ? const ['<redacted>'] : entry.value;
+      final values = isSensitiveNetworkField(entry.key)
+          ? const ['<redacted>']
+          : entry.value;
       return values.map((value) => '${Uri.encodeQueryComponent(entry.key)}='
           '${Uri.encodeQueryComponent(value)}');
     }).join('&');
@@ -78,7 +79,7 @@ String safeNetworkError(Object? error) {
 
 Map<String, Object?> safeNetworkHeaders(Map<String, dynamic> headers) {
   return headers.map((key, value) {
-    if (_sensitiveField(key)) return MapEntry(key, '<redacted>');
+    if (isSensitiveNetworkField(key)) return MapEntry(key, '<redacted>');
     final normalizedKey = key.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
     if (normalizedKey == 'link') return MapEntry(key, '<redacted>');
     if (normalizedKey.contains('location') ||
@@ -102,4 +103,54 @@ String networkPayloadSummary(Object? value) {
   if (value is Map) return '<Map entries:${value.length}>';
   if (value is List) return '<List length:${value.length}>';
   return '<${value.runtimeType}>';
+}
+
+final _logUrlPattern = RegExp(
+  r'''[A-Za-z][A-Za-z0-9+.-]*://[^\s<>"']+''',
+  caseSensitive: false,
+);
+
+// Log entries are free-form text, so apply the same field policy a second
+// time at the export boundary. This protects older call sites that logged a
+// raw URL or an ad-hoc map instead of using the structured helpers above.
+final _logAssignmentPattern = RegExp(
+  r'''(["']?)([A-Za-z][A-Za-z0-9_.-]*)(["']?)(\s*[:=]\s*)("[^"]*"|'[^']*'|\[[^\]]*\]|[^\s,;}]+)''',
+);
+
+final _logAuthPattern = RegExp(
+  r'\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+',
+  caseSensitive: false,
+);
+
+/// Removes credentials and secret-like values from arbitrary log text.
+///
+/// Network call sites should continue to use [safeNetworkUrl],
+/// [safeNetworkHeaders] and [networkPayloadSummary] at write time. This
+/// function is deliberately an export-time second pass for legacy and future
+/// call sites that may write free-form diagnostic text.
+String redactLogText(String value) {
+  var redacted = value.replaceAllMapped(_logUrlPattern, (match) {
+    return safeNetworkUrl(match.group(0)!);
+  });
+
+  // Run this before key/value matching so an Authorization value containing
+  // a scheme and a token is handled as one credential.
+  redacted = redacted.replaceAllMapped(_logAuthPattern, (match) {
+    final value = match.group(0)!;
+    final separator = value.indexOf(RegExp(r'\s'));
+    return '${value.substring(0, separator)} <redacted>';
+  });
+
+  redacted = redacted.replaceAllMapped(_logAssignmentPattern, (match) {
+    final key = match.group(2)!;
+    if (!isSensitiveNetworkField(key)) return match.group(0)!;
+    // Preserve the encoded form emitted by safeNetworkUrl so a second pass
+    // remains stable and does not turn a URL into malformed text.
+    final current = match.group(5)!;
+    if (current == '<redacted>' || current == '%3Credacted%3E') {
+      return match.group(0)!;
+    }
+    return '${match.group(1)}$key${match.group(3)}${match.group(4)}<redacted>';
+  });
+  return redacted.replaceAll('<redacted> <redacted>', '<redacted>');
 }
