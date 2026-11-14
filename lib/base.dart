@@ -276,7 +276,10 @@ class Appdata {
       _settingsWriteResult = operation;
       return operation;
     });
-    if (shouldUpload) Webdav.uploadData();
+    if (syncData) DataMaintenance.recordSyncRequest();
+    // The caller must not observe a successful settings write before the
+    // requested remote publication has completed (or reported failure).
+    if (shouldUpload) await Webdav.uploadData();
   }
 
   /// Wait until settings writes already requested by an import or UI update
@@ -372,6 +375,7 @@ class Appdata {
       }
       await updateSettings(false);
     });
+    if (sync) DataMaintenance.recordSyncRequest();
     if (shouldUpload) await Webdav.uploadData();
   }
 

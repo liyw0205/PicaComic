@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pica_comic/base.dart';
+import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
@@ -174,5 +177,23 @@ void main() {
       await ImageFavoriteManager.add(favorite('after-failure'));
     }, suppressSync: true);
     expect(ImageFavoriteManager.exist('after-failure', 1, 2), isTrue);
+  });
+
+  test('settings writes are awaited and counted without remote publication',
+      () async {
+    App.dataPath = root.path;
+    final isolated = Appdata();
+    isolated.settings[1] = 'da';
+
+    await DataMaintenance.run<void>(() => isolated.updateSettings(),
+        suppressSync: true, operationName: 'data-import');
+
+    final saved = jsonDecode(await File('${root.path}/settings').readAsString())
+        as List<dynamic>;
+    expect(saved[1], 'da');
+    final stats = DataMaintenance.lastStats;
+    expect(stats?.syncRequests, 1);
+    expect(stats?.suppressedSyncRequests, 1);
+    expect(stats?.unsuppressedSyncRequests, 0);
   });
 }
