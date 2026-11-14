@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-15。代码基线：`5c196812`，当前已发布版本：`4.2.42+4242`（tag `v4.2.42`），下一轮开发版本：`4.2.43+4243`。上一轮已发布 A5、A7、A15 和 A19；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A18 迁移目标完整性校验。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42` release workflow `43638910254` 已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
+日期：2026-11-15。代码基线：`5c196812`，当前已发布版本：`4.2.43+4243`（tag `v4.2.43`），下一轮开发版本：`4.2.44+4244`。上一轮已发布 A5、A7、A15 和 A19；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A18 迁移目标完整性校验。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42` release workflow `43638910254` 和 `v4.2.43` release workflow `43643735042` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
 
 ## 1. 结论与评估边界
 
@@ -253,7 +253,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 | 检查 | 本轮结果 | 能证明的范围 |
 | --- | --- | --- |
-| Git 与版本核对 | `v4.2.42` 已发布；随后独立提交 A6 `bc70dd28`、A11 `04145155`、A12 `9fb955f0`、A13 `49eb9048`、A14 `83a30447`/`5c196812`，并保留 A18 `2fb5c547`、A1 trusted root `6150ea89`、A2 导入契约 `1c619083`、设置页结果处理 `e22eeff1`、fixture 修正 `d12a8339`；下一轮递增到 `4.2.43+4243` | 方案基线及本轮交付范围 |
+| Git 与版本核对 | `v4.2.43` 已发布；随后独立提交 A6 `bc70dd28`、A11 `04145155`、A12 `9fb955f0`、A13 `49eb9048`、A14 `83a30447`/`5c196812`，版本提交 `01043cda` 创建 annotated tag；并保留 A18 `2fb5c547`、A1 trusted root `6150ea89`、A2 导入契约 `1c619083`、设置页结果处理 `e22eeff1`、fixture 修正 `d12a8339`；下一轮递增到 `4.2.44+4244` | 方案基线及本轮交付范围 |
 | `flutter --version` | Flutter 3.44.0 / Dart 3.12.2 | 本机工具版本 |
 | `flutter pub get` | 成功；新增 `flutter_secure_storage 9.2.4` 及平台实现并写入 lockfile | 依赖可解析；不替代各平台插件构建 |
 | Analyzer baseline | `bash tool/check-analyzer-baseline.sh` 通过：errors=0/0、warnings=0/0；存量提示仍保留在 baseline | 新增 error/warning 被阻断；不替代设备构建 |
@@ -265,13 +265,13 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 | A1/A2/A11/A16/A18 定向分析 | `dart format`、目标 `dart analyze` 和 `git diff --check` 通过；新增恢复进度/缺失备份、trusted root、导入落盘与结果契约、坏下载快照回退、页面异步边界和迁移目标集合回归 | 证明本轮 Dart API、恢复安全边界和测试代码可编译；Flutter runner、Android 编译、真实 WebDAV 和设备行为仍需 CI/设备验收 |
 | A6/A11/A12/A13/A14 定向分析 | 各功能组独立执行 `dart format`、目标 `dart analyze` 和 `git diff --check`；覆盖上传同步祖先缺失、下载/图片收藏重复删除、活动指标标签规范化、自定义源归一化 UTF-8 体积门禁 | 证明本轮窄改动和离线边界测试可编译；Flutter runner、真实 WebDAV、来源 fixture 和设备性能仍需 CI/设备验收 |
 | 异步边界扫描 | `lib/` 声明级扫描为 64 个 `void ... async`、171 个 `Future<void> ... async`、52 个同步 I/O 命中 | 仅用于跟踪入口数量；必须结合生命周期和错误传播审查 |
-| 全量 Flutter 测试 | 上一轮记录为 147 项通过；本轮依赖更新后重跑受 Termux Flutter kernel/`impellerc` 环境阻塞 | 上一轮覆盖当前离线 Flutter 测试集；本轮需在标准 Linux/CI 重跑 |
-| Android Gradle/Kotlin | `:app:compileDebugKotlin` 触发 Flutter kernel SDK hash mismatch；使用缓存 Flutter 时又因 Termux ELF interpreter 不可执行失败 | 当前环境阻塞，需标准 Linux/CI runner 重跑；不修改业务逻辑规避 |
-| APK metadata 门禁 | `tool/android_apk_metadata.sh` 已通过 `bash -n`，Android workflow YAML 可解析；尚未有标准 runner APK 产物可执行脚本 | 需在 CI 产出并核对版本、ABI、native curl、签名和 SHA-256 |
+| 全量 Flutter 测试 | `v4.2.43` tag run `43643735042` 的 Flutter regression 全部通过；本地 Termux 仍受 Flutter kernel/`impellerc` 环境阻塞 | 标准 Linux/CI 已覆盖当前离线 Flutter 测试集；本地环境不替代 CI |
+| Android Gradle/Kotlin | `v4.2.43` tag run 已完成 Android APK 构建；本地 `:app:compileDebugKotlin` 仍受 Flutter kernel/Termux ELF 环境阻塞 | CI 已完成发布构建；本地不修改业务逻辑规避环境问题 |
+| APK metadata 门禁 | `v4.2.43` tag run 已完成版本、ABI、metadata、native curl、签名校验和 SHA-256 资产生成 | 证明发布产物可追溯；设备安装和升级矩阵仍需单独验收 |
 | 调用链与 SDK 对照 | 核对恢复日志调用点、导入上传链、数据库写入、`precacheImage` 和缩略图解码实现 | 支持文中的静态结论，不替代端到端复现 |
 | 本方案文档检查 | 路径/行号核对、引用文件存在性、格式和空白检查 | 文档可追溯、格式完整 |
 
-本轮尚未完成 APK metadata 的 CI 产物核对、签名产物、平台打包、远端 Actions、真实 WebDAV、旧版覆盖升级、系统安全存储可用性或设备性能采样。全量 Flutter 测试通过不替代这些平台和运行时验收；方案中的性能目标和风险后果均需按各项验收场景确认。
+本轮 `v4.2.43` 已完成 APK metadata、签名产物、平台打包和远端 Actions 发布；真实 WebDAV、旧版覆盖升级、系统安全存储可用性和设备性能采样仍未完成。全量 Flutter 测试通过不替代这些平台和运行时验收；方案中的性能目标和风险后果均需按各项验收场景确认。
 
 ## 6. A10-A14：下一轮补充优化方向
 
@@ -449,7 +449,7 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 1. **凭据迁移回滚已补齐。** `Webdav.migrateLegacyConfig()` 现在会先读取旧安全存储值；普通设置落盘失败或安全存储写入中断时，恢复设置字符串和旧凭据。`test/secret_store_test.dart` 增加了设置路径不可写的故障注入用例。该用例已通过 `dart analyze`，Flutter runner 仍需在标准 Linux/CI 执行。
 2. **安全存储不可用应失败闭环。** 当前启动将安全存储初始化设为非关键步骤，应用可以继续启动；但同步请求不能在凭据读取失败时意外按匿名凭据发送。设备验收时应确认 UI 明确显示“凭据不可用”，同步返回失败且不覆盖旧配置；如产品允许匿名 WebDAV，需要增加显式的匿名模式而不是依赖异常降级。
 3. **导入与同步要做端到端计数。** 在导入 1,000 条收藏、历史和图片收藏的测试中，分别记录本地写次数、远端上传次数和最终 revision。静默恢复预期远端上传为 0，用户主动合并预期只产生 1 次发布；任何逐条上传都应作为回归失败。
-4. **发布闸门仍是环境外工作。** 当前 Termux 的 Flutter kernel hash 与 `impellerc` ELF 环境阻塞 Flutter 测试和 Android 构建；不能用业务代码规避。标准 CI 需要重新执行全量测试、各平台构建、APK metadata、ABI/native curl、签名和覆盖升级矩阵。
+4. **发布闸门已完成一轮验证。** `v4.2.43` 的标准 CI 已通过全量 Flutter 测试、各 ABI 构建、APK metadata、native curl、签名和 Release 上传；当前 Termux 仍受 Flutter kernel hash 与 `impellerc` ELF 环境阻塞，不能用业务代码规避，后续版本继续以标准 CI 为门禁。
 5. **恢复 journal 的外部根需要绑定可信运行时配置。** 当前 `DataRestoreTransaction` 会把下载目录作为 `allowedRoots` 写入 journal，导入时会传入运行中的下载目录，因此正常导入路径已覆盖；但启动恢复发生在下载管理器初始化前，后续应让恢复入口从可信的当前下载配置取得外部根，并拒绝仅由 journal 新增或修改的根。需补充“篡改 `allowedRoots`”故障注入，确保不会借恢复日志操作 `App.dataPath` 之外的任意路径。
 
 建议实施顺序调整为：先完成 A1/A2 的故障注入和真实 WebDAV 双设备验收，同时在标准 runner 验证 A15/A16；随后做 A5/A7 的设备性能采样，再将 A16 的剩余同步 I/O 扫描和 A10-A14 纳入发布矩阵。每项都保留可回滚的迁移快照和独立指标，避免一次性大范围重构。
