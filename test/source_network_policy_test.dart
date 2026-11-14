@@ -226,10 +226,7 @@ void main() {
     ]);
     expect(expandedCompleted, isTrue);
     expect(expandedSecondCompleted, isTrue);
-    for (final lease in expandedLeases) {
-      lease.release();
-    }
-
+    expandedLeases.first.release();
     final second = await policy.beforeRequest(RequestOptions(
         path: 'https://fixture.test/second', extra: {'sourceKey': 'fixture'}));
     var shrunkCompleted = false;
@@ -251,6 +248,9 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 1));
     expect(shrunkCompleted, isFalse);
     first.release();
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(shrunkCompleted, isFalse);
+    expandedLeases[1].release();
     await Future<void>.delayed(const Duration(milliseconds: 1));
     expect(shrunkCompleted, isFalse);
     second.release();
