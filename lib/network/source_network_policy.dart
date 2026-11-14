@@ -141,7 +141,7 @@ class SourceNetworkPolicy {
     final bucket = _buckets[key];
     if (bucket != null) {
       if (bucket.config.maxConcurrent != config.maxConcurrent) {
-        bucket.limiter = _AsyncLimiter(config.maxConcurrent);
+        bucket.limiter.resize(config.maxConcurrent);
       }
       bucket.config = config;
     }
@@ -391,8 +391,7 @@ class SourceNetworkPolicy {
     }.contains(kind)) {
       health.consecutiveFailures++;
       if (health.consecutiveFailures >= lease._bucket.config.failureThreshold) {
-        health.openedUntil =
-            _now().add(lease._bucket.config.circuitCooldown);
+        health.openedUntil = _now().add(lease._bucket.config.circuitCooldown);
       }
     } else {
       // Client, parse, TLS, cancellation and size failures are not a
@@ -528,9 +527,14 @@ class _Waiter {
 class _AsyncLimiter {
   _AsyncLimiter(this.limit);
 
-  final int limit;
+  int limit;
   int active = 0;
   final Queue<_Waiter> queue = Queue<_Waiter>();
+
+  void resize(int newLimit) {
+    limit = newLimit;
+    _drain();
+  }
 
   Future<_Permit> acquire(RequestOptions options, Future<void>? cancelFuture) {
     if (active < limit) {
@@ -555,13 +559,17 @@ class _AsyncLimiter {
 
   void release() {
     if (active > 0) active--;
+    _drain();
+  }
+
+  void _drain() {
     while (queue.isNotEmpty) {
+      if (active >= limit) return;
       final waiter = queue.removeFirst();
       if (waiter.done) continue;
       waiter.done = true;
       active++;
       waiter.completer.complete(_Permit(this));
-      break;
     }
   }
 }

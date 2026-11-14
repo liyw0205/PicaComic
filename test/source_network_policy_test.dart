@@ -186,6 +186,79 @@ void main() {
     first.release();
   });
 
+  test('resizing a source budget preserves queued requests', () async {
+    final policy = SourceNetworkPolicy();
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+    );
+    final first = await policy.beforeRequest(RequestOptions(
+        path: 'https://fixture.test/first', extra: {'sourceKey': 'fixture'}));
+    var expandedCompleted = false;
+    final expanded = policy
+        .beforeRequest(RequestOptions(
+            path: 'https://fixture.test/expanded',
+            extra: {'sourceKey': 'fixture'}))
+        .then((lease) {
+      expandedCompleted = true;
+      return lease;
+    });
+    var expandedSecondCompleted = false;
+    final expandedSecond = policy
+        .beforeRequest(RequestOptions(
+            path: 'https://fixture.test/expanded-second',
+            extra: {'sourceKey': 'fixture'}))
+        .then((lease) {
+      expandedSecondCompleted = true;
+      return lease;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(expandedCompleted, isFalse);
+    expect(expandedSecondCompleted, isFalse);
+
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 3, minInterval: Duration.zero),
+    );
+    final expandedLeases = await Future.wait([
+      expanded.timeout(const Duration(seconds: 1)),
+      expandedSecond.timeout(const Duration(seconds: 1)),
+    ]);
+    expect(expandedCompleted, isTrue);
+    expect(expandedSecondCompleted, isTrue);
+    for (final lease in expandedLeases) {
+      lease.release();
+    }
+
+    final second = await policy.beforeRequest(RequestOptions(
+        path: 'https://fixture.test/second', extra: {'sourceKey': 'fixture'}));
+    var shrunkCompleted = false;
+    final shrunk = policy
+        .beforeRequest(RequestOptions(
+            path: 'https://fixture.test/shrunk',
+            extra: {'sourceKey': 'fixture'}))
+        .then((lease) {
+      shrunkCompleted = true;
+      return lease;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(shrunkCompleted, isFalse);
+
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(shrunkCompleted, isFalse);
+    first.release();
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(shrunkCompleted, isFalse);
+    second.release();
+    final shrunkLease = await shrunk.timeout(const Duration(seconds: 1));
+    expect(shrunkCompleted, isTrue);
+    shrunkLease.release();
+  });
+
   test('a circuit opened for one source does not block another source',
       () async {
     var now = DateTime(2026, 1, 1);
