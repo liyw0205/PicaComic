@@ -70,6 +70,13 @@ class DownloadManager with _DownloadDb implements Listenable {
   ///是否初始化
   bool _runInit = false;
 
+  // Concurrent callers must observe the same startup transaction. Returning
+  // immediately while the first caller is still restoring the queue allows a
+  // page to start a download against a partially initialized database.
+  Future<void>? _initFuture;
+
+  int _queueGeneration = 0;
+
   static const int _downloadQueueVersion = 1;
   static const String _downloadQueueFileName = 'newDownload.json';
 
@@ -162,6 +169,9 @@ class DownloadManager with _DownloadDb implements Listenable {
     final file = File("$path$pathSep$_downloadQueueFileName");
     await _recoverQueueFiles(file);
     if (!await file.exists()) {
+      // Without a durable snapshot there is no safe evidence that an
+      // in-memory item belongs to this storage path or startup cycle.
+      downloading.clear();
       await _saveInfo();
       return;
     }
@@ -169,19 +179,37 @@ class DownloadManager with _DownloadDb implements Listenable {
     try {
       final decoded = jsonDecode(await file.readAsString());
       final envelope = _decodeQueueEnvelope(decoded);
+      final generation = _generationOf(envelope);
+      if (generation > _queueGeneration) _queueGeneration = generation;
       final restored = <DownloadingItem>[];
+      final restoredIds = <String>{};
       for (final rawItem in envelope['downloading'] as List<Object?>) {
         if (rawItem is! Map) {
           throw const FormatException('Invalid download task record');
         }
-        restored.add(downloadingItemFromMap(
-          Map<String, dynamic>.from(rawItem),
+        final rawMap = Map<String, dynamic>.from(rawItem);
+        final rawDirectory = rawMap['directory'];
+        if (rawDirectory != null &&
+            (rawDirectory is! String || !_isSafeQueueDirectory(rawDirectory))) {
+          throw const FormatException('Invalid download task directory');
+        }
+        final item = downloadingItemFromMap(
+          rawMap,
           _onFinish,
           _onError,
           _saveInfo,
-        ));
+        );
+        if (!restoredIds.add(item.id)) {
+          throw FormatException('Duplicate download task: ${item.id}');
+        }
+        restored.add(item);
       }
-      downloading.addAll(restored);
+      // Replace stale in-memory state only after the whole snapshot decoded.
+      // This makes retries and path changes all-or-nothing from the queue's
+      // perspective.
+      downloading
+        ..clear()
+        ..addAll(restored);
 
       // A legacy snapshot has no marker. Rewrite it only after every task has
       // been decoded successfully, keeping migration all-or-nothing.
@@ -214,6 +242,9 @@ class DownloadManager with _DownloadDb implements Listenable {
     if (version != null && version != _downloadQueueVersion) {
       throw FormatException('Unsupported download queue version: $version');
     }
+    if (version != null && _generationOf(envelope) < 0) {
+      throw const FormatException('Invalid download queue generation');
+    }
     final state = envelope['state'];
     if (state != null && state != 'committed') {
       throw const FormatException('Uncommitted download queue snapshot');
@@ -224,56 +255,96 @@ class DownloadManager with _DownloadDb implements Listenable {
     return envelope;
   }
 
-  Future<bool> _isValidQueueFile(File file) async {
-    if (!await file.exists()) return false;
+  int _generationOf(Map<String, dynamic> envelope) {
+    final generation = envelope['generation'];
+    if (generation == null) return 0;
+    if (generation is int) return generation;
+    if (generation is num && generation == generation.toInt()) {
+      return generation.toInt();
+    }
+    throw const FormatException('Invalid download queue generation');
+  }
+
+  bool _isSafeQueueDirectory(String directory) {
+    if (directory.isEmpty || directory == '.' || directory == '..') {
+      return false;
+    }
+    if (directory.contains('/') || directory.contains(r'\')) return false;
     try {
-      _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
-      return true;
+      return sanitizeFileName(directory) == directory;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _readQueueSnapshot(File file) async {
+    if (!await file.exists()) return null;
+    try {
+      return _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
+    } catch (_) {
+      return null;
     }
   }
 
   Future<void> _recoverQueueFiles(File target) async {
     final temporary = File('${target.path}.tmp');
     final backup = File('${target.path}.bak');
-    final targetValid = await _isValidQueueFile(target);
+    final targetSnapshot = await _readQueueSnapshot(target);
+    final temporarySnapshot = await _readQueueSnapshot(temporary);
+    final backupSnapshot = await _readQueueSnapshot(backup);
 
-    if (targetValid) {
-      // A valid target is the last committed snapshot. Temporary and backup
-      // files are remnants of an earlier atomic replacement.
-      if (await temporary.exists()) await temporary.delete();
-      if (await backup.exists()) await backup.delete();
+    if (targetSnapshot != null) {
+      // A valid .tmp may have been fully flushed before the process stopped,
+      // but before the rename. Compare generations instead of discarding it.
+      if (temporarySnapshot != null &&
+          _generationOf(temporarySnapshot) > _generationOf(targetSnapshot)) {
+        await _moveQueueFileAside(target, 'stale');
+        await temporary.rename(target.path);
+      } else if (await temporary.exists()) {
+        await _moveQueueFileAside(
+          temporary,
+          temporarySnapshot == null ? 'corrupt' : 'stale',
+        );
+      }
+      if (await backup.exists()) {
+        if (backupSnapshot == null) {
+          await _moveQueueFileAside(backup, 'corrupt');
+        } else {
+          await backup.delete();
+        }
+      }
       return;
     }
 
     // A complete temporary snapshot is newer than the previous backup. This
     // is the expected state after the target was moved aside but before the
     // temporary file was renamed into place.
-    if (await _isValidQueueFile(temporary)) {
+    if (temporarySnapshot != null) {
       if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
       await temporary.rename(target.path);
       if (await backup.exists()) {
-        try {
+        if (backupSnapshot == null) {
+          await _moveQueueFileAside(backup, 'corrupt');
+        } else {
           await backup.delete();
-        } catch (e, s) {
-          LogManager.addLog(LogLevel.warning, 'IO',
-              'Failed to remove stale download snapshot backup\n${safeNetworkError(e)}\n$s');
         }
       }
       return;
     }
 
-    if (await _isValidQueueFile(backup)) {
+    if (backupSnapshot != null) {
       if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
       await backup.rename(target.path);
       return;
     }
 
-    // Keep an incomplete temporary file as evidence for diagnostics and a
-    // future manual recovery instead of silently deleting it.
+    // Keep incomplete candidates as evidence for diagnostics and manual
+    // recovery instead of silently deleting them.
     if (await temporary.exists()) {
       await _moveQueueFileAside(temporary, 'corrupt');
+    }
+    if (await backup.exists()) {
+      await _moveQueueFileAside(backup, 'corrupt');
     }
   }
 
@@ -353,6 +424,14 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   Future<void> dispose() async {
+    final initialization = _initFuture;
+    if (initialization != null) {
+      try {
+        await initialization;
+      } catch (_) {
+        // Dispose still needs to release any partially initialized resources.
+      }
+    }
     _runInit = false;
     isDownloading = false;
     for (final item in downloading.toList()) {
@@ -370,21 +449,47 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   ///初始化下载管理器
-  Future<void> init() async {
-    if (_runInit) return;
+  Future<void> init() {
+    final running = _initFuture;
+    if (running != null) return running;
+    if (_runInit) return Future<void>.value();
+    final future = _initInternal();
+    _initFuture = future;
+    return future.whenComplete(() {
+      if (identical(_initFuture, future)) _initFuture = null;
+    });
+  }
+
+  Future<void> _initInternal() async {
     _runInit = true;
-    await _getPath();
-    await _getInfo();
-    await _initDb();
+    isDownloading = false;
+    _error = false;
+    _stopping.clear();
+    _startRequestedDuringStop = false;
+    _pauseRequestedDuringStop = false;
+    _downloadControlGeneration++;
+    try {
+      await _getPath();
+      await _getInfo();
+      await _initDb();
+    } catch (_) {
+      // A failed startup must be retryable after the caller fixes the path or
+      // snapshot. Leaving _runInit=true would permanently hide later retries.
+      _runInit = false;
+      _db?.dispose();
+      _db = null;
+      rethrow;
+    }
   }
 
   ///储存当前的下载队列信息, 每完成一张图片的下载调用一次
   Future<void> _saveInfo() async {
     notifyListeners();
+    final generation = _nextQueueGeneration();
     final data = <String, dynamic>{
       'version': _downloadQueueVersion,
       'state': 'committed',
-      'generation': DateTime.now().microsecondsSinceEpoch,
+      'generation': generation,
       'downloading': <Map<String, dynamic>>[],
     };
     for (var item in downloading) {
@@ -400,6 +505,12 @@ class DownloadManager with _DownloadDb implements Listenable {
           'Failed to save download information\n${safeNetworkError(error)}\n$stack');
     });
     return write;
+  }
+
+  int _nextQueueGeneration() {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    _queueGeneration = now > _queueGeneration ? now : _queueGeneration + 1;
+    return _queueGeneration;
   }
 
   /// Queue additions happen from synchronous UI callbacks. Keep their

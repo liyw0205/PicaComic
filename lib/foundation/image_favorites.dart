@@ -30,7 +30,14 @@ class ImageFavoritePage {
   final List<ImageFavorite> items;
   final int? nextCursor;
 
-  const ImageFavoritePage(this.items, this.nextCursor);
+  /// The rowid of the newest item in this page, if the page is non-empty.
+  ///
+  /// Consumers that keep a loaded window can use this as a watermark for an
+  /// incremental refresh. It is intentionally separate from [nextCursor],
+  /// which points toward older rows.
+  final int? firstRowId;
+
+  const ImageFavoritePage(this.items, this.nextCursor, [this.firstRowId]);
 
   bool get hasMore => nextCursor != null;
 }
@@ -124,6 +131,7 @@ class ImageFavoriteManager {
   static ImageFavoritePage getPage({
     int limit = 60,
     int? afterRowId,
+    int? newerThanOrEqualRowId,
     String keyword = '',
   }) {
     if (limit <= 0) return const ImageFavoritePage([], null);
@@ -137,6 +145,12 @@ class ImageFavoriteManager {
     if (afterRowId != null) {
       conditions.add('rowid < ?');
       parameters.add(afterRowId);
+    }
+    if (newerThanOrEqualRowId != null) {
+      // The inclusive bound also catches SQLite reusing the highest rowid
+      // after that row was deleted between two refreshes.
+      conditions.add('rowid >= ?');
+      parameters.add(newerThanOrEqualRowId);
     }
     parameters.add(limit + 1);
     final rows = _db.select('''
@@ -153,6 +167,7 @@ class ImageFavoriteManager {
       hasMore && visible.isNotEmpty
           ? visible.last['image_favorite_rowid'] as int
           : null,
+      visible.isEmpty ? null : visible.first['image_favorite_rowid'] as int,
     );
   }
 

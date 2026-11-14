@@ -69,6 +69,51 @@ void main() {
         'image-2');
   });
 
+  test('incremental head refresh reaches every new row in bounded batches',
+      () async {
+    insertRows([
+      ('image-0', 'Title 0'),
+      ('image-1', 'Title 1'),
+      ('image-2', 'Title 2'),
+    ]);
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    final first = ImageFavoriteManager.getPage(limit: 2);
+    expect(first.items.map((item) => item.id), ['image-2', 'image-1']);
+    final watermark = first.firstRowId;
+    expect(watermark, isNotNull);
+
+    // Delete the highest rowid so the first new insert reuses the watermark;
+    // the following inserts also force the refresh to cross a page boundary.
+    HistoryManager().close();
+    final db = sqlite3.open(path);
+    db.execute('delete from image_favorites where id = ?;', ['image-2']);
+    db.dispose();
+    insertRows([
+      ('image-new-0', 'New 0'),
+      ('image-new-1', 'New 1'),
+      ('image-new-2', 'New 2'),
+    ]);
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    final refreshed = <ImageFavorite>[];
+    int? cursor;
+    while (true) {
+      final page = ImageFavoriteManager.getPage(
+        limit: 2,
+        afterRowId: cursor,
+        newerThanOrEqualRowId: watermark,
+      );
+      refreshed.addAll(page.items);
+      if (!page.hasMore) break;
+      cursor = page.nextCursor;
+      expect(cursor, isNotNull);
+    }
+
+    expect(refreshed.map((item) => item.id),
+        ['image-new-2', 'image-new-1', 'image-new-0']);
+  });
+
   test('existing key lookup preserves identity and handles missing rows',
       () async {
     insertRows([

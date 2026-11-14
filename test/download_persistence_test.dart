@@ -32,11 +32,35 @@ void main() {
   File getQueueFile([String suffix = '']) =>
       File('${directory.path}/newDownload.json$suffix');
 
-  Map<String, dynamic> committedQueue([List<Object?> tasks = const []]) => {
+  Map<String, dynamic> committedQueue([
+    List<Object?> tasks = const [],
+    int generation = 1,
+  ]) =>
+      {
         'version': 1,
         'state': 'committed',
-        'generation': 1,
+        'generation': generation,
         'downloading': tasks,
+      };
+
+  Map<String, dynamic> fixtureTask(String id) => {
+        'type': 7,
+        'id': id,
+        '_downloadedNum': 0,
+        '_downloadingEp': 0,
+        'index': 0,
+        'links': null,
+        'directory': id,
+        'finishedTasks': <String>[],
+        'comic': {
+          'name': id,
+          'author': '',
+          'type': 0,
+          'tags': <String>[],
+          'target': id,
+          'coverPath': '',
+          'time': '2026-01-01 00:00:00',
+        },
       };
 
   test('legacy queue snapshots are upgraded with a committed marker', () async {
@@ -116,6 +140,47 @@ void main() {
     expect(manager.downloading, hasLength(1));
   });
 
+  test('a newer complete temporary snapshot supersedes a valid target',
+      () async {
+    await getQueueFile().writeAsString(jsonEncode(committedQueue([], 10)));
+    await getQueueFile('.tmp').writeAsString(
+      jsonEncode(committedQueue([fixtureTask('newer')], 11)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading.single.id, 'newer');
+    final snapshot =
+        jsonDecode(await getQueueFile().readAsString()) as Map<String, dynamic>;
+    expect(snapshot['generation'], 11);
+    expect(await getQueueFile('.tmp').exists(), isFalse);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.stale.')),
+      hasLength(1),
+    );
+  });
+
+  test('a malformed temporary snapshot is preserved when target is valid',
+      () async {
+    await getQueueFile().writeAsString(jsonEncode(committedQueue([], 10)));
+    await getQueueFile('.tmp').writeAsString('{"version":1');
+
+    await manager.init();
+
+    expect(manager.downloading, isEmpty);
+    expect(jsonDecode(await getQueueFile().readAsString())['generation'], 10);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+  });
+
   test('invalid task records are rejected without deleting the source snapshot',
       () async {
     await getQueueFile().writeAsString(jsonEncode(committedQueue([
@@ -131,6 +196,74 @@ void main() {
         .whereType<File>()
         .where((file) => file.path.contains('newDownload.json.corrupt.'));
     expect(preserved, hasLength(1));
+  });
+
+  test('duplicate task ids are rejected to prevent duplicate downloads',
+      () async {
+    await getQueueFile().writeAsString(
+      jsonEncode(committedQueue(
+          [fixtureTask('duplicate'), fixtureTask('duplicate')], 2)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading, isEmpty);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+  });
+
+  test('task directories cannot escape the configured download root', () async {
+    final task = fixtureTask('unsafe');
+    task['directory'] = '../outside';
+    await getQueueFile().writeAsString(
+      jsonEncode(committedQueue([task], 3)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading, isEmpty);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+    expect(
+        await Directory('${directory.parent.path}/outside').exists(), isFalse);
+  });
+
+  test('failed initialization can be retried after fixing the path', () async {
+    final invalidPath = File('${directory.path}/not-a-directory');
+    await invalidPath.writeAsString('occupied');
+    appdata.settings[22] = invalidPath.path;
+
+    await expectLater(manager.init(), throwsA(isA<FileSystemException>()));
+
+    appdata.settings[22] = directory.path;
+    await manager.init();
+
+    expect(manager.path, directory.path);
+    expect(manager.total, 0);
+  });
+
+  test('missing snapshot does not resurrect an in-memory queue', () async {
+    manager.downloading.add(
+      downloadingItemFromMap(
+          fixtureTask('memory-only'), () {}, () {}, () async {}),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading, isEmpty);
+    final snapshot =
+        jsonDecode(await getQueueFile().readAsString()) as Map<String, dynamic>;
+    expect(snapshot['downloading'], isEmpty);
   });
 
   test('download sorting accepts only mapped columns and directions', () async {

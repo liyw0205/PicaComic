@@ -33,6 +33,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   final _searchFocus = FocusNode();
 
   int? _nextCursor;
+  int? _headRowId;
   int _totalCount = 0;
   String _keyword = '';
   bool _hasMore = true;
@@ -60,6 +61,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   void _reload() {
     _images.clear();
     _nextCursor = null;
+    _headRowId = null;
     _hasMore = true;
     _totalCount = ImageFavoriteManager.count(keyword: _keyword);
     _loadPage();
@@ -74,6 +76,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
       keyword: _keyword,
     );
     _images.addAll(page.items);
+    _headRowId ??= page.firstRowId;
     _nextCursor = page.nextCursor;
     _hasMore = page.hasMore;
     _loading = false;
@@ -95,23 +98,45 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   }
 
   void _reconcileExternalChanges() {
-    final head = ImageFavoriteManager.getPage(
-      limit: _pageSize,
-      keyword: _keyword,
-    );
-    final known = _images.map((image) => image.key).toSet();
-    for (final image in head.items.reversed) {
-      if (known.add(image.key)) {
-        _images.insert(0, image);
+    // Walk every bounded batch newer than the loaded head. Reading only one
+    // page here can permanently skip rows when a sync/import adds more than
+    // [_pageSize] favorites before the next refresh. The inclusive watermark
+    // also handles SQLite reusing a deleted highest rowid.
+    if (_headRowId == null) {
+      // An empty page has no watermark yet. Populate it directly so an
+      // external add can transition out of the empty state without requiring
+      // the page to be recreated.
+      final page = ImageFavoriteManager.getPage(
+        limit: _pageSize,
+        keyword: _keyword,
+      );
+      _images.addAll(page.items);
+      _headRowId = page.firstRowId;
+      _nextCursor = page.nextCursor;
+      _hasMore = page.hasMore;
+    } else {
+      final known = _images.map((image) => image.key).toSet();
+      int? cursor;
+      while (true) {
+        final page = ImageFavoriteManager.getPage(
+          limit: _pageSize,
+          afterRowId: cursor,
+          newerThanOrEqualRowId: _headRowId,
+          keyword: _keyword,
+        );
+        for (final image in page.items.reversed) {
+          if (known.add(image.key)) {
+            _images.insert(0, image);
+          }
+        }
+        if (!page.hasMore) break;
+        cursor = page.nextCursor;
+        if (cursor == null) break;
       }
     }
     final existing = ImageFavoriteManager.existingKeys(_images);
     _images.removeWhere((image) => !existing.contains(image.key));
     _totalCount = ImageFavoriteManager.count(keyword: _keyword);
-    if (_images.length <= _pageSize && _nextCursor == null) {
-      _nextCursor = head.nextCursor;
-      _hasMore = head.hasMore;
-    }
   }
 
   void _setKeyword(String value) {

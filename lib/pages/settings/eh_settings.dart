@@ -99,24 +99,23 @@ class _EhProfileSelectPageState extends State<EhProfileSelectPage> {
 
   String? error;
 
-  void loadData() async {
-    var res = await EhNetwork().getProfiles();
-    loading = false;
-    if (res.error) {
-      setState(() {
+  Future<void> loadData() async {
+    final res = await EhNetwork().getProfiles();
+    if (!mounted) return;
+    setState(() {
+      loading = false;
+      if (res.error) {
         error = res.errorMessageWithoutNull;
-      });
-    } else {
-      setState(() {
+      } else {
         profiles = res.data;
-      });
-    }
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      loadData();
+      unawaited(loadData());
     }
     return Scaffold(
       appBar: AppBar(
@@ -134,10 +133,10 @@ class _EhProfileSelectPageState extends State<EhProfileSelectPage> {
     );
   }
 
-  Widget buildBody(){
+  Widget buildBody() {
     profiles?[""] = "Do not modify";
     var keys = profiles?.keys.toList();
-    if(keys != null){
+    if (keys != null) {
       keys.sort();
     }
     return ListView.builder(

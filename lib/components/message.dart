@@ -123,7 +123,7 @@ void showDialogMessage(BuildContext context, String title, String message) {
 }
 
 void showConfirmDialog(BuildContext context, String title, String content,
-    void Function() onConfirm) {
+    FutureOr<void> Function() onConfirm) {
   showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -135,7 +135,15 @@ void showConfirmDialog(BuildContext context, String title, String content,
               TextButton(
                   onPressed: () {
                     App.back(context);
-                    onConfirm();
+                    unawaited(
+                        Future<void>.sync(onConfirm).catchError((error, stack) {
+                      LogManager.addLog(
+                        LogLevel.error,
+                        "UI",
+                        "Confirmation action failed: ${safeNetworkError(error)}\n$stack",
+                      );
+                      showToast(message: "操作失败".tl);
+                    }));
                   },
                   child: Text("确认".tl)),
             ],
