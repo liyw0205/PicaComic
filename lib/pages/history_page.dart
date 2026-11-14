@@ -42,7 +42,7 @@ class _HistoryPageState extends State<HistoryPage> {
     comics.clear();
     _hasMore = true;
     _loadingPage = false;
-    _totalCount = HistoryManager().count();
+    _totalCount = HistoryManager().count(keyword: searchMode ? keyword : '');
     _loadPage();
   }
 

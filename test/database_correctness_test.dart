@@ -237,6 +237,8 @@ void main() {
     final second = manager.getPage(limit: 2, after: first.last);
     expect(second.map((row) => row.target), ['c', 'd']);
     expect(manager.getPage(keyword: 'TITLE C').single.target, 'c');
+    expect(manager.count(keyword: ' title c '), 1);
+    expect(manager.count(keyword: '   '), 4);
     expect(manager.getPage(keyword: '   ').map((row) => row.target),
         ['new', 'b', 'c', 'd']);
     expect(manager.findSync('new'), isNotNull);

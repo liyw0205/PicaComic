@@ -575,11 +575,19 @@ class HistoryManager {
     return res.map((element) => History.fromRow(element)).toList();
   }
 
-  /// 获取历史记录的数量
-  int count() {
-    var res = _db.select("""
-      select count(*) from history;
-    """);
-    return res.first[0] as int;
+  /// 获取历史记录的数量，可按与 [getPage] 相同的关键词过滤。
+  int count({String keyword = ''}) {
+    final normalizedKeyword = keyword.trim().toLowerCase();
+    final parameters = normalizedKeyword.isEmpty
+        ? const <Object?>[]
+        : <Object?>[normalizedKeyword, normalizedKeyword];
+    final rows = _db.select('''
+      select count(*) as total from history
+      ${normalizedKeyword.isEmpty ? '' : '''
+      where instr(pica_lower(title), ?) > 0
+         or instr(pica_lower(subtitle), ?) > 0
+      '''};
+    ''', parameters);
+    return rows.single['total'] as int;
   }
 }
