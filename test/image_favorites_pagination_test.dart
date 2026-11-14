@@ -134,6 +134,15 @@ void main() {
     });
   });
 
+  test('favorite image keys preserve composite field boundaries', () {
+    const first = ImageFavorite('comic-1', '', 'Title 1', 2, 34, {});
+    const second = ImageFavorite('comic-12', '', 'Title 2', 3, 4, {});
+
+    expect(first.key, 'comic-1\u00002\u000034');
+    expect(second.key, 'comic-12\u00003\u00004');
+    expect(first.key, isNot(second.key));
+  });
+
   test('consecutive writes coalesce page refresh notifications', () async {
     await HistoryManager().init(databasePath: path, importLegacy: false);
     var meUpdates = 0;
