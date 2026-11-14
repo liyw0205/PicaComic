@@ -745,8 +745,10 @@ bool _isSafeRestorePathSync(String dataPath, String target,
           .any((part) => part == '.' || part == '..')) {
     return false;
   }
-  final roots = <String>[Directory(dataPath).resolveSymbolicLinksSync()]
-    ..addAll(allowedRoots);
+  final roots = <String>[
+    Directory(dataPath).resolveSymbolicLinksSync(),
+    ...allowedRoots,
+  ];
   final type = FileSystemEntity.typeSync(target, followLinks: false);
   if (type == FileSystemEntityType.link) return false;
   if (type != FileSystemEntityType.notFound) {
