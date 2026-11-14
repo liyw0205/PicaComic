@@ -253,6 +253,9 @@ class SourceNetworkPolicy {
           error.error is HandshakeException) {
         return SourceNetworkErrorKind.tls;
       }
+      if (error.error is FormatException || error.error is TypeError) {
+        return SourceNetworkErrorKind.parse;
+      }
       if (const {
         DioExceptionType.connectionTimeout,
         DioExceptionType.receiveTimeout,

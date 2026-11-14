@@ -196,6 +196,12 @@ void main() {
         SourceNetworkPolicy.instance
             .classify(const FormatException('fixture JSON')),
         SourceNetworkErrorKind.parse);
+    expect(
+        SourceNetworkPolicy.instance.classify(DioException(
+            requestOptions: _fixtureRequest(),
+            type: DioExceptionType.connectionError,
+            error: const FormatException('fixture JSON'))),
+        SourceNetworkErrorKind.parse);
     expect(adapter.calls, 1);
   });
 
