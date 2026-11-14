@@ -178,7 +178,12 @@ class EhDownloadingItem extends DownloadingItem {
       final startToken = CancelToken();
       _archiveStartToken = startToken;
       try {
+        final previousDirectory = directory;
         await onStart();
+        if (!_isArchiveRunActive(run)) return;
+        if (directory != previousDirectory) {
+          await updateInfo?.call();
+        }
         if (!_isArchiveRunActive(run)) return;
         await downloadCover(
           shouldContinue: () => _isArchiveRunActive(run),

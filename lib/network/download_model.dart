@@ -248,7 +248,15 @@ abstract class DownloadingItem with _TransferSpeedMixin {
     _runtimeKey++;
     var currentKey = _runtimeKey;
     try {
+      final previousDirectory = directory;
       await onStart();
+      if (_runtimeKey != currentKey) return;
+      // Persist the directory chosen on the first start before any network
+      // request. A process crash after directory creation must resume the
+      // same task instead of allocating another directory on restart.
+      if (directory != previousDirectory) {
+        await updateInfo?.call();
+      }
       if (_runtimeKey != currentKey) return;
       await notifications.sendProgressNotification(downloadedPages, totalPages,
           "下载中".tl, "${downloadManager.downloading.length} Tasks");

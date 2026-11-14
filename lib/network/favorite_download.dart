@@ -44,9 +44,14 @@ class FavoriteDownloading extends DownloadingItem {
     final generation = ++_startGeneration;
     final manager = DownloadManager();
     try {
+      final previousDirectory = directory;
       await super.onStart();
       if (!_isActiveStart(generation, manager)) {
         return;
+      }
+      if (directory != previousDirectory) {
+        await updateInfo?.call();
+        if (!_isActiveStart(generation, manager)) return;
       }
       final logic = await _loadDownloadLogicOnce();
       if (!_isActiveStart(generation, manager)) {
@@ -60,6 +65,8 @@ class FavoriteDownloading extends DownloadingItem {
         return;
       }
       manager.downloading.addFirst(logic);
+      await updateInfo?.call();
+      if (!_isActiveStart(generation, manager)) return;
       logic.start();
     } catch (e, s) {
       if (!_isActiveStart(generation, manager)) return;

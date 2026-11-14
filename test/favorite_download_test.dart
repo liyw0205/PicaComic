@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -14,8 +15,9 @@ import 'package:pica_comic/network/favorite_download.dart';
 import 'package:pica_comic/tools/translations.dart';
 
 class _TestDownloadingItem extends DownloadingItem {
-  _TestDownloadingItem(String id, {DownloadProgressCallback? onFinish})
-      : super(onFinish, null, null, id, type: DownloadType.favorite);
+  _TestDownloadingItem(String id,
+      {DownloadProgressCallback? onFinish, Future<void> Function()? updateInfo})
+      : super(onFinish, null, updateInfo, id, type: DownloadType.favorite);
 
   int startCount = 0;
   int stopCount = 0;
@@ -28,6 +30,7 @@ class _TestDownloadingItem extends DownloadingItem {
   Completer<void>? downloadedItemGate;
   DownloadedItem? downloadedItem;
   bool runBaseStart = false;
+  String titleForTesting = '';
   String coverForTesting = '';
   Map<int, List<String>> linksForTesting = {};
   Stream<DownloadProgress> imageStream = const Stream.empty();
@@ -69,7 +72,7 @@ class _TestDownloadingItem extends DownloadingItem {
   Stream<DownloadProgress> downloadImage(String link) => imageStream;
 
   @override
-  String get title => '';
+  String get title => titleForTesting;
 
   @override
   Map<String, dynamic> toMap() => toBaseMap();
@@ -152,9 +155,8 @@ void main() {
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 
-  FavoriteDownloading createFavorite(
-    Future<DownloadingItem> Function() load,
-  ) {
+  FavoriteDownloading createFavorite(Future<DownloadingItem> Function() load,
+      {String? directory = 'fixture', Future<void> Function()? updateInfo}) {
     final favorite = FavoriteItem(
       target: 'fixture',
       name: 'fixture',
@@ -167,10 +169,10 @@ void main() {
       favorite,
       () {},
       () {},
-      () async {},
+      updateInfo ?? () async {},
       'fixture',
       loadDownloadLogic: load,
-    )..directory = 'fixture';
+    )..directory = directory;
     return item;
   }
 
@@ -196,6 +198,89 @@ void main() {
     await started.future;
     expect(manager.downloading.first, same(logic));
     expect(logic.startCount, 1);
+  });
+
+  test('repeated favorite enqueue is deduplicated by durable task id',
+      () async {
+    manager.isDownloading = true;
+    final favorite = FavoriteItem(
+      target: 'fixture',
+      name: 'fixture',
+      coverPath: '',
+      author: '',
+      type: FavoriteType.picacg,
+      tags: const [],
+    );
+
+    manager.addFavoriteDownload(favorite);
+    manager.addFavoriteDownload(favorite);
+
+    expect(manager.downloading, hasLength(1));
+    expect(manager.downloading.single.id, 'fixture');
+    await manager.dispose();
+  });
+
+  test('first start persists the directory before network work', () async {
+    await manager.init();
+    final persistedDirectory = Completer<String?>();
+    late _TestDownloadingItem item;
+    item = _TestDownloadingItem(
+      'first-start',
+      updateInfo: () async {
+        await manager.persistQueueForTesting();
+        if (!persistedDirectory.isCompleted) {
+          persistedDirectory.complete(item.directory);
+        }
+      },
+    )
+      ..titleForTesting = 'first-start'
+      ..runBaseStart = true;
+    manager.downloading.add(item);
+    manager.isDownloading = true;
+
+    item.start();
+
+    expect(await persistedDirectory.future.timeout(const Duration(seconds: 5)),
+        'first-start');
+    expect(await Directory('${temp.path}/first-start').exists(), isTrue);
+    final snapshot =
+        jsonDecode(await File('${temp.path}/newDownload.json').readAsString())
+            as Map;
+    expect(
+        (snapshot['downloading'] as List).single['directory'], 'first-start');
+    await manager.dispose();
+  });
+
+  test('favorite wrapper persists its assigned directory before replacement',
+      () async {
+    await manager.init();
+    final loadResult = Completer<DownloadingItem>();
+    final replaced = Completer<void>();
+    var writes = 0;
+    final favorite = createFavorite(
+      () => loadResult.future,
+      directory: null,
+      updateInfo: () async {
+        await manager.persistQueueForTesting();
+        writes++;
+        if (writes == 2 && !replaced.isCompleted) replaced.complete();
+      },
+    );
+    final logic = _TestDownloadingItem('fixture');
+    manager.downloading.add(favorite);
+    manager.isDownloading = true;
+
+    favorite.start();
+    await Future<void>.delayed(Duration.zero);
+    loadResult.complete(logic);
+    await replaced.future.timeout(const Duration(seconds: 5));
+
+    expect(manager.downloading.first, same(logic));
+    final snapshot =
+        jsonDecode(await File('${temp.path}/newDownload.json').readAsString())
+            as Map;
+    expect((snapshot['downloading'] as List).single['directory'], 'fixture');
+    await manager.dispose();
   });
 
   test('a changed queue head is not replaced after details load', () async {
