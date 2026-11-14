@@ -161,7 +161,10 @@ class LoadingDialogController {
     }
     closed = true;
     if (closeDialog == null) {
-      Future.microtask(closeDialog!);
+      // The navigator callback is assigned just after push(). If a caller
+      // closes during that handoff, retry after the callback has a chance to
+      // be installed instead of force-unwrapping null.
+      Future.microtask(() => closeDialog?.call());
     } else {
       closeDialog!();
     }
