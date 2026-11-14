@@ -120,7 +120,7 @@ jobs:
           found=0
           while IFS= read -r apk; do
             found=1
-            actual="$("$apksigner" verify --print-certs "$apk" |
+            actual="$("$apksigner" verify --print-certs "$apk" 2>&1 |
               awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' |
               tr -d ':' | tr '[:lower:]' '[:upper:]')"
             test -n "$actual"

@@ -111,7 +111,7 @@ mkdir -p "$(dirname "$output")"
       native_curl=fallback
     fi
 
-    signer="$("$apksigner" verify --print-certs "$apk" |
+    signer="$("$apksigner" verify --print-certs "$apk" 2>&1 |
       sed -n 's/.*Signer #1 certificate SHA-256 digest:[[:space:]]*//p' |
       head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
     if [[ ! "$signer" =~ ^[A-F0-9]{64}$ ]]; then
