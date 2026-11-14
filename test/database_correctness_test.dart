@@ -237,6 +237,8 @@ void main() {
     final second = manager.getPage(limit: 2, after: first.last);
     expect(second.map((row) => row.target), ['c', 'd']);
     expect(manager.getPage(keyword: 'TITLE C').single.target, 'c');
+    expect(manager.getPage(keyword: '   ').map((row) => row.target),
+        ['new', 'b', 'c', 'd']);
     expect(manager.findSync('new'), isNotNull);
     manager.clearHistory();
     await DataMaintenance.waitForIdle();

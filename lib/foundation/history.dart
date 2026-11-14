@@ -512,10 +512,13 @@ class HistoryManager {
     if (limit <= 0) return [];
     final conditions = <String>[];
     final parameters = <Object?>[];
-    if (keyword.isNotEmpty) {
+    // Treat whitespace-only input as an empty search, matching the other
+    // local search paths and avoiding a query that can never match.
+    final normalizedKeyword = keyword.trim().toLowerCase();
+    if (normalizedKeyword.isNotEmpty) {
       conditions.add(
           '(instr(pica_lower(title), ?) > 0 or instr(pica_lower(subtitle), ?) > 0)');
-      parameters.addAll([keyword.toLowerCase(), keyword.toLowerCase()]);
+      parameters.addAll([normalizedKeyword, normalizedKeyword]);
     }
     if (after != null) {
       conditions.add('(time <= ? and (time < ? or target > ?))');
