@@ -70,10 +70,12 @@ class RuntimeMetrics {
   static final Map<String, _MetricBucket> _buckets = <String, _MetricBucket>{};
 
   static RuntimeMetricTimer start(String operation) {
-    final bucket = _bucketFor(operation);
+    final normalizedOperation = _normaliseOperation(operation);
+    final bucket = _bucketFor(normalizedOperation);
     bucket.active++;
     bucket.peakActive = math.max(bucket.peakActive, bucket.active);
-    return RuntimeMetricTimer._(operation, Stopwatch()..start(), bucket);
+    return RuntimeMetricTimer._(
+        normalizedOperation, Stopwatch()..start(), bucket);
   }
 
   static void record(
@@ -162,6 +164,7 @@ class RuntimeMetrics {
   static String _normaliseOperation(String operation) {
     final trimmed = operation.trim();
     if (trimmed.isEmpty) return 'unknown';
+    if (trimmed.length > 80) return 'custom';
     // Only structured metric labels are retained. This prevents a caller
     // accidentally passing a URL, exception, or other sensitive payload.
     if (!RegExp(r'^[A-Za-z][A-Za-z0-9_.:-]{0,79}$').hasMatch(trimmed)) {

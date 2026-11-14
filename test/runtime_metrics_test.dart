@@ -38,6 +38,18 @@ void main() {
     expect(summary, isNot(contains('example.test')));
   });
 
+  test('timer retains only the normalized operation label', () {
+    final timer = RuntimeMetrics.start(
+      'https://user:secret@example.test/path?token=secret',
+    );
+    expect(timer.operation, 'custom');
+    timer.finish();
+
+    final longTimer = RuntimeMetrics.start('operation${'x' * 128}');
+    expect(longTimer.operation, 'custom');
+    longTimer.finish();
+  });
+
   test('timer records at most once', () {
     final timer = RuntimeMetrics.start('reader.image');
     timer.finish(bytes: 123);
