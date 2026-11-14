@@ -77,13 +77,17 @@ void main() {
     appdata.settings[46] = '2';
     addTearDown(() => appdata.settings[46] = previousVersion);
 
+    // Keep the fixture ASCII-only. ArchiveFile.string records character
+    // length while the ZIP payload uses UTF-8 bytes; runtime settings may
+    // contain non-ASCII text and would otherwise produce a false CRC failure.
+    final archivedSettings = List<String>.filled(47, '')..[46] = '1';
     final archive = Archive()
       ..addFile(ArchiveFile.string(
         'appdata',
         jsonEncode({
           'schemaVersion': 1,
-          'settings': <String>[...appdata.settings]..[46] = '1',
-          'firstUse': appdata.firstUse,
+          'settings': archivedSettings,
+          'firstUse': const <String>[],
           'blockingKeywords': const <String>[],
           'favoriteTags': const <String>[],
         }),
