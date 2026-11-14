@@ -6,7 +6,7 @@ jobs:
   Build_Linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-flutter
       - run: flutter pub get --enforce-lockfile
       - run: |
@@ -20,11 +20,11 @@ jobs:
           sudo rm -rf build/linux/arch/pkg
           sudo rm -rf build/linux/arch/src
           sudo rm -rf build/linux/arch/PKGBUILD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb_build
           path: build/linux/x64/release/debian
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arch_build
           path: build/linux/arch/
