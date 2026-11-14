@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-15。代码基线：`5c196812`，当前已发布版本：`4.2.43+4243`（tag `v4.2.43`），下一轮开发版本：`4.2.44+4244`。上一轮已发布 A5、A7、A15 和 A19；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A18 迁移目标完整性校验。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42` release workflow `43638910254` 和 `v4.2.43` release workflow `43643735042` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
+日期：2026-11-15。代码基线：`4b32939e`，当前已发布版本：`4.2.43+4243`（tag `v4.2.43`），下一轮开发版本：`4.2.44+4244`。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42` release workflow `43638910254` 和 `v4.2.43` release workflow `43643735042` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
 
 ## 1. 结论与评估边界
 
@@ -41,16 +41,16 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 | A7 | 图片内存与原生网络资源 | 缩略图、任务指标和 Android PSS 采样已落地，待设备测量 | 控制大图和并发任务的内存峰值 | 3-5 人日 | 中高 |
 | A8 | 设置校验与可恢复启动 | 已落地，专项回归通过，待设备测量 | 降低坏配置影响，缩短首屏等待 | 2-4 人日 | 中 |
 | A9 | 测试基线与可复现构建 | 基线已落地，native curl 已回归，待产物验收 | 让修复可回归、产物能力可核对 | 2-3 人日 | 低中 |
-| A10 | 凭据安全迁移 | 已实现，匿名配置兼容边界已审计，待设备验收 | 避免安全存储失败时意外匿名同步 | 2-3 人日 | 高 |
+| A10 | 凭据安全迁移 | 已实现；持久化配置不再绕过 `SecretStore`，安全存储失败不会创建匿名 transport，待设备验收 | 避免安全存储失败时意外匿名同步 | 2-3 人日 | 高 |
 | A11 | 下载任务存储与删除 | 已实现 JSON 快照恢复和删除幂等，待大规模设备验收 | 避免损坏快照和重复删除放大副作用 | 2-3 人日 | 中 |
 | A12 | 日志与运行指标 | 已实现活动标签规范化和指标上限，待生命周期/脱敏验收 | 提升诊断可用性，避免敏感或无界标签 | 1-2 人日 | 中 |
 | A13 | 图片收藏大列表 | 已实现 keyset 分页、搜索计数和删除幂等，待设备性能验收 | 降低大列表查询与重复同步成本 | 2-4 人日 | 中 |
 | A14 | 漫画源契约与隔离 | 已实现契约校验和自定义源落盘前体积门禁，待来源 fixture 矩阵 | 限制坏源影响，避免超大源污染持久化 | 2-4 人日 | 中高 |
 | A15 | StateController 生命周期与通知成本 | 已实现实例级清理、tag/id 重绑和 Widget 回归，待标准 runner 验收 | 避免监听器泄漏和无效通知 | 1-2 人日 | 中 |
 | A16 | UI 异步 I/O 与原子文件写入 | 已收口主页剪贴板、更新检查、启动同步和设置写入，待跨平台故障验收 | 降低首帧阻塞和半写文件风险 | 2-3 人日 | 中 |
-| A17 | PDF/分享流水线 | 已实现，专项测试待标准 Flutter runner 重跑 | 大文件导出不阻塞 UI，取消不破坏旧文件 | 2-4 人日 | 中 |
+| A17 | PDF/分享流水线 | 已实现，隔离导出成功/取消/失败指标已回传主 isolate，专项测试待标准 Flutter runner 重跑 | 大文件导出不阻塞 UI，取消不破坏旧文件 | 2-4 人日 | 中 |
 | A18 | 缓存与下载目录维护 | 已落地；提交 journal 恢复要求目标文件集合与 journal 精确一致，待设备和中断验收 | 降低维护阻塞，迁移可恢复 | 2-3 人日 | 中 |
-| A19 | 来源网络策略 | 已实现并补充超时 fixture，待标准 runner 和设备网络验收 | 统一取消、限流、退避、熔断和错误分类 | 2-4 人日 | 中高 |
+| A19 | 来源网络策略 | 已实现并修复并发预算重配置时的排队请求保留，补充超时 fixture，待标准 runner 和设备网络验收 | 统一取消、限流、退避、熔断和错误分类 | 2-4 人日 | 中高 |
 
 ## 3. 具体方案
 
@@ -253,25 +253,25 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 | 检查 | 本轮结果 | 能证明的范围 |
 | --- | --- | --- |
-| Git 与版本核对 | `v4.2.43` 已发布；随后独立提交 A6 `bc70dd28`、A11 `04145155`、A12 `9fb955f0`、A13 `49eb9048`、A14 `83a30447`/`5c196812`，版本提交 `01043cda` 创建 annotated tag；并保留 A18 `2fb5c547`、A1 trusted root `6150ea89`、A2 导入契约 `1c619083`、设置页结果处理 `e22eeff1`、fixture 修正 `d12a8339`；下一轮递增到 `4.2.44+4244` | 方案基线及本轮交付范围 |
+| Git 与版本核对 | `v4.2.43` 已发布；随后独立提交 A6 `bc70dd28`、A11 `04145155`、A12 `9fb955f0`、A13 `49eb9048`、A14 `83a30447`/`5c196812`、A10 `147f23c3`、A19 `1df99f86`、A17 `4b32939e`，版本提交 `01043cda` 创建 annotated tag；并保留 A18 `2fb5c547`、A1 trusted root `6150ea89`、A2 导入契约 `1c619083`、设置页结果处理 `e22eeff1`、fixture 修正 `d12a8339`；下一轮递增到 `4.2.44+4244` | 方案基线及本轮交付范围 |
 | `flutter --version` | Flutter 3.44.0 / Dart 3.12.2 | 本机工具版本 |
 | `flutter pub get` | 成功；新增 `flutter_secure_storage 9.2.4` 及平台实现并写入 lockfile | 依赖可解析；不替代各平台插件构建 |
 | Analyzer baseline | `bash tool/check-analyzer-baseline.sh` 通过：errors=0/0、warnings=0/0；存量提示仍保留在 baseline | 新增 error/warning 被阻断；不替代设备构建 |
 | 专项 Flutter 测试 | 8 个阅读器/预加载用例、11 个恢复、12 个数据库正确性、1 个数据库性能、16 个迁移/启动/缩略图用例，共 48 项通过 | 证明离线专项行为；不替代真实网络、设备和发布验收 |
 | Native curl 回归 | `test/native_curl/executor.sh` 通过；`test/native_curl/run.sh` 通过 6 项 JNI 检查 | 覆盖本机 executor 与 JNI 回归；不替代各 ABI APK 验收 |
 | 下载/WebDAV 定向分析 | `dart analyze` 目标源码与新增下载/WebDAV 测试无 error/warning；仅保留既有 info | 证明类型和接口可编译；不替代 Flutter runner 的行为测试 |
-| A17/A19 定向分析 | PDF 导出、来源网络策略及 WebDAV revision 测试源码 `dart analyze` 无 issue；新增 Flutter 用例尚未执行 | 证明 API、错误分类、取消和协议图可编译；行为仍需标准 Flutter runner、真实网络和设备验收 |
-| A5/A7/A15/A19 定向分析 | `dart format`、目标 `dart analyze` 和 `git diff --check` 通过；新增内存结构校验、历史空白搜索、重复 tag/tag 重绑及超时 fixture | 证明本轮 Dart API、边界校验和测试代码可编译；Flutter runner、Android 编译和设备行为仍需 CI 验收 |
+| A10/A17/A19 定向分析 | WebDAV 凭据、PDF 导出、来源网络策略及新增测试源码 `dart analyze` 无 issue；目标文件格式化和差异检查通过；Flutter 用例受本地 Termux Flutter kernel/`impellerc` 环境阻塞 | 证明安全边界、隔离指标、重配置队列和错误分类 API 可编译；行为仍需标准 Flutter runner、真实网络和设备验收 |
+| A5/A7/A15/A19 定向分析 | `dart format`、目标 `dart analyze` 和 `git diff --check` 通过；新增内存结构校验、历史空白搜索、重复 tag/tag 重绑及超时/重配置 fixture | 证明本轮 Dart API、边界校验和测试代码可编译；Flutter runner、Android 编译和设备行为仍需 CI 验收 |
 | A1/A2/A11/A16/A18 定向分析 | `dart format`、目标 `dart analyze` 和 `git diff --check` 通过；新增恢复进度/缺失备份、trusted root、导入落盘与结果契约、坏下载快照回退、页面异步边界和迁移目标集合回归 | 证明本轮 Dart API、恢复安全边界和测试代码可编译；Flutter runner、Android 编译、真实 WebDAV 和设备行为仍需 CI/设备验收 |
 | A6/A11/A12/A13/A14 定向分析 | 各功能组独立执行 `dart format`、目标 `dart analyze` 和 `git diff --check`；覆盖上传同步祖先缺失、下载/图片收藏重复删除、活动指标标签规范化、自定义源归一化 UTF-8 体积门禁 | 证明本轮窄改动和离线边界测试可编译；Flutter runner、真实 WebDAV、来源 fixture 和设备性能仍需 CI/设备验收 |
-| 异步边界扫描 | `lib/` 声明级扫描为 64 个 `void ... async`、171 个 `Future<void> ... async`、52 个同步 I/O 命中 | 仅用于跟踪入口数量；必须结合生命周期和错误传播审查 |
-| 全量 Flutter 测试 | `v4.2.43` tag run `43643735042` 的 Flutter regression 全部通过；本地 Termux 仍受 Flutter kernel/`impellerc` 环境阻塞 | 标准 Linux/CI 已覆盖当前离线 Flutter 测试集；本地环境不替代 CI |
+| 异步边界扫描 | `lib/` 声明级扫描为 59 个 `void ... async`、184 个 `Future<void> ... async`、50 个同步 I/O 命中 | 仅用于跟踪入口数量；必须结合生命周期和错误传播审查 |
+| 全量 Flutter 测试 | `v4.2.43` tag run `43643735042` 的 Flutter regression 全部通过；本轮 A10/A17/A19 新增用例尚未在本地执行，本地 Termux 仍受 Flutter kernel/`impellerc` 环境阻塞 | 标准 Linux/CI 已覆盖已发布版本离线 Flutter 测试集；本地环境不替代 CI |
 | Android Gradle/Kotlin | `v4.2.43` tag run 已完成 Android APK 构建；本地 `:app:compileDebugKotlin` 仍受 Flutter kernel/Termux ELF 环境阻塞 | CI 已完成发布构建；本地不修改业务逻辑规避环境问题 |
 | APK metadata 门禁 | `v4.2.43` tag run 已完成版本、ABI、metadata、native curl、签名校验和 SHA-256 资产生成 | 证明发布产物可追溯；设备安装和升级矩阵仍需单独验收 |
 | 调用链与 SDK 对照 | 核对恢复日志调用点、导入上传链、数据库写入、`precacheImage` 和缩略图解码实现 | 支持文中的静态结论，不替代端到端复现 |
 | 本方案文档检查 | 路径/行号核对、引用文件存在性、格式和空白检查 | 文档可追溯、格式完整 |
 
-本轮 `v4.2.43` 已完成 APK metadata、签名产物、平台打包和远端 Actions 发布；真实 WebDAV、旧版覆盖升级、系统安全存储可用性和设备性能采样仍未完成。全量 Flutter 测试通过不替代这些平台和运行时验收；方案中的性能目标和风险后果均需按各项验收场景确认。
+本轮 `v4.2.43` 已完成 APK metadata、签名产物、平台打包和远端 Actions 发布；其后的 A10/A17/A19 修复已进入下一版本候选，尚未完成真实 WebDAV、旧版覆盖升级、系统安全存储可用性和设备性能采样。全量 Flutter 测试通过不替代这些平台和运行时验收；方案中的性能目标和风险后果均需按各项验收场景确认。
 
 ## 6. A10-A14：下一轮补充优化方向
 
@@ -279,7 +279,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 | 方向 | 当前实现 | 仍需验收 |
 | --- | --- | --- |
-| A10 凭据隔离 | `SecretStore` 接口、`flutter_secure_storage` 平台适配、旧 WebDAV 配置迁移、普通导出脱敏、迁移失败回滚 | Android Keystore、iOS Keychain、桌面后端和升级失败保留旧值的设备验收 |
+| A10 凭据隔离 | `SecretStore` 接口、`flutter_secure_storage` 平台适配、旧 WebDAV 配置迁移、普通导出脱敏、迁移失败回滚；持久化配置缺少安全存储时不创建 transport，不降级匿名 | Android Keystore、iOS Keychain、桌面后端和升级失败保留旧值的设备验收 |
 | A11 下载队列 | JSON 快照版本标记、串行原子写入、`.tmp/.bak` 恢复、损坏任务保留、排序白名单；删除操作先完成目录操作再删除数据库记录 | 大规模任务性能；是否迁移 SQLite 需以设备测量决定 |
 | A12 日志 | 串行写队列、按日期/大小滚动、保留历史、flush、写失败统计；`RuntimeMetrics` 已接入网络请求、文件下载和缓存/目录维护，并限制 bucket/sample 上限 | 真实生命周期 flush、长期日志权限和导出脱敏；同步结果和活动任务峰值仍需补齐 |
 | A13 图片收藏 | keyset 分页、搜索/计数、增量刷新、缩略图和语义标签 | 1,000/10,000 张设备性能、动态字体和页面反复进出泄漏验收 |
@@ -411,7 +411,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 - `lib/pages/settings/network_setting.dart:141` 在页面初始化同步读取 `rule.json`，`:148` 在 `dispose` 同步写入；规则文件较大或存储较慢时会阻塞首帧和页面切换。
 - `lib/pages/settings/comic_source_settings.dart:202` 在下载漫画源后直接写文件；`lib/tools/io_tools.dart:576`、`:596`、`:632` 等导入导出辅助仍有同步文件读写。
-- 当前对 `lib/` 使用 `tool/check-async-boundary.sh` 扫描得到 64 个 `void ... async`、171 个 `Future<void> ... async` 和 52 个同步 I/O 命中（统计日期 2026-11-14）。下载子类的 `FavoriteDownloading.start` 已改为兼容入口 + 可观测 Future；EH archive 的 isolate 回调已捕获异步错误，但其 `start` 仍受基类兼容签名约束。Workmanager 的 `executeTask` 因插件 API 固定为 `void async` 也需保留直接调用。通知、后台服务、下载删除、设置、分享以及收藏/历史 mutator 相关边界已收口；剩余页面/手势入口仍可能无法等待、取消或接收异常，需继续按持久化、网络和生命周期风险排序。该数量应由 CI 扫描持续跟踪，而不是作为一次性完成标准。
+- 当前对 `lib/` 使用 `tool/check-async-boundary.sh` 扫描得到 59 个 `void ... async`、184 个 `Future<void> ... async` 和 50 个同步 I/O 命中（统计日期 2026-11-15）。下载子类的 `FavoriteDownloading.start` 已改为兼容入口 + 可观测 Future；EH archive 的 isolate 回调已捕获异步错误，但其 `start` 仍受基类兼容签名约束。Workmanager 的 `executeTask` 因插件 API 固定为 `void async` 也需保留直接调用。通知、后台服务、下载删除、设置、分享以及收藏/历史 mutator 相关边界已收口；剩余页面/手势入口仍可能无法等待、取消或接收异常，需继续按持久化、网络和生命周期风险排序。该数量应由 CI 扫描持续跟踪，而不是作为一次性完成标准。
 
 **实施：**
 
@@ -430,9 +430,9 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 | 方向 | 代码依据 | 方案 | 优先级 |
 | --- | --- | --- | --- |
-| A17 PDF/分享流水线 | `lib/tools/pdf.dart` 已改为异步枚举/按页读取，支持取消、进度、隔离执行、原子替换和 `RuntimeMetrics`；`pdf.save()` 受第三方 API 限制仍一次性编码 | 标准 runner 验证封面/章节语义、500/2,000 页、超大图片、取消响应、空间不足和最终文件可打开性 | P1（大图/长篇用户） |
+| A17 PDF/分享流水线 | `lib/tools/pdf.dart` 已改为异步枚举/按页读取，支持取消、进度、隔离执行、原子替换和 `RuntimeMetrics`；隔离 isolate 的成功/取消/失败指标已在主 isolate 汇总；`pdf.save()` 受第三方 API 限制仍一次性编码 | 标准 runner 验证封面/章节语义、500/2,000 页、超大图片、取消响应、空间不足和最终文件可打开性 | P1（大图/长篇用户） |
 | A18 缓存与下载目录维护 | 已接入 `directory_maintenance.dart`：异步分批清理、容量统计、SHA-256 校验、staging 目录和迁移 journal；`cache_auto_clear.dart` 已改为使用该维护入口 | 固定设备性能、剩余空间不足、进程中断恢复和跨平台目录替换验收 | P2 |
-| A19 来源网络策略 | `SourceNetworkPolicy` 已接入 `AppHttpAdapter` 和 JS source 请求，提供每来源/host 并发、间隔、响应体上限、GET/HEAD 重试、429 退避、熔断、错误分类和诊断计数；非幂等请求不自动重放；本轮补充 `TimeoutException` fixture | 为内置来源补脱敏 fixture，验证 429/403/超时/取消/错误 JSON；在真实网络下确认取消、代理和原生 curl 路径的一致性 | P1（网络错误频发时升 P0） |
+| A19 来源网络策略 | `SourceNetworkPolicy` 已接入 `AppHttpAdapter` 和 JS source 请求，提供每来源/host 并发、间隔、响应体上限、GET/HEAD 重试、429 退避、熔断、错误分类和诊断计数；非幂等请求不自动重放；动态重配置原地保留活动与等待队列；本轮补充 `TimeoutException` fixture | 为内置来源补脱敏 fixture，验证 429/403/超时/取消/错误 JSON；在真实网络下确认取消、代理和原生 curl 路径的一致性 | P1（网络错误频发时升 P0） |
 
 ### A17-A19 验收与交付
 
