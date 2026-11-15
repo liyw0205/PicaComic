@@ -364,23 +364,43 @@ class ComicReadingPageLogic extends StateController {
 
   /// 是否处于自动翻页状态
   bool runningAutoPageTurning = false;
+  int _autoPageTurningGeneration = 0;
+
+  void stopAutoPageTurning() {
+    runningAutoPageTurning = false;
+    _autoPageTurningGeneration++;
+  }
 
   /// 自动翻页
-  void autoPageTurning() async {
-    if (index == urls.length - 1) {
-      runningAutoPageTurning = false;
-      update();
+  Future<void> autoPageTurning() async {
+    final generation = ++_autoPageTurningGeneration;
+    if (isDisposed || !runningAutoPageTurning) {
       return;
     }
-    int sec = int.parse(appdata.settings[33]);
-    for (int i = 0; i < sec * 10; i++) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (!runningAutoPageTurning) {
+    while (!isDisposed &&
+        runningAutoPageTurning &&
+        generation == _autoPageTurningGeneration) {
+      if (index >= urls.length - 1) {
+        runningAutoPageTurning = false;
+        update();
         return;
       }
+      final sec = int.parse(appdata.settings[33]);
+      for (int i = 0; i < sec * 10; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (isDisposed ||
+            !runningAutoPageTurning ||
+            generation != _autoPageTurningGeneration) {
+          return;
+        }
+      }
+      if (isDisposed ||
+          !runningAutoPageTurning ||
+          generation != _autoPageTurningGeneration) {
+        return;
+      }
+      jumpToNextPage();
     }
-    jumpToNextPage();
-    autoPageTurning();
   }
 
   void refresh_() {

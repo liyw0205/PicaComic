@@ -182,7 +182,7 @@ extension ToolBar on ComicReadingPage {
                           logic.runningAutoPageTurning =
                               !logic.runningAutoPageTurning;
                           logic.update();
-                          logic.autoPageTurning();
+                          unawaited(logic.autoPageTurning());
                         },
                       ),
                     ),

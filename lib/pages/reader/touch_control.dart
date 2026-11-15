@@ -127,14 +127,20 @@ class TapController {
       ignoreNextTap = false;
       return;
     }
-    var logic = StateController.find<ComicReadingPageLogic>();
+    final logic = StateController.findOrNull<ComicReadingPageLogic>();
+    if (logic == null || logic.isDisposed) {
+      fingers--;
+      return;
+    }
 
     if(appdata.settings[55] == "1") {
       _tapDownPointer = _TapDownPointer(event.pointer);
       Future.delayed(const Duration(milliseconds: 300), () {
-        if (event.pointer == _tapDownPointer?.id) {
-          onTapUpReplacement = _handleLongPressEnd;
-          _handleLongPressStart(event.position);
+        if (event.pointer == _tapDownPointer?.id &&
+            !logic.isDisposed &&
+            identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+          onTapUpReplacement = (detail) => _handleLongPressEnd(logic, detail);
+          _handleLongPressStart(logic, event.position);
         }
       });
     }
@@ -176,6 +182,7 @@ class TapController {
   }
 
   static void Function(PointerUpEvent detail)? _doubleClickRecognizer;
+  static ComicReadingPageLogic? _doubleClickLogic;
 
   static void handleSecondaryTapUp(PointerDownEvent detail){
     var logic = StateController.find<ComicReadingPageLogic>();
@@ -206,7 +213,11 @@ class TapController {
     );
   }
 
-  static void onTapUp(PointerUpEvent detail) async {
+  static void onTapUp(PointerUpEvent detail) {
+    unawaited(_onTapUp(detail));
+  }
+
+  static Future<void> _onTapUp(PointerUpEvent detail) async {
     fingers--;
     if(onTapUpReplacement != null){
       onTapUpReplacement!(detail);
@@ -214,7 +225,10 @@ class TapController {
       return;
     }
 
-    var logic = StateController.find<ComicReadingPageLogic>();
+    final logic = StateController.findOrNull<ComicReadingPageLogic>();
+    if (logic == null || logic.isDisposed) {
+      return;
+    }
 
     _tapDownPointer = null;
 
@@ -233,7 +247,10 @@ class TapController {
     }
 
     if (appdata.settings[49] == "1") {
-      if (_doubleClickRecognizer == null) {
+      if (_doubleClickRecognizer == null ||
+          !identical(_doubleClickLogic, logic)) {
+        _doubleClickRecognizer = null;
+        _doubleClickLogic = logic;
         bool flag = false;
         _doubleClickRecognizer = (another) {
           var d = detail.delta - another.delta;
@@ -242,9 +259,20 @@ class TapController {
           }
         };
         await Future.delayed(const Duration(milliseconds: 200));
+        if (!identical(_doubleClickLogic, logic) ||
+            !identical(
+                StateController.findOrNull<ComicReadingPageLogic>(), logic) ||
+            logic.isDisposed) {
+          if (identical(_doubleClickLogic, logic)) {
+            _doubleClickRecognizer = null;
+            _doubleClickLogic = null;
+          }
+          return;
+        }
         _doubleClickRecognizer = null;
+        _doubleClickLogic = null;
         if (flag) {
-          _handleDoubleClick(detail.position);
+          _handleDoubleClick(logic, detail.position);
           return;
         }
       } else {
@@ -336,8 +364,12 @@ class TapController {
     }
   }
 
-  static void _handleDoubleClick(Offset position) async {
-    var logic = StateController.find<ComicReadingPageLogic>();
+  static void _handleDoubleClick(ComicReadingPageLogic logic, Offset position) {
+    if (logic.isDisposed ||
+        !identical(
+            StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+      return;
+    }
     var controller = logic.photoViewController;
     double target;
     if (controller.scale == null || controller.getInitialScale?.call() == null) {
@@ -356,8 +388,11 @@ class TapController {
     controller.animateScale?.call(target, Offset(size.width/2 - position.dx, size.height/2 - position.dy));
   }
 
-  static void _handleLongPressStart(Offset position){
-    var logic = StateController.find<ComicReadingPageLogic>();
+  static void _handleLongPressStart(ComicReadingPageLogic logic, Offset position){
+    if (logic.isDisposed ||
+        !identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+      return;
+    }
     var controller = logic.photoViewController;
     if(controller.scale != controller.getInitialScale?.call() || controller.scale == null
         || controller.getInitialScale?.call() == null){
@@ -369,8 +404,11 @@ class TapController {
     controller.updateState?.call(null);
   }
 
-  static void _handleLongPressEnd(PointerUpEvent event){
-    var logic = StateController.find<ComicReadingPageLogic>();
+  static void _handleLongPressEnd(ComicReadingPageLogic logic, PointerUpEvent event){
+    if (logic.isDisposed ||
+        !identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+      return;
+    }
     var controller = logic.photoViewController;
     if(controller.scale == controller.getInitialScale?.call() || controller.scale == null){
       return;
