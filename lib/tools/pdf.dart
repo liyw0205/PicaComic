@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
@@ -131,7 +132,7 @@ Future<void> _createPdfFromComic({
     for (final page in pages) {
       cancellation?.throwIfCancelled();
       if (page.path != null && page.title != null) {
-        final imageData = await File(page.path!).readAsBytes();
+        final image = await _loadDeferredImage(File(page.path!));
         cancellation?.throwIfCancelled();
         pdf.addPage(
           Page(
@@ -146,7 +147,7 @@ Future<void> _createPdfFromComic({
                   ),
                 ),
                 Expanded(
-                  child: Image(MemoryImage(imageData), fit: BoxFit.contain),
+                  child: Image(image, fit: BoxFit.contain),
                 ),
               ],
             ),
@@ -161,12 +162,11 @@ Future<void> _createPdfFromComic({
           ),
         );
       } else {
-        final imageData = await File(page.path!).readAsBytes();
+        final image = await _loadDeferredImage(File(page.path!));
         cancellation?.throwIfCancelled();
         pdf.addPage(
           Page(
-            build: (Context context) =>
-                Image(MemoryImage(imageData), fit: BoxFit.contain),
+            build: (Context context) => Image(image, fit: BoxFit.contain),
           ),
         );
       }
@@ -192,6 +192,51 @@ Future<void> _createPdfFromComic({
   } catch (_) {
     timer.finish(success: false);
     rethrow;
+  }
+}
+
+/// Keeps page input bytes out of the document until that page is painted.
+///
+/// The PDF package resolves image providers during [Document.save], so a
+/// provider backed by a path lets earlier pages release their source bytes
+/// after the PDF stream copies them. Dimensions are read up front because
+/// [Image] needs them during layout.
+Future<ImageProvider> _loadDeferredImage(File file) async {
+  final bytes = await file.readAsBytes();
+  final decoded = MemoryImage(bytes);
+  final width = decoded.width;
+  final height = decoded.height;
+  if (width == null || height == null) {
+    throw StateError('Unable to determine image dimensions: ${file.path}');
+  }
+  return _DeferredFileImage(
+    file.path,
+    width: width,
+    height: height,
+    orientation: decoded.orientation,
+  );
+}
+
+final class _DeferredFileImage extends ImageProvider {
+  _DeferredFileImage(
+    this.path, {
+    required int width,
+    required int height,
+    required PdfImageOrientation orientation,
+  }) : super(width, height, orientation, null);
+
+  final String path;
+
+  @override
+  PdfImage buildImage(Context context, {int? width, int? height}) {
+    // ImageProvider.buildImage is synchronous; this runs in the export
+    // isolate, keeping the UI isolate free while limiting retained input.
+    final bytes = File(path).readAsBytesSync();
+    return PdfImage.file(
+      context.document,
+      bytes: bytes,
+      orientation: orientation,
+    );
   }
 }
 
