@@ -598,7 +598,12 @@ Future<Map<String, dynamic>> extractDataBackup(String source, Directory root,
     // original backup remains available for inspection and retry.
     if (FileSystemEntity.typeSync(root.path, followLinks: false) ==
         FileSystemEntityType.directory) {
-      root.deleteSync(recursive: true);
+      try {
+        root.deleteSync(recursive: true);
+      } catch (_) {
+        // Cleanup is best effort; never hide the validation failure that made
+        // the extracted backup unusable.
+      }
     }
     rethrow;
   }
