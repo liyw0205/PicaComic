@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:pica_comic/comic_source/built_in/ht_manga.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/comic_page.dart';
@@ -63,15 +67,31 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   }
 
   @override
-  void onThumbnailTapped(int index) async {
-    await History.findOrCreate(data!);
-    App.globalTo(
-      () => ComicReadingPage.htmanga(
-        data!.target,
-        data!.title,
-        initialPage: index + 1,
-      ),
-    );
+  void onThumbnailTapped(int index) {
+    final comic = data;
+    if (comic == null) return;
+    unawaited(_openReader(comic, initialPage: index + 1));
+  }
+
+  Future<void> _openReader(HtComicInfo comic,
+      {required int initialPage}) async {
+    try {
+      await History.findOrCreate(comic);
+      if (!_isPageActive(comic)) return;
+      await App.globalTo(
+        () => ComicReadingPage.htmanga(
+          comic.target,
+          comic.title,
+          initialPage: initialPage,
+        ),
+      );
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open Ht Manga reader: ${safeNetworkError(error)}\n$stack",
+      );
+    }
   }
 
   @override
@@ -87,15 +107,36 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   int? get pages => null;
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
-    App.globalTo(
-      () => ComicReadingPage.htmanga(
-        data!.target,
-        data!.title,
-        initialPage: history!.page,
-      ),
-    );
+  void read(History? history) {
+    final comic = data;
+    if (comic == null) return;
+    unawaited(_read(comic, history));
+  }
+
+  Future<void> _read(HtComicInfo comic, History? history) async {
+    try {
+      final currentHistory = await History.createIfNull(history, comic);
+      if (!_isPageActive(comic)) return;
+      await App.globalTo(
+        () => ComicReadingPage.htmanga(
+          comic.target,
+          comic.title,
+          initialPage: currentHistory.page,
+        ),
+      );
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open Ht Manga reader: ${safeNetworkError(error)}\n$stack",
+      );
+    }
+  }
+
+  bool _isPageActive(HtComicInfo comic) {
+    final logic =
+        StateController.findOrNull<ComicPageLogic<HtComicInfo>>(tag: tag);
+    return logic != null && !logic.isDisposed && identical(logic.data, comic);
   }
 
   @override
@@ -183,34 +224,116 @@ class HtComicPageLogic extends StateController {
   bool loading = true;
   HtComicInfo? comic;
   String? message;
-  ScrollController controller = ScrollController();
+  final ScrollController controller = ScrollController();
   bool showAppbarTitle = false;
   List<String> images = [];
+  bool _requestInFlight = false;
+  bool _imagesRequestInFlight = false;
+  int _requestGeneration = 0;
+  int _imagesGeneration = 0;
 
-  void get(String id) async {
-    var res = await HtmangaNetwork().getComicInfo(id);
-    message = res.errorMessage;
-    comic = res.dataOrNull;
-    if (res.subData != null) {
-      images.addAll(res.subData);
+  Future<void> get(String id) async {
+    if (isDisposed || _requestInFlight) return;
+    _requestInFlight = true;
+    final generation = ++_requestGeneration;
+    _imagesGeneration++;
+    _imagesRequestInFlight = false;
+    try {
+      final res = await HtmangaNetwork().getComicInfo(id);
+      if (isDisposed || generation != _requestGeneration) return;
+      message = res.errorMessage;
+      comic = res.dataOrNull;
+      images
+        ..clear()
+        ..addAll(
+          res.subData is Iterable
+              ? (res.subData as Iterable).whereType<String>()
+              : const <String>[],
+        );
+      loading = false;
+      update();
+    } catch (error, stack) {
+      if (isDisposed || generation != _requestGeneration) return;
+      message = safeNetworkError(error);
+      loading = false;
+      update();
+      LogManager.addLog(
+        LogLevel.error,
+        "Network",
+        "Failed to load Ht Manga comic: ${safeNetworkError(error)}\n$stack",
+      );
+    } finally {
+      if (generation == _requestGeneration) {
+        _requestInFlight = false;
+      }
     }
-    loading = false;
-    update();
   }
 
   void refresh_() {
+    if (isDisposed) return;
+    _requestGeneration++;
+    _imagesGeneration++;
+    _requestInFlight = false;
+    _imagesRequestInFlight = false;
     comic = null;
     message = null;
     loading = true;
+    images.clear();
     update();
   }
 
-  void getImages() async {
-    var nextPage = images.length ~/ 12 + 1;
-    var res = await HtmangaNetwork().getThumbnails(comic!.id, nextPage);
-    if (!res.error) {
-      images.addAll(res.data);
-      update();
+  Future<void> getImages() async {
+    final currentComic = comic;
+    if (isDisposed || currentComic == null || _imagesRequestInFlight) return;
+    _imagesRequestInFlight = true;
+    final generation = ++_imagesGeneration;
+    final nextPage = images.length ~/ 12 + 1;
+    try {
+      final res =
+          await HtmangaNetwork().getThumbnails(currentComic.id, nextPage);
+      if (isDisposed ||
+          generation != _imagesGeneration ||
+          !identical(currentComic, comic)) {
+        return;
+      }
+      if (!res.error) {
+        images.addAll(res.data);
+        update();
+      } else {
+        LogManager.addLog(
+          LogLevel.error,
+          "Network",
+          "Failed to load Ht Manga thumbnails: "
+              "${safeNetworkError(res.errorMessage)}",
+        );
+      }
+    } catch (error, stack) {
+      if (isDisposed ||
+          generation != _imagesGeneration ||
+          !identical(currentComic, comic)) {
+        return;
+      }
+      LogManager.addLog(
+        LogLevel.error,
+        "Network",
+        "Failed to load Ht Manga thumbnails: "
+            "${safeNetworkError(error)}\n$stack",
+      );
+    } finally {
+      if (generation == _imagesGeneration) {
+        _imagesRequestInFlight = false;
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    if (isDisposed) return;
+    _requestGeneration++;
+    _imagesGeneration++;
+    _requestInFlight = false;
+    _imagesRequestInFlight = false;
+    controller.dispose();
+    super.dispose();
   }
 }
