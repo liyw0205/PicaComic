@@ -25,6 +25,9 @@ void main() {
   Completer<void>? parallelRelease;
   Completer<void>? parallelStarted;
   var parallelRequestCount = 0;
+  Completer<void>? clearRelease;
+  Completer<void>? clearStarted;
+  var clearRequestCount = 0;
   final sourceBytes = Uint8List.fromList(
     image.encodePng(image.Image(width: 4, height: 20)),
   );
@@ -68,6 +71,13 @@ void main() {
         }
         await parallelRelease?.future;
       }
+      if (request.uri.path.contains('clear-')) {
+        clearRequestCount++;
+        if (clearRequestCount == 1 && !(clearStarted?.isCompleted ?? true)) {
+          clearStarted!.complete();
+        }
+        await clearRelease?.future;
+      }
       request.response.headers.contentType = ContentType('image', 'png');
       request.response.contentLength = responseBytes.length;
       request.response.add(responseBytes);
@@ -81,6 +91,9 @@ void main() {
     parallelRequestCount = 0;
     parallelRelease = null;
     parallelStarted = null;
+    clearRelease = null;
+    clearStarted = null;
+    clearRequestCount = 0;
   });
 
   tearDownAll(() async {
@@ -139,6 +152,44 @@ void main() {
     expect(finished.active, 0);
     expect(finished.peakActive, 2);
     expect(finished.count, 2);
+  });
+
+  test('clearTasks cancels same-key waiters without restarting the request',
+      () async {
+    clearRelease = Completer<void>();
+    clearStarted = Completer<void>();
+    final first = load('clear-pending').last;
+    await clearStarted!.future.timeout(const Duration(seconds: 5));
+
+    final second = load('clear-pending').last;
+    await Future<void>.delayed(Duration.zero);
+    ImageManager.clearTasks();
+    clearRelease!.complete();
+
+    try {
+      await expectLater(
+        first,
+        throwsA(isA<DioException>().having(
+          (error) => error.type,
+          'type',
+          DioExceptionType.cancel,
+        )),
+      );
+      await expectLater(
+        second,
+        throwsA(isA<DioException>().having(
+          (error) => error.type,
+          'type',
+          DioExceptionType.cancel,
+        )),
+      );
+    } finally {
+      if (!clearRelease!.isCompleted) clearRelease!.complete();
+    }
+
+    expect(clearRequestCount, 1,
+        reason: 'a waiter invalidated by clearTasks must not restart IO');
+    expect(ImageManager.haveTask, isFalse);
   });
 
   test('cancelling before recombination cannot commit an image cache',

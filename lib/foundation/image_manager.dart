@@ -61,6 +61,7 @@ class ImageManager {
   static final Map<String, Object?> _taskOwners = {};
   static final Object _taskOwnerZoneKey = Object();
   static final Set<Object> _cancelledOwners = {};
+  static int _taskGeneration = 0;
 
   /// Image cache manager for reader and download manager
   factory ImageManager() => cache ??= ImageManager._create();
@@ -68,7 +69,10 @@ class ImageManager {
   static bool get haveTask => loadingItems.isNotEmpty;
 
   static void clearTasks() {
-    for (final token in _cancelTokens.values) {
+    // Invalidate waiters as well as tasks that already own a token. Without a
+    // generation, a same-key waiter can restart immediately after cleanup.
+    _taskGeneration++;
+    for (final token in List<CancelToken>.of(_cancelTokens.values)) {
       token.cancel('Image tasks cleared');
     }
   }
@@ -122,9 +126,17 @@ class ImageManager {
 
   Future<CancelToken> _startTask(String key) async {
     final owner = Zone.current[_taskOwnerZoneKey] as Object?;
+    final generation = _taskGeneration;
     while (true) {
       if (owner != null && _cancelledOwners.contains(owner)) {
         throw StateError('Image task owner cancelled');
+      }
+      if (generation != _taskGeneration) {
+        throw DioException(
+          requestOptions: RequestOptions(path: key),
+          type: DioExceptionType.cancel,
+          message: 'Image tasks cleared',
+        );
       }
       if (_cancelTokens.containsKey(key) || loadingItems[key] != null) {
         await Future.delayed(const Duration(milliseconds: 300));
