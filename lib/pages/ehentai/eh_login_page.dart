@@ -2,10 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart'
+    show InAppWebViewController;
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/pages/ehentai/eh_user_cookie_parser.dart';
 import 'package:pica_comic/pages/webview.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
@@ -26,6 +30,9 @@ class _EhLoginPageState extends State<EhLoginPage> {
   final c4 = TextEditingController();
   bool logging = false;
   late EhUserCookieParserController cookieParserController;
+  bool _mobileWebviewOpen = false;
+  bool _webviewCookieCaptureInFlight = false;
+  DesktopWebview? _desktopWebview;
 
   @override
   void initState() {
@@ -35,6 +42,8 @@ class _EhLoginPageState extends State<EhLoginPage> {
 
   @override
   void dispose() {
+    _desktopWebview?.close();
+    _desktopWebview = null;
     c1.dispose();
     c2.dispose();
     c3.dispose();
@@ -111,17 +120,20 @@ class _EhLoginPageState extends State<EhLoginPage> {
                       switchInCurve: Curves.easeInOut,
                       switchOutCurve: Curves.easeInOut,
                       child: cookieParserController.visible
-                          ? _buildCookieParserButtonGroup(cookieParserController)
+                          ? _buildCookieParserButtonGroup(
+                              cookieParserController)
                           : TextButton(
-                        onPressed: () {
-                          if (cookieParserController.visible) return;
-                          cookieParserController.show();
-                          setState(() {});
-                        },
-                        child: Text('通过 cookie 身份信息快速填写'.tl),
-                      ),
+                              onPressed: () {
+                                if (cookieParserController.visible) return;
+                                cookieParserController.show();
+                                setState(() {});
+                              },
+                              child: Text('通过 cookie 身份信息快速填写'.tl),
+                            ),
                     ),
-                    const SizedBox(height: 8,),
+                    const SizedBox(
+                      height: 8,
+                    ),
                     Center(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
@@ -223,67 +235,164 @@ class _EhLoginPageState extends State<EhLoginPage> {
     );
   }
 
-  void loginWithWebview() async {
+  void loginWithWebview() {
+    unawaited(_loginWithWebview());
+  }
+
+  Future<void> _loginWithWebview() async {
+    if (!mounted || logging) return;
     if (App.isMobile) {
-      App.globalTo(() => AppWebview(
-            singlePage: true,
-            initialUrl:
-                "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
-            onTitleChange: (title, controller) async {
-              if (title == "E-Hentai Forums") {
-                var ua = await controller.getUA();
-                if(ua != null){
-                  appdata.implicitData[3] = ua;
-                  appdata.writeImplicitData();
-                }
-                var cookies1 =
-                    await controller.getCookies("https://e-hentai.org") ?? {};
-                var cookies2 =
-                    await controller.getCookies("https://exhentai.org") ?? {};
-                var cookies = <String, String>{};
-                cookies1.forEach((key, value) {
-                  cookies[key] = value;
-                });
-                cookies2.forEach((key, value) {
-                  cookies[key] = value;
-                });
-                loginWithCookies(cookies);
-                App.globalBack();
-              }
-            },
-          ));
+      if (_mobileWebviewOpen) return;
+      _mobileWebviewOpen = true;
+      try {
+        await App.globalTo(() => AppWebview(
+              singlePage: true,
+              initialUrl:
+                  "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+              onTitleChange: (title, controller) {
+                unawaited(_handleMobileWebviewTitle(title, controller));
+              },
+            ));
+      } catch (error, stack) {
+        _logLoginError("Failed to open mobile login webview", error, stack);
+      } finally {
+        _mobileWebviewOpen = false;
+      }
     } else if (App.isDesktop) {
-      if (await DesktopWebview.isAvailable()) {
-        var webview = DesktopWebview(
+      if (_desktopWebview != null) return;
+      try {
+        if (!await DesktopWebview.isAvailable()) {
+          if (mounted) showToast(message: "Unsupported device".tl);
+          return;
+        }
+        if (!mounted || _desktopWebview != null) return;
+        late final DesktopWebview webview;
+        webview = DesktopWebview(
           initialUrl: "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
-          onTitleChange: (url, webview) async {
+          onClose: () {
+            if (identical(_desktopWebview, webview)) {
+              _desktopWebview = null;
+            }
+          },
+          onTitleChange: (url, controller) {
             if (url == "E-Hentai Forums") {
-              var ua = webview.userAgent;
-              if(ua != null){
-                appdata.implicitData[3] = ua;
-                appdata.writeImplicitData();
-              }
-              var cookies1 =
-                  await webview.getCookies("https://e-hentai.org");
-              var cookies2 =
-                  await webview.getCookies("https://exhentai.org");
-              webview.close();
-              var cookies = <String, String>{};
-              cookies1.forEach((key, value) {
-                cookies[key] = value;
-              });
-              cookies2.forEach((key, value) {
-                cookies[key] = value;
-              });
-              loginWithCookies(cookies);
+              unawaited(_handleDesktopWebviewTitle(controller));
             }
           },
         );
-        unawaited(webview.open());
-      } else {
+        _desktopWebview = webview;
+        await webview.open();
+      } catch (error, stack) {
+        _logLoginError("Failed to open desktop login webview", error, stack);
+        final webview = _desktopWebview;
+        _desktopWebview = null;
+        webview?.close();
+      }
+    } else {
+      if (mounted) {
         showToast(message: "Unsupported device".tl);
       }
     }
+  }
+
+  Future<void> _handleMobileWebviewTitle(
+      String title, InAppWebViewController controller) async {
+    if (title != "E-Hentai Forums" ||
+        !mounted ||
+        logging ||
+        _webviewCookieCaptureInFlight) {
+      return;
+    }
+    _webviewCookieCaptureInFlight = true;
+    try {
+      String? userAgent;
+      try {
+        userAgent = await controller.getUA();
+      } catch (error, stack) {
+        _logLoginError(
+            "Failed to read mobile webview user agent", error, stack);
+      }
+      await _saveWebviewUserAgent(userAgent);
+      if (!mounted) return;
+      final cookies = await _collectWebviewCookies(
+        () => controller.getCookies("https://e-hentai.org"),
+        () => controller.getCookies("https://exhentai.org"),
+      );
+      if (!mounted) return;
+      loginWithCookies(cookies);
+      _closeMobileWebview();
+    } catch (error, stack) {
+      _logLoginError("Failed to read mobile login cookies", error, stack);
+      if (mounted) showToast(message: "登录失败".tl);
+    } finally {
+      _webviewCookieCaptureInFlight = false;
+    }
+  }
+
+  Future<void> _handleDesktopWebviewTitle(DesktopWebview webview) async {
+    if (!mounted ||
+        logging ||
+        _webviewCookieCaptureInFlight ||
+        !identical(_desktopWebview, webview)) {
+      return;
+    }
+    _webviewCookieCaptureInFlight = true;
+    try {
+      await _saveWebviewUserAgent(webview.userAgent);
+      if (!mounted) return;
+      final cookies = await _collectWebviewCookies(
+        () => webview.getCookies("https://e-hentai.org"),
+        () => webview.getCookies("https://exhentai.org"),
+      );
+      if (!mounted) return;
+      webview.close();
+      loginWithCookies(cookies);
+    } catch (error, stack) {
+      _logLoginError("Failed to read desktop login cookies", error, stack);
+      if (mounted) showToast(message: "登录失败".tl);
+    } finally {
+      _webviewCookieCaptureInFlight = false;
+      if (identical(_desktopWebview, webview)) {
+        webview.close();
+      }
+    }
+  }
+
+  Future<Map<String, String>> _collectWebviewCookies(
+      Future<Map<String, String>?> Function() loadEh,
+      Future<Map<String, String>?> Function() loadExh) async {
+    final cookies = <String, String>{};
+    final results = await Future.wait([loadEh(), loadExh()]);
+    for (final result in results) {
+      if (result != null) cookies.addAll(result);
+    }
+    return cookies;
+  }
+
+  Future<void> _saveWebviewUserAgent(String? userAgent) async {
+    if (userAgent == null || userAgent.isEmpty) return;
+    appdata.implicitData[3] = userAgent;
+    try {
+      await appdata.writeImplicitData();
+    } catch (error, stack) {
+      _logLoginError("Failed to persist webview user agent", error, stack);
+    }
+  }
+
+  void _closeMobileWebview() {
+    try {
+      if (App.globalContext?.mounted == true) App.globalBack();
+    } catch (error, stack) {
+      _logLoginError("Failed to close mobile login webview", error, stack);
+    }
+  }
+
+  void _logLoginError(String message, Object error, StackTrace stack) {
+    LogManager.addLog(
+      LogLevel.error,
+      "EH Login",
+      "$message: ${safeNetworkError(error)}\n$stack",
+    );
   }
 
   void login(String id, String hash, String igneous, String star) {
@@ -295,39 +404,60 @@ class _EhLoginPageState extends State<EhLoginPage> {
     });
   }
 
-  void loginWithCookies(Map<String, String> cookiesMap) async {
-    setState(() {
-      logging = true;
-    });
+  void loginWithCookies(Map<String, String> cookiesMap) {
+    unawaited(_loginWithCookies(cookiesMap));
+  }
 
-    EhNetwork().cookieJar.deleteUri(Uri.parse('https://e-hentai.org'));
-    EhNetwork().cookieJar.deleteUri(Uri.parse('https://exhentai.org'));
+  Future<void> _loginWithCookies(Map<String, String> cookiesMap) async {
+    if (!mounted || logging) return;
+    setState(() => logging = true);
+    EhNetwork? network;
+    try {
+      network = EhNetwork();
+      _clearEhCookies(network);
+      final cookies = cookiesMap.entries
+          .map((entry) => Cookie(entry.key, entry.value))
+          .toList(growable: false);
+      final ehCookies = cookies
+          .map((cookie) => cookie..domain = ".e-hentai.org")
+          .toList(growable: false);
+      final exhCookies = cookies
+          .map((cookie) =>
+              Cookie(cookie.name, cookie.value)..domain = ".exhentai.org")
+          .toList(growable: false);
+      network.cookieJar
+          .saveFromResponse(Uri.parse("https://e-hentai.org"), ehCookies);
+      network.cookieJar
+          .saveFromResponse(Uri.parse("https://exhentai.org"), exhCookies);
 
-    var cookies =
-        cookiesMap.entries.map((e) => Cookie(e.key, e.value)).toList();
-    cookies.forEach((element) => element.domain = ".e-hentai.org");
-    EhNetwork()
-        .cookieJar
-        .saveFromResponse(Uri.parse("https://e-hentai.org"), cookies);
-    cookies.forEach((element) => element.domain = ".exhentai.org");
-    EhNetwork()
-        .cookieJar
-        .saveFromResponse(Uri.parse("https://exhentai.org"), cookies);
-
-    // EhNetwork().getUserName().then((b) {
-    EhNetwork().validateCookies().then((b) {
-      if(!mounted)  return;
-      if (b) {
+      final valid = await network.validateCookies();
+      if (!valid) {
+        _clearEhCookies(network);
+      }
+      if (!mounted) return;
+      if (valid) {
         context.pop();
         showToast(message: "登录成功".tl);
       } else {
-        EhNetwork().cookieJar.deleteUri(Uri.parse('https://e-hentai.org'));
-        EhNetwork().cookieJar.deleteUri(Uri.parse('https://exhentai.org'));
         showToast(message: "登录失败".tl);
-        setState(() {
-          logging = false;
-        });
       }
-    });
+    } catch (error, stack) {
+      if (network != null) _clearEhCookies(network);
+      _logLoginError("Failed to validate EH cookies", error, stack);
+      if (mounted) showToast(message: "登录失败".tl);
+    } finally {
+      if (mounted) {
+        setState(() => logging = false);
+      }
+    }
+  }
+
+  void _clearEhCookies(EhNetwork network) {
+    try {
+      network.cookieJar.deleteUri(Uri.parse('https://e-hentai.org'));
+      network.cookieJar.deleteUri(Uri.parse('https://exhentai.org'));
+    } catch (error, stack) {
+      _logLoginError("Failed to clear EH cookies", error, stack);
+    }
   }
 }
