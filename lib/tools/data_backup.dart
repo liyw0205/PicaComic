@@ -905,8 +905,11 @@ class DataRestoreTransaction {
     journal.parent.createSync(recursive: true);
     final canonicalAllowedRoots = await _canonicalRestoreRoots(allowedRoots);
     final targets = <String>[];
-    for (final target in replacements.keys) {
-      if (_normaliseRestorePath(target) == _normaliseRestorePath(dataPath) ||
+    for (final rawTarget in replacements.keys) {
+      // Keep restore artifacts beside the target. A trailing separator would
+      // otherwise place `target.restore-*` inside a directory being moved.
+      final target = _normaliseRestorePath(rawTarget);
+      if (target == _normaliseRestorePath(dataPath) ||
           _isRestorePathWithin(
               _normaliseRestorePath('$dataPath/data-restore'), target) ||
           targets.any((existing) => _restoreTargetsOverlap(existing, target)) ||
@@ -935,7 +938,7 @@ class DataRestoreTransaction {
         trustedAllowedRoots: canonicalAllowedRoots);
     transaction._write();
     for (final entry in replacements.entries) {
-      final target = entry.key;
+      final target = _normaliseRestorePath(entry.key);
       final staged = '$target.restore-new-$id';
       final backup = '$target.restore-old-$id';
       entries.add({

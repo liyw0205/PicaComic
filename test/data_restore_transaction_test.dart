@@ -299,6 +299,33 @@ void main() {
     expect(File('$dataPath/new.db').existsSync(), isFalse);
   });
 
+  test('trailing target separator keeps restore artifacts beside directory',
+      () async {
+    final dataPath = '${root.path}/data';
+    final target = Directory('$dataPath/downloads')
+      ..createSync(recursive: true);
+    await File('${target.path}/old.txt').writeAsString('old');
+    final replacement = Directory('${root.path}/downloads.new')..createSync();
+    await File('${replacement.path}/new.txt').writeAsString('new');
+
+    final transaction = await DataRestoreTransaction.prepare(dataPath, {
+      '${target.path}${Platform.pathSeparator}': replacement.path,
+    });
+    final state = jsonDecode(await transaction.journal.readAsString())
+        as Map<String, dynamic>;
+    final entry = (state['entries'] as List).single as Map<String, dynamic>;
+    expect(entry['target'], target.path);
+    expect(entry['staged'], '${target.path}.restore-new-${state['id']}');
+    expect(entry['backup'], '${target.path}.restore-old-${state['id']}');
+
+    transaction.apply();
+    expect(await File('${target.path}/new.txt').readAsString(), 'new');
+    transaction.commit();
+    await transaction.recover();
+    expect(transaction.journal.existsSync(), isFalse);
+    expect(await File('${target.path}/new.txt').readAsString(), 'new');
+  });
+
   test(
       'missing original backup must retain journal instead of claiming recovery',
       () async {
