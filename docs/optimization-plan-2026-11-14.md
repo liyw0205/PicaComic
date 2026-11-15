@@ -178,7 +178,7 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 **依据：**Flutter 解码缓存上限为 200 MiB，见 `lib/main.dart:161`；原始字节 LRU 平时为 50 MiB，进入阅读器升至 100 MiB，见 `lib/foundation/image_loader/base_image_provider.dart:120` 和 `lib/pages/reader/comic_reading_page.dart:217`。原生单响应上限为 64 MiB，且通过 JNI 完整返回字节；见 `android/app/src/main/cpp/pica_curl.c:79`、`:410`。这些不是进程总内存上限，不能相加作为 RSS。
 
-`android/app/src/main/kotlin/com/github/pacalini/pica_comic/MainActivity.kt:26` 使用可增长的 `newCachedThreadPool()`，应用层没有在此设置原生活动请求总数上限。调用侧已有的局部并发限制不能代替跨来源的全局预算。
+`android/app/src/main/kotlin/com/github/pacalini/pica_comic/MainActivity.kt:28` 当前使用 `NativeCurlExecutor(4, 64)`，原生请求已有活动数和等待队列上限；后续仍需用设备测量确认这组预算在不同网络和图片负载下是否合适。调用侧已有的局部并发限制不能代替跨来源的全局预算。
 
 **实施：**
 
@@ -647,3 +647,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A2 WebDAV 上传结果 | `0a63face` | 将 late coalesced upload 纳入同一个稳定 Future，调用方等待最终批次结果，错误也不会在微任务窗口中丢失或提前报告 | `lib/network/webdav.dart`、目标分析、格式、analyzer baseline、差异检查通过 |
 
 本轮 A2 静态审计未发现导入逐条上传、同步抑制泄漏或错误吞掉的稳定缺口；`importDataResult(null)` 的文件选择器异常和真实双客户端远端计数仍需平台/服务 fixture 验收。对应 Flutter 测试在本机加载阶段仍受 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner。普通 `master` push 与版本发布分开处理：正常发布可创建新的 annotated `v*` tag 触发 Android workflow；只禁止移动或重写既有历史 tag。
+
+## 25. 2026-11-16 页面加载与评论请求生命周期继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A16 通用加载状态 | `3707c4bc`, `f86c8b7f` | `LoadingState` 使用请求 generation、异常归一化和 dispose 守卫；retry 不再让旧响应覆盖新状态，首帧微任务启动前也检查 mounted | `test/loading_state_async_test.dart` 覆盖页面销毁后迟到响应；目标 `dart/flutter analyze`、格式、baseline 和差异检查通过 |
+| A16 Hitomi/EH 页面 | `3707c4bc` | 动态漫画卡片按 id 丢弃旧响应并提供失败重试；EH 归档下载和 Profile 请求增加互斥、generation、错误态和重试入口 | 目标分析、格式和差异检查通过；Flutter runner 受本机 Kernel SDK mismatch 阻塞 |
+| A16 账号登录 | `51f42b3c` | 登录提交增加重复请求互斥、异常复位和页面生命周期检查，离开账号页后不再回写状态 | 目标分析、格式和差异检查通过 |
+| A16 PicACG 评论/回复 | `634027b2`, `1d8c99c2` | 首屏和分页请求互斥，retry 会失效旧分页；评论发送等待刷新结果，异常、dispose 和代际变化不再回写 controller 或状态；旧分页 finally 不会清除新请求的锁 | 目标 `dart analyze`、格式、差异检查通过；需标准 Flutter runner 补充注入网络 fixture |
+| A16 桌面窗口状态 | `634027b2` | 最大化状态查询使用 mounted 守卫和异常兜底，窗口销毁后不再调用 `setState` | 目标分析、格式和差异检查通过 |
+
+本轮未移动或重写 `v4.2.47`、`v4.2.48`。普通 `master` 提交仍只推送分支，不触发 Android workflow；版本号、发布产物和标准 CI 准备完成后，按正常流程创建新的 annotated `v*` tag 并推送，让 tag workflow 执行发布门禁。新 tag 可以按版本递增正常创建，历史 tag 只保持不可变。
