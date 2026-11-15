@@ -569,3 +569,13 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A16 探索页异步边界 | `96cc9b84` | multipart 探索页增加请求中的互斥和 generation；refresh 后旧响应丢弃，避免 build 重复发起网络请求 | `test/explore_page_async_test.dart`；目标分析、格式、差异检查和异步扫描通过，`void_async=52` |
 
 A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 journal、可信根、完整文件集合校验更可靠的新缺口；独立进程、真实 WebDAV 双客户端、设备性能和中断恢复仍是发布前验收，不以静态检查替代。
+
+## 18. 2026-11-15 页面异步生命周期继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A16 收藏夹操作 | `0e5c3713` | 重命名和导出入口返回 `Future<void>`，菜单回调显式 `unawaited`；重命名完成后检查 controller 生命周期，导出对话框统一在 `finally` 关闭 | 目标分析、格式和差异检查通过；无可靠离线 UI fixture，底层重命名的持久化边界仍需单独收口 |
+| A16 JM 评论分页 | `211fbf06` | loader 注入、首屏/分页互斥、retry/refresh/dispose generation 和旧响应丢弃，页面入口显式 `unawaited` | `test/jm_comments_page_async_test.dart` 5 项生命周期回归；目标分析、格式、差异检查和异步扫描通过 |
+| A16/A17 阅读器图片操作 | `4c2023e4` | 分享/保存改为可等待 Future；图片读取后校验当前 controller、章节和 load generation，toolbar 显式 `unawaited` | 目标分析、格式和差异检查通过；真实图片流取消、设备相册/分享插件仍需标准 runner 与设备验收 |
+
+本轮异步边界扫描从基线 `64` 降至 `45` 个 `void async`。剩余入口继续按持久化、网络请求、取消和生命周期风险排序；不为降低统计数量改写插件固定签名或纯同步回调。
