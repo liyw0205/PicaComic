@@ -340,14 +340,12 @@ class SourceNetworkPolicy {
   }
 
   void reportSuccess(SourceNetworkLease lease, {ResponseBody? response}) {
-    final health = lease._bucket.health;
-    health.successes++;
-    health.consecutiveFailures = 0;
     if (response == null) {
+      _recordSuccess(lease._bucket.health);
       lease.release();
       return;
     }
-    response.stream = _releaseAfterStream(response.stream, lease);
+    response.stream = _reportStreamOutcome(response.stream, lease);
   }
 
   void reportResponse(SourceNetworkLease lease, int? statusCode) {
@@ -407,6 +405,11 @@ class SourceNetworkPolicy {
       health.consecutiveFailures = 0;
     }
     lease.release();
+  }
+
+  void _recordSuccess(SourceNetworkHealth health) {
+    health.successes++;
+    health.consecutiveFailures = 0;
   }
 
   Map<String, Object?> diagnosticSummary() {
@@ -491,12 +494,16 @@ class SourceNetworkPolicy {
     }
   }
 
-  Stream<Uint8List> _releaseAfterStream(
+  Stream<Uint8List> _reportStreamOutcome(
       Stream<Uint8List> source, SourceNetworkLease lease) async* {
     try {
       await for (final chunk in source) {
         yield chunk;
       }
+      _recordSuccess(lease._bucket.health);
+    } catch (error) {
+      reportFailure(lease, error);
+      rethrow;
     } finally {
       lease.release();
     }

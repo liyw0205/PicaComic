@@ -77,6 +77,52 @@ void main() {
     );
   });
 
+  test('records response-limit failures while reading a streamed response',
+      () async {
+    final policy = SourceNetworkPolicy();
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(
+        maxConcurrent: 1,
+        minInterval: Duration.zero,
+        maxResponseBytes: 3,
+      ),
+    );
+    final request = RequestOptions(
+      path: 'https://fixture.test',
+      extra: {'sourceKey': 'fixture'},
+    );
+    final lease = await policy.beforeRequest(request);
+    final response = policy.enforceResponseLimit(
+      ResponseBody(
+        Stream<Uint8List>.value(Uint8List.fromList([1, 2, 3, 4])),
+        200,
+      ),
+      'fixture',
+    );
+    policy.reportSuccess(lease, response: response);
+
+    var health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['successes'], 0);
+    expect(health['failures'], 0);
+    await expectLater(
+      response.stream.toList(),
+      throwsA(isA<SourceNetworkException>().having(
+        (error) => error.kind,
+        'kind',
+        SourceNetworkErrorKind.responseTooLarge,
+      )),
+    );
+
+    health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['successes'], 0);
+    expect(health['failures'], 1);
+    final followup = await policy.beforeRequest(request);
+    policy.reportSuccess(followup);
+    health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['successes'], 1);
+  });
+
   test('opens a source circuit after repeated transient failures', () async {
     var now = DateTime(2026, 1, 1);
     final policy = SourceNetworkPolicy(now: () => now);
