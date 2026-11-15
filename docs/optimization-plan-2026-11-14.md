@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-15。历史发布基线：`bc485265`，当前正式发布版本：`4.2.46+4246`（tag `v4.2.46`）；master 已推进到 `f0a7fc8e`，版本字段为 `4.2.47+4247`，但 `v4.2.47` 尚未获得 GitHub Actions/Release 门禁，不视为正式发布。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291` 和 `v4.2.46` workflow `43652289981` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
+日期：2026-11-15。历史发布基线：`bc485265`，当前正式发布版本：`4.2.46+4246`（tag `v4.2.46`）；master 已推进到 `7ed8a7d7`，版本字段为 `4.2.47+4247`。annotated tag `v4.2.47` 已固定指向 `82793767`，但该 tag 尚未获得 GitHub Actions/Release 门禁，不视为正式发布；tag 不移动、不重写，后续修复随下一版本收纳。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291` 和 `v4.2.46` workflow `43652289981` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
 
 ## 1. 结论与评估边界
 
@@ -19,7 +19,7 @@
 | WebDAV | 本机上传/下载串行化、不可变 revision、父版本图、SHA-256 回读、CAS 指针、冲突分支保留；上传前校验本地 heads 仍在远端 revision 图中；导入期间同步抑制与统计已接入 | 真实 WebDAV 的双客户端并发、ETag/无 ETag、旧客户端共存验收 |
 | 数据恢复 | 独立临时目录、替换记录、异常回滚分支、启动恢复入口、快照/故障注入覆盖 | 标准 runner 的独立进程恢复、实际设备和被篡改 `allowedRoots` 的验收 |
 | 阅读器 | 预加载代次、失败清标记、图片任务 owner、活动窗口/并发上限 | 全量测试、真实网络失败/取消和退出后任务归零 |
-| 图片与下载 | 原始字节 LRU、坏图失效、缩略图解码、内存压力清理；下载记录删除幂等，图片收藏删除不为不存在行发布同步 | 总内存预算、原生并发和固定设备性能基线 |
+| 图片与下载 | 原始字节 LRU、坏图失效、缩略图解码、内存压力清理；下载记录删除幂等，图片收藏删除不为不存在行发布同步；`StreamImageProvider` 已把取消绑定到底层 source stream | 总内存预算、原生并发和固定设备性能基线；真实网络取消和退出后任务归零 |
 | 工程验证 | Flutter 3.44.0、lockfile、analyzer baseline、本地 CI action、native curl 回归 | APK metadata、各 ABI/native curl/签名验收 |
 | 状态与 I/O 生命周期 | StateController token/disposer、监听器清理、规则/漫画源异步原子写入、通知/下载/分享及收藏/历史 mutator 的 Future 边界收口；收藏导入清理失败保留源文件 | Flutter widget 回归、Windows 替换语义、进程终止和低速存储验收 |
 | 缓存与下载目录维护 | 异步分批清理、容量统计、SHA-256 校验、staging 目录和可恢复迁移 journal；清理/迁移指标已接入 | 固定设备的性能、空间不足和跨平台中断恢复验收 |
@@ -471,7 +471,7 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 1. 在固定设备和 1,000/10,000/50,000 条数据集上测量 A5 查询 p50/p95、首屏和滚动内存，只有测量确认后再调整索引或缓存。
 2. 用双客户端真实 WebDAV 重放同秒并发、时钟偏移、离线恢复、上传中断、ETag 和无 ETag 服务；记录最终 revision 图、冲突提示和旧客户端共存行为。
 3. 为 A1/A2/A11/A16/A18 建立独立进程、低速存储和中断恢复 runner；重点确认导入失败不假成功、下载任务不丢失、目录迁移可重放。
-4. 补齐 A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收，再以连续稳定的 master CI 为条件升至 `4.2.47+4247` 并创建 annotated `v4.2.47`；tag 只指向已通过 CI 的版本提交。
+4. A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收完成后，先对当前 master 重新跑完整 CI；下一次递增版本（预计 `4.2.48+4248`）时再创建新的 annotated tag，现有 `v4.2.47` 保持不可变。tag 只指向已通过 CI 的版本提交。
 
 ## 11. 2026-11-15 后续缺口修复
 
@@ -496,3 +496,22 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 | A10 凭据边界 | `3e7f8713` | 安全存储读取失败时 `configForSettings()` 返回空结果，阻断设置页把半配置转换为匿名 WebDAV one-shot 请求；显式匿名配置仍保留 |
 
 这些提交均已推送至 `origin/master`，目标分析、格式和差异检查通过；对应 Flutter 测试仍需标准 runner 执行。annotated tag `v4.2.47` 已推送并固定到 `82793767`，但当前 GitHub Actions 未为版本提交或 tag 创建 run，GitHub Release 也尚不存在，因此不能宣称 APK 已发布。恢复 Actions 后应先对当前 master 重新跑完整 workflow，再决定是否以 `4.2.48+4248` 收纳 tag 之后的修复，避免移动既有 tag。
+
+## 12. 2026-11-15 A7/A2 审计收口与提交/tag 工作流
+
+### A7 图片源流取消传播
+
+提交 `7ed8a7d7` 已独立推送到 `origin/master`。`StreamImageProvider` 现在覆盖 `loadWithCancellation`，用 `StreamIterator` 将 `ImageLoadCancellation` 绑定到 source stream；完成、取消和异常路径均在 `finally` 中释放迭代器，避免切章或退出后底层网络流继续占用。新增 `test/stream_image_provider_cancellation_test.dart` 验证取消会触发 source `onCancel` 并返回 `ImageTaskCancelledException`。
+
+目标 `dart analyze`、`flutter analyze`、`dart format` 和 `git diff --check` 已通过。定向 Flutter 测试在 Termux 被既有 Kernel SDK mismatch 阻塞（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`）；该结果不能替代标准 runner 验收。
+
+### A2 导入链定向审计
+
+A2 本轮覆盖 `importDataResult`、`Appdata.readDataFromJson/writeData/updateSettings`、收藏/历史/图片收藏合并、`Webdav._importRevision` 和 `DataMaintenance` scope/计数。现有路径会等待本地事务提交，导入期间抑制逐条同步并透传错误；未发现可稳定复现且值得修改的源码缺口，因此不新增提交。仍需双客户端真实 WebDAV 和 1,000 条数据端到端计数验收，不能把静态审计当作远端同步证明。
+
+### 提交、推送与 tag 规则
+
+1. 每个功能组先独立完成目标分析、格式、差异和专项回归，再使用单一语义提交；提交后立即推送 `origin/master`，记录 commit、验证命令和 Actions run。
+2. master push 只用于验证和 debug artifact；正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发 Android workflow。tag 创建前先确认 master CI、Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
+3. `v4.2.47` 已固定到 `82793767`，且当前 Actions 返回 `Actions has been disabled for this repository`，不得移动、重写或宣称已发布。恢复后先验证当前 master，再以 `4.2.48+4248`（包含 tag 之后修复）创建新 tag。
+4. tag workflow 失败时保留失败历史和对应提交，修复用新提交/新版本递增；禁止通过强推 tag 或覆盖 Release 规避门禁。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
