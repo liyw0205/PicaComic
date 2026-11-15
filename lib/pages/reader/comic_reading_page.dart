@@ -589,50 +589,68 @@ class ComicReadingPage extends StatelessWidget {
     throw "failed";
   }
 
-  void share() async {
-    var logic = StateController.find<ComicReadingPageLogic>();
+  bool _isCurrentReader(ComicReadingPageLogic logic) {
+    return !logic.isDisposed &&
+        identical(StateController.findOrNull<ComicReadingPageLogic>(), logic);
+  }
+
+  Future<File?> _loadCurrentImage(ComicReadingPageLogic logic) async {
+    if (!_isCurrentReader(logic)) {
+      return null;
+    }
+    final chapter = logic.order;
+    final generation = logic.loadGeneration;
     int? index = logic.index - 1;
     if (logic.readingMethod == ReadingMethod.topToBottomContinuously) {
       index = await selectImage();
     }
-    if (index == null) {
-      return;
+    if (index == null ||
+        !_isCurrentReader(logic) ||
+        chapter != logic.order ||
+        generation != logic.loadGeneration) {
+      return null;
+    }
+    final urls = logic.urls;
+    if (index < 0 || index >= urls.length) {
+      return null;
     }
 
-    var file = await _getFileFromStream(
-        readingData.loadImage(logic.order, index, logic.urls[index]));
+    final file = await _getFileFromStream(
+        readingData.loadImage(chapter, index, urls[index]));
+    if (!_isCurrentReader(logic) ||
+        chapter != logic.order ||
+        generation != logic.loadGeneration) {
+      return null;
+    }
+    return file;
+  }
+
+  Future<void> share() async {
+    final logic = StateController.find<ComicReadingPageLogic>();
+    final file = await _loadCurrentImage(logic);
+    if (file == null) {
+      return;
+    }
 
     await shareImage(file);
   }
 
   Future<String?> _persistentCurrentImage() async {
-    var logic = StateController.find<ComicReadingPageLogic>();
-    int? index = logic.index - 1;
-    if (logic.readingMethod == ReadingMethod.topToBottomContinuously) {
-      index = await selectImage();
-    }
-    if (index == null) {
+    final logic = StateController.find<ComicReadingPageLogic>();
+    final file = await _loadCurrentImage(logic);
+    if (file == null) {
       return null;
     }
-
-    var file = await _getFileFromStream(
-        readingData.loadImage(logic.order, index, logic.urls[index]));
 
     return persistentCurrentImage(file);
   }
 
-  void saveCurrentImage() async {
-    var logic = StateController.find<ComicReadingPageLogic>();
-    int? index = logic.index - 1;
-    if (logic.readingMethod == ReadingMethod.topToBottomContinuously) {
-      index = await selectImage();
-    }
-    if (index == null) {
+  Future<void> saveCurrentImage() async {
+    final logic = StateController.find<ComicReadingPageLogic>();
+    final file = await _loadCurrentImage(logic);
+    if (file == null) {
       return;
     }
-
-    var file = await _getFileFromStream(
-        readingData.loadImage(logic.order, index, logic.urls[index]));
 
     await saveImage(file);
   }

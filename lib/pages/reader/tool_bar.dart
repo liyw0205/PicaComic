@@ -198,14 +198,14 @@ extension ToolBar on ComicReadingPage {
                       message: "保存图片".tl,
                       child: IconButton(
                         icon: const Icon(Icons.save_alt),
-                        onPressed: saveCurrentImage,
+                        onPressed: () => unawaited(saveCurrentImage()),
                       ),
                     ),
                     Tooltip(
                       message: "分享".tl,
                       child: IconButton(
                         icon: const Icon(Icons.share),
-                        onPressed: share,
+                        onPressed: () => unawaited(share()),
                       ),
                     ),
                     const SizedBox(
