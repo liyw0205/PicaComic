@@ -747,7 +747,17 @@ class DownloadManager with _DownloadDb implements Listenable {
           (item) => item?.id == id,
           orElse: () => null,
         );
-    if (item == null) return;
+    if (item == null) {
+      // The queue entry is removed before its final snapshot write. Resolve a
+      // repeated request against the in-flight operation during that window.
+      for (final entry in _cancellationOperations.entries) {
+        if (entry.key.id == id) {
+          await entry.value;
+          return;
+        }
+      }
+      return;
+    }
     final pending = _cancellationOperations[item];
     if (pending != null) {
       await pending;
