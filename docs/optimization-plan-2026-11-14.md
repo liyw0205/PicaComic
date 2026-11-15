@@ -670,3 +670,12 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A5 图片收藏查询 | `b03dc1c3`, `73d8d3d8`, `a9eaac38`, `c1b75d5e` | 为图片收藏标题增加可选 FTS5 trigram external-content 索引和增删改触发器；长关键词使用 MATCH 缩小候选集后仍用原 `instr(lower(title), ?)` 精确过滤，短关键词和 FTS 不可用时回退旧查询；补齐 JOIN 后 keyset 游标限定、第二页回归和非 FTS 辅助表降级 fixture | `test/image_favorites_pagination_test.dart` 覆盖语义、EXPLAIN、初始化后写入/删除、分页和启动回退；目标分析、格式和差异检查通过；本机 Flutter 测试受 Kernel SDK mismatch 阻塞 |
 
 上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。未移动或重写 `v4.2.47`、`v4.2.48`。本机 Flutter runner 仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此这些专项测试需由标准 runner 重跑。普通 `master` push 不触发 Android workflow；只有版本字段、发布产物和标准 CI 准备完成后，才创建新的 annotated `v*` tag 并推送触发发布门禁。
+
+## 27. 2026-11-16 恢复校验清理与 WebDAV 本地状态一致性
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A1/A9 备份恢复 | `f2db7418`, `9107ffb7` | manifest、appdata 或 SQLite 完整性校验失败时删除派生解压目录，保留原始备份供重试；清理失败不遮蔽原始校验异常 | `test/data_restore_transaction_test.dart` 验证坏备份输出目录不残留；目标分析、baseline、格式、异步边界和差异检查通过 |
+| A2/A6 WebDAV 上传 | `10a74a81` | 远端 revision 已发布但本地 sync state 写入失败时，回滚并持久化 `settings[46]`，避免磁盘 revision 声称已同步而本地 heads 未提交 | `test/webdav_sync_test.dart` 验证 upload 失败、远端 archive 保留且本地 settings revision 恢复；目标分析、baseline、格式、异步边界和差异检查通过 |
+
+上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。Flutter 测试仍受本机 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，需由标准 runner 重跑；真实双客户端 WebDAV、独立进程恢复和设备故障注入仍属于发布前验收。普通 `master` push 不触发 Android workflow，版本递增后可正常创建新的 annotated `v*` tag 触发发布，历史 tag 不移动、不重写。
