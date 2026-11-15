@@ -20,12 +20,19 @@ class JmSettings extends StatefulWidget {
   @override
   State<JmSettings> createState() => _JmSettingsState();
 
-  static void updateApiDomains([bool showLoading = false]) async {
+  static Future<void> updateApiDomains([bool showLoading = false]) async {
     var title = "";
     var msg = "";
     List<String> domains = JmNetwork.builtInApiDomains;
-    var controller = showLoading ? showLoadingDialog(App.globalContext!) : null;
-    var res = await JmNetwork().getApiDomains();
+    final context = App.globalContext;
+    if (showLoading && (context == null || !context.mounted)) return;
+    var controller = showLoading ? showLoadingDialog(context!) : null;
+    final res;
+    try {
+      res = await JmNetwork().getApiDomains();
+    } finally {
+      controller?.close();
+    }
     if (res.error) {
       title += "更新失败".tl;
       msg += "${"使用内置域名:".tl}\n";
@@ -33,40 +40,48 @@ class JmSettings extends StatefulWidget {
       title += "更新成功".tl;
       domains = res.data;
     }
-    controller?.close();
     for (var i = 0; i < domains.length; i++) {
       msg += "${"域名".tl}${i + 1}: ${domains[i]}\n";
     }
     msg = msg.trim();
-    showConfirmDialog(App.globalContext!, title, msg, () async {
+    if (context == null || !context.mounted) return;
+    showConfirmDialog(context, title, msg, () async {
       appdata.appSettings.jmApiDomains = domains;
       var index = int.tryParse(appdata.settings[17]) ?? 0;
       if (index < 0 || index >= domains.length) {
         appdata.settings[17] = "0";
       }
       await updateAppVersionCode();
-      JmNetwork().loginFromAppdata();
+      await JmNetwork().loginFromAppdata();
     });
   }
 
-  static void daily([bool showLoading = false]) async {
+  static Future<void> daily([bool showLoading = false]) async {
     if (!jm.isLogin && showLoading) {
       showToast(message: "未登录".tl);
       return;
     }
-    var controller = showLoading ? showLoadingDialog(App.globalContext!) : null;
-    var res = await JmNetwork().dailyChk();
-    controller?.close();
+    final context = App.globalContext;
+    if (showLoading && (context == null || !context.mounted)) return;
+    var controller = showLoading ? showLoadingDialog(context!) : null;
+    final res;
+    try {
+      res = await JmNetwork().dailyChk();
+    } finally {
+      controller?.close();
+    }
     var title = res.success ? "签到成功".tl : "签到失败".tl;
     var msg = res.success ? "${res.subData}".tl : res.errorMessage;
-    if (showLoading) showDialogMessage(App.globalContext!, title, msg!);
+    if (showLoading && context != null && context.mounted) {
+      showDialogMessage(context, title, msg!);
+    }
   }
 
   static Future<void> updateAppVersionCode() async {
     var res = await JmNetwork().getAppVersionCode();
     if (!res.error) {
       appdata.settings[89] = res.data;
-      appdata.updateSettings();
+      await appdata.updateSettings();
     }
   }
 }
@@ -161,14 +176,14 @@ class _JmSettingsState extends State<JmSettings> {
         ListTile(
           leading: const Icon(Icons.update_outlined),
           title: Text("更新API域名".tl),
-          onTap: () => JmSettings.updateApiDomains(true),
+          onTap: () => unawaited(JmSettings.updateApiDomains(true)),
           trailing: const Icon(Icons.arrow_right),
         ),
         ListTile(
           leading: const Icon(Icons.today),
           title: Text("自动签到".tl),
           subtitle: Text("勾选启用, 点击测试".tl),
-          onTap: () => JmSettings.daily(true),
+          onTap: () => unawaited(JmSettings.daily(true)),
           trailing: Switch(
             value: autoCheckIn,
             onChanged: (b) {
@@ -177,7 +192,9 @@ class _JmSettingsState extends State<JmSettings> {
                 autoCheckIn = b;
               });
               appdata.updateSettings();
-              if (autoCheckIn && jm.isLogin) JmSettings.daily(false);
+              if (autoCheckIn && jm.isLogin) {
+                unawaited(JmSettings.daily(false));
+              }
             },
           ),
         ),
