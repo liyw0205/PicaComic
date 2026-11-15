@@ -76,7 +76,7 @@ void main() {
     final bytes = await output.readAsBytes();
     expect(bytes.take(5), <int>[37, 80, 68, 70, 45]);
     expect(progress.first.completedPages, 0);
-    expect(progress.last.completedPages, 3);
+    expect(progress.last.completedPages, 4);
     expect(progress.last.totalPages, 4);
     final metric = RuntimeMetrics.snapshot()['pdf.export']!;
     expect(metric.success, 1);
