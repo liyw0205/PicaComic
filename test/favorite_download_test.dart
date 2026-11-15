@@ -400,6 +400,33 @@ void main() {
     }
   });
 
+  test('dispose waits for cancellation before stopping the same task',
+      () async {
+    final stopStarted = Completer<void>();
+    final stopGate = Completer<void>();
+    final item = _TestDownloadingItem('dispose-race')
+      ..onStopStarted = stopStarted
+      ..stopGate = stopGate;
+    manager.downloading.add(item);
+    manager.isDownloading = true;
+
+    final cancellation = manager.cancel(item.id);
+    try {
+      await stopStarted.future;
+      final disposal = manager.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(item.stopCount, 1);
+
+      stopGate.complete();
+      await cancellation;
+      await disposal;
+      expect(item.stopCount, 1);
+    } finally {
+      if (!stopGate.isCompleted) stopGate.complete();
+      await cancellation;
+    }
+  });
+
   test('pause cancels an in-flight cover request', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final requestStarted = Completer<HttpResponse>();

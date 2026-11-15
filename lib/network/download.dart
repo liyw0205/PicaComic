@@ -58,6 +58,10 @@ class DownloadManager with _DownloadDb implements Listenable {
   final Map<DownloadingItem, Future<void>> _cancellationOperations =
       HashMap<DownloadingItem, Future<void>>.identity();
 
+  // Path switches and disposal must own the queue lifecycle while awaiting
+  // I/O. New cancellation requests wait for that transition to finish.
+  Future<void>? _lifecycleOperation;
+
   bool _startRequestedDuringStop = false;
 
   bool _pauseRequestedDuringStop = false;
@@ -140,35 +144,37 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   ///更换下载目录
-  Future<String> updatePath(String newPath, {bool transform = true}) async {
-    // Stop network writes before copying the directory. Persist the paused
-    // progress so the destination can be resumed after a restart without
-    // relying on an in-memory queue.
-    await _waitForPendingCancellations();
-    if (isDownloading) await pause();
-    await _waitForPendingCancellations();
-    await _saveInfo();
-    await _queueWriteTail;
-    if (transform) {
-      var source = Directory(path!);
-      final appPath = await getApplicationSupportDirectory();
-      var destination = Directory(
-        newPath == "" ? "${appPath.path}${pathSep}download" : newPath,
-      );
-      try {
-        if (source.absolute.path != destination.absolute.path) {
-          await migrateDirectory(source, destination);
+  Future<String> updatePath(String newPath, {bool transform = true}) {
+    return _runLifecycle(() async {
+      // Stop network writes before copying the directory. Persist the paused
+      // progress so the destination can be resumed after a restart without
+      // relying on an in-memory queue.
+      await _waitForPendingCancellations();
+      if (isDownloading) await pause();
+      await _waitForPendingCancellations();
+      await _saveInfo();
+      await _queueWriteTail;
+      if (transform) {
+        var source = Directory(path!);
+        final appPath = await getApplicationSupportDirectory();
+        var destination = Directory(
+          newPath == "" ? "${appPath.path}${pathSep}download" : newPath,
+        );
+        try {
+          if (source.absolute.path != destination.absolute.path) {
+            await migrateDirectory(source, destination);
+          }
+        } catch (e) {
+          return e.toString();
         }
-      } catch (e) {
-        return e.toString();
       }
-    }
 
-    _runInit = false;
-    _db!.dispose();
-    downloading.clear();
-    await init();
-    return "ok";
+      _runInit = false;
+      _db!.dispose();
+      downloading.clear();
+      await init();
+      return "ok";
+    });
   }
 
   ///读取数据, 获取未完成的下载和已下载的漫画ID
@@ -458,48 +464,50 @@ class DownloadManager with _DownloadDb implements Listenable {
     }
   }
 
-  Future<void> dispose() async {
-    final initialization = _initFuture;
-    if (initialization != null) {
-      try {
-        await initialization;
-      } catch (_) {
-        // Dispose still needs to release any partially initialized resources.
+  Future<void> dispose() {
+    return _runLifecycle(() async {
+      final initialization = _initFuture;
+      if (initialization != null) {
+        try {
+          await initialization;
+        } catch (_) {
+          // Dispose still needs to release any partially initialized resources.
+        }
       }
-    }
-    try {
-      await _waitForPendingCancellations();
-    } catch (e, s) {
-      LogManager.addLog(LogLevel.error, 'Download',
-          'Failed to finish pending download cancellation during dispose\n${safeNetworkError(e)}\n$s');
-    }
-    _runInit = false;
-    isDownloading = false;
-    for (final item in downloading.toList()) {
       try {
-        await item.stop();
+        await _waitForPendingCancellations();
       } catch (e, s) {
         LogManager.addLog(LogLevel.error, "Download",
-            "Failed to stop download during dispose: ${safeNetworkError(e)}\n$s");
+            'Failed to finish pending download cancellation during dispose\n${safeNetworkError(e)}\n$s');
       }
-    }
-    downloading.clear();
-    // [stop] removes in-progress task files, so an older non-empty snapshot
-    // would resurrect tasks whose recorded progress no longer exists. Commit
-    // the cleared queue before closing the database; imports that replace the
-    // directory have already copied the source snapshot and remain resumable.
-    if (path != null) {
-      try {
-        await _saveInfo();
-      } catch (e, s) {
-        LogManager.addLog(LogLevel.error, 'IO',
-            'Failed to persist disposed download queue\n${safeNetworkError(e)}\n$s');
+      _runInit = false;
+      isDownloading = false;
+      for (final item in downloading.toList()) {
+        try {
+          await item.stop();
+        } catch (e, s) {
+          LogManager.addLog(LogLevel.error, "Download",
+              "Failed to stop download during dispose: ${safeNetworkError(e)}\n$s");
+        }
       }
-    }
-    await _queueWriteTail;
-    _db?.dispose();
-    _db = null;
-    _DownloadDb.clearAllDirectoryCache();
+      downloading.clear();
+      // [stop] removes in-progress task files, so an older non-empty snapshot
+      // would resurrect tasks whose recorded progress no longer exists. Commit
+      // the cleared queue before closing the database; imports that replace the
+      // directory have already copied the source snapshot and remain resumable.
+      if (path != null) {
+        try {
+          await _saveInfo();
+        } catch (e, s) {
+          LogManager.addLog(LogLevel.error, 'IO',
+              'Failed to persist disposed download queue\n${safeNetworkError(e)}\n$s');
+        }
+      }
+      await _queueWriteTail;
+      _db?.dispose();
+      _db = null;
+      _DownloadDb.clearAllDirectoryCache();
+    });
   }
 
   ///初始化下载管理器
@@ -743,6 +751,11 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///取消指定的下载
   Future<void> cancel(String id) async {
+    final lifecycle = _lifecycleOperation;
+    if (lifecycle != null) {
+      await lifecycle;
+      return cancel(id);
+    }
     final item = downloading.cast<DownloadingItem?>().firstWhere(
           (item) => item?.id == id,
           orElse: () => null,
@@ -783,6 +796,23 @@ class DownloadManager with _DownloadDb implements Listenable {
       if (identical(_cancellationOperations[item], operation)) {
         _cancellationOperations.remove(item);
       }
+    }
+  }
+
+  Future<T> _runLifecycle<T>(Future<T> Function() action) async {
+    final running = _lifecycleOperation;
+    if (running != null) await running;
+
+    final completer = Completer<void>();
+    final operation = completer.future;
+    _lifecycleOperation = operation;
+    try {
+      return await action();
+    } finally {
+      if (identical(_lifecycleOperation, operation)) {
+        _lifecycleOperation = null;
+      }
+      if (!completer.isCompleted) completer.complete();
     }
   }
 
