@@ -224,4 +224,44 @@ void main() {
     expect(await extra.exists(), isTrue);
     expect(await journal.exists(), isTrue);
   });
+
+  test('malformed journal cannot opt into source deletion', () async {
+    final root = await Directory.systemTemp.createTemp('pica-dir-journal-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    await source.create(recursive: true);
+    await destination.create(recursive: true);
+    const contents = 'payload';
+    await File('${source.path}/comic.bin').writeAsString(contents);
+    await File('${destination.path}/comic.bin').writeAsString(contents);
+    final digest = sha256.convert(utf8.encode(contents)).toString();
+    final journal = File('${destination.path}.migration.json');
+    await journal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'committed',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': '${destination.path}.migration-recovery.tmp',
+      // A corrupted JSON type must not be interpreted as the default `true`.
+      'deleteSource': 'false',
+      'totalBytes': contents.length,
+      'files': [
+        {
+          'path': 'comic.bin',
+          'size': contents.length,
+          'sha256': digest,
+          'done': true,
+        },
+      ],
+    }));
+
+    await expectLater(
+      migrateDirectory(source, destination),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await source.exists(), isTrue);
+    expect(await File('${source.path}/comic.bin').readAsString(), contents);
+    expect(await journal.exists(), isTrue);
+  });
 }

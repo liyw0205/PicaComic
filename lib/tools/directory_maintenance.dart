@@ -271,15 +271,28 @@ class _MigrationEntry {
     if (!_isSafeRelativePath(relativePath)) {
       throw const FormatException('Invalid directory migration relative path');
     }
+    final size = value['size'] as int;
+    if (size < 0) {
+      throw const FormatException('Invalid directory migration file size');
+    }
     final digest = value['sha256'];
-    if (digest != null && digest is! String) {
+    if (digest != null &&
+        (digest is! String || !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest))) {
       throw const FormatException('Invalid directory migration digest');
+    }
+    final done = value['done'];
+    if (done != null && done is! bool) {
+      throw const FormatException('Invalid directory migration completion');
+    }
+    if (done == true && digest == null) {
+      throw const FormatException(
+          'Completed directory migration entry has no digest');
     }
     return _MigrationEntry(
       relativePath: relativePath,
-      size: value['size'] as int,
+      size: size,
       sha256: digest as String?,
-      done: value['done'] == true,
+      done: done == true,
     );
   }
 }
@@ -325,6 +338,19 @@ Future<DirectoryMigrationReport> migrateDirectory(
       entries = (state['files'] as List<Object?>)
           .map(_MigrationEntry.fromJson)
           .toList();
+      final expectedPaths = <String>{};
+      var totalBytes = 0;
+      for (final entry in entries) {
+        if (!expectedPaths.add(entry.relativePath)) {
+          throw const FormatException(
+              'Duplicate directory migration relative path');
+        }
+        totalBytes += entry.size;
+      }
+      if (totalBytes != state['totalBytes']) {
+        throw const FormatException(
+            'Directory migration journal byte count mismatch');
+      }
       staging = Directory(state['staging'] as String);
       if (!_isSafeStagingPath(staging.path, destinationPath)) {
         throw const FormatException('Invalid directory migration staging path');
@@ -483,7 +509,9 @@ Future<Map<String, Object?>> _readMigrationJournal(File journal) async {
       decoded['destination'] is! String ||
       decoded['staging'] is! String ||
       decoded['files'] is! List ||
-      decoded['totalBytes'] is! int) {
+      decoded['totalBytes'] is! int ||
+      decoded['totalBytes'] as int < 0 ||
+      (decoded['deleteSource'] != null && decoded['deleteSource'] is! bool)) {
     throw const FormatException('Invalid directory migration journal');
   }
   final state = Map<String, Object?>.from(decoded);
