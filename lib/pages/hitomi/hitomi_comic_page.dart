@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
@@ -59,7 +61,12 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
   String? get cover => data?.cover ?? comicCover;
 
   @override
-  void download() => _downloadComic(data!, context, cover!, link);
+  void download() {
+    final comic = data;
+    final comicCover = cover;
+    if (comic == null || comicCover == null) return;
+    _downloadComic(comic, comicCover, link);
+  }
 
   @override
   EpsData? get eps => null;
@@ -76,11 +83,19 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
   int? get pages => null;
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
+  void read(History? history) {
+    unawaited(_read(history));
+  }
+
+  Future<void> _read(History? history) async {
+    final logic = _pageLogic;
+    final comic = data;
+    if (!_isCurrent(logic, comic)) return;
+    history = await History.createIfNull(history, comic!);
+    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
     App.globalTo(
       () => ComicReadingPage.hitomi(
-        data!,
+        comic,
         link,
         initialPage: history!.page,
       ),
@@ -178,14 +193,34 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
       }, 2);
 
   @override
-  void onThumbnailTapped(int index) async {
-    await History.findOrCreate(data!, page: index + 1);
+  void onThumbnailTapped(int index) {
+    unawaited(_openThumbnail(index));
+  }
+
+  Future<void> _openThumbnail(int index) async {
+    final logic = _pageLogic;
+    final comic = data;
+    if (!_isCurrent(logic, comic)) return;
+    await History.findOrCreate(comic!, page: index + 1);
+    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
     App.globalTo(() => ComicReadingPage.hitomi(
-          data!,
+          comic,
           link,
           initialPage: index + 1,
         ));
   }
+
+  ComicPageLogic<HitomiComic>? get _pageLogic =>
+      StateController.findOrNull<ComicPageLogic<HitomiComic>>(tag: tag);
+
+  bool _isCurrent(ComicPageLogic<HitomiComic>? logic, HitomiComic? comic) =>
+      logic != null &&
+      !logic.isDisposed &&
+      comic != null &&
+      identical(logic.data, comic) &&
+      identical(
+          StateController.findOrNull<ComicPageLogic<HitomiComic>>(tag: tag),
+          logic);
 
   @override
   String? get title => data?.title;
@@ -216,8 +251,7 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
   String get sourceKey => "hitomi";
 }
 
-void _downloadComic(
-    HitomiComic comic, BuildContext context, String cover, String link) {
+void _downloadComic(HitomiComic comic, String cover, String link) {
   if (downloadManager.isExists(comic.id)) {
     showToast(message: "已下载".tl);
     return;
