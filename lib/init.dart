@@ -23,7 +23,6 @@ import 'package:pica_comic/tools/app_links.dart';
 import 'package:pica_comic/tools/background_service.dart';
 import 'package:pica_comic/tools/cache_auto_clear.dart';
 import 'package:pica_comic/tools/data_backup.dart';
-import 'package:pica_comic/tools/io_extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:pica_comic/tools/legacy_data_migration.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -183,17 +182,8 @@ Future<void> _checkOldData() async {
 
     await migrateLegacyCookies(App.dataPath);
 
-    if (io.File("${App.dataPath}/cache.json").existsSync()) {
-      io.File("${App.dataPath}/cache.json").deleteIgnoreError();
-    }
-    if (io.Directory("${App.cachePath}/imageCache").existsSync()) {
-      io.Directory("${App.cachePath}/imageCache")
-          .deleteIgnoreError(recursive: true);
-    }
-    if (io.Directory("${App.cachePath}/cachedNetwork").existsSync()) {
-      io.Directory("${App.cachePath}/cachedNetwork")
-          .deleteIgnoreError(recursive: true);
-    }
+    await clearLegacyCacheOnce(
+        dataPath: App.dataPath, cachePath: App.cachePath);
     await _checkAccountData();
   } catch (e, s) {
     LogManager.addLog(LogLevel.error, "Init",

@@ -6,6 +6,28 @@ import 'package:pica_comic/tools/directory_maintenance.dart';
 
 const _cacheRetention = Duration(days: 7);
 
+/// Removes cache trees from the legacy cache format once, using its index file
+/// as the migration marker. Without the index there is no evidence that the
+/// directories still belong to the legacy format; the regular maintenance
+/// pass can safely age out any orphaned files instead.
+Future<void> clearLegacyCacheOnce({
+  required String dataPath,
+  required String cachePath,
+}) async {
+  final legacyIndex = File('$dataPath${Platform.pathSeparator}cache.json');
+  if (!await legacyIndex.exists()) return;
+
+  for (final name in const ['imageCache', 'cachedNetwork']) {
+    final directory = Directory('$cachePath${Platform.pathSeparator}$name');
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+  }
+  // Delete the marker only after both trees have been removed. A failed
+  // deletion leaves it in place so the next startup can retry safely.
+  await legacyIndex.delete();
+}
+
 /// Cleans the two application image cache trees in bounded asynchronous batches.
 /// The report is useful to diagnostics and keeps capacity accounting in one
 /// place for callers that need to display maintenance results.

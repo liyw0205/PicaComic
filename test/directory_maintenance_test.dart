@@ -46,6 +46,34 @@ void main() {
     expect(await old.exists(), isFalse);
   });
 
+  test('legacy cache cleanup is gated by its one-time index marker', () async {
+    final root = await Directory.systemTemp.createTemp('pica-cache-legacy-');
+    addTearDown(() => root.delete(recursive: true));
+    final data = Directory('${root.path}/data');
+    final cache = Directory('${root.path}/cache');
+    await data.create(recursive: true);
+    for (final name in const ['imageCache', 'cachedNetwork']) {
+      final directory = Directory('${cache.path}/$name');
+      await directory.create(recursive: true);
+      await File('${directory.path}/recent.bin').writeAsString('recent');
+    }
+    final marker = File('${data.path}/cache.json');
+    await marker.writeAsString('{}');
+
+    await clearLegacyCacheOnce(dataPath: data.path, cachePath: cache.path);
+
+    expect(await marker.exists(), isFalse);
+    expect(await Directory('${cache.path}/imageCache').exists(), isFalse);
+    expect(await Directory('${cache.path}/cachedNetwork').exists(), isFalse);
+
+    // Once the legacy index is gone, a later startup must not delete newly
+    // created cache files; the normal retention pass owns that cleanup.
+    final recent = File('${cache.path}/imageCache/recent.bin');
+    await recent.create(recursive: true);
+    await clearLegacyCacheOnce(dataPath: data.path, cachePath: cache.path);
+    expect(await recent.exists(), isTrue);
+  });
+
   test('directory migration writes a resumable journal and verifies files',
       () async {
     final root = await Directory.systemTemp.createTemp('pica-dir-migration-');
