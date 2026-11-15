@@ -96,11 +96,12 @@ class CacheCleanupReport {
 }
 
 class _FileRecord {
-  _FileRecord(this.file, this.size, this.lastUsed);
+  _FileRecord(this.file, this.size, this.lastUsed, {this.protected = false});
 
   final File file;
   final int size;
   final DateTime lastUsed;
+  final bool protected;
 }
 
 /// Removes old cache files and, when [maxBytes] is supplied, evicts the least
@@ -135,16 +136,21 @@ Future<CacheCleanupReport> cleanupDirectory(
   var scannedBytes = 0;
   var pending = 0;
   await for (final entity in root.list(recursive: true, followLinks: false)) {
-    if (entity is! File || protected.contains(_absolutePath(entity.path))) {
-      continue;
-    }
+    if (entity is! File) continue;
+    // Protected files still occupy cache capacity; only the later eviction
+    // pass excludes them from deletion candidates.
     try {
       final stat = await entity.stat();
       final modified = stat.modified;
       // Access time is disabled or coarsely updated on many mobile filesystems
       // and is refreshed by ordinary scans. Modification time is the stable
       // signal for cache retention and makes cleanup deterministic.
-      records.add(_FileRecord(entity, stat.size, modified));
+      records.add(_FileRecord(
+        entity,
+        stat.size,
+        modified,
+        protected: protected.contains(_absolutePath(entity.path)),
+      ));
       scannedBytes += stat.size;
     } on FileSystemException {
       // Races with writers are expected for a best-effort cache pass.
@@ -159,6 +165,7 @@ Future<CacheCleanupReport> cleanupDirectory(
   final candidates = <_FileRecord>[];
   var remainingBytes = scannedBytes;
   for (final record in records) {
+    if (record.protected) continue;
     if (record.lastUsed.isBefore(olderThan)) {
       candidates.add(record);
       remainingBytes -= record.size;
@@ -166,6 +173,7 @@ Future<CacheCleanupReport> cleanupDirectory(
   }
   if (maxBytes != null && remainingBytes > maxBytes) {
     for (final record in records) {
+      if (record.protected) continue;
       if (candidates.contains(record)) continue;
       if (remainingBytes <= maxBytes) break;
       candidates.add(record);

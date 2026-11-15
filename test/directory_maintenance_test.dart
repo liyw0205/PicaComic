@@ -65,6 +65,54 @@ void main() {
     expect(await old.exists(), isTrue);
   });
 
+  test('cache capacity accounts for protected files without evicting them',
+      () async {
+    final root = await Directory.systemTemp.createTemp('pica-cache-budget-');
+    addTearDown(() => root.delete(recursive: true));
+    final protectedFile = File('${root.path}/protected.bin');
+    final ordinaryFile = File('${root.path}/ordinary.bin');
+    await protectedFile.writeAsBytes(List<int>.filled(8, 1));
+    await ordinaryFile.writeAsBytes(List<int>.filled(8, 2));
+    final now = DateTime.now();
+
+    final report = await cleanupDirectory(
+      root,
+      olderThan: now.subtract(const Duration(days: 1)),
+      maxBytes: 8,
+      protectedPaths: {protectedFile.path},
+    );
+
+    expect(report.scannedFiles, 2);
+    expect(report.scannedBytes, 16);
+    expect(report.deletedFiles, 1);
+    expect(report.deletedBytes, 8);
+    expect(report.remainingBytes, 8);
+    expect(await protectedFile.exists(), isTrue);
+    expect(await ordinaryFile.exists(), isFalse);
+  });
+
+  test('cache capacity reports protected files that exceed the budget',
+      () async {
+    final root = await Directory.systemTemp.createTemp('pica-cache-protected-');
+    addTearDown(() => root.delete(recursive: true));
+    final protectedFile = File('${root.path}/protected.bin');
+    await protectedFile.writeAsBytes(List<int>.filled(8, 1));
+
+    final report = await cleanupDirectory(
+      root,
+      olderThan: DateTime.now().subtract(const Duration(days: 1)),
+      maxBytes: 1,
+      protectedPaths: {protectedFile.path},
+    );
+
+    expect(report.scannedFiles, 1);
+    expect(report.scannedBytes, 8);
+    expect(report.deletedFiles, 0);
+    expect(report.deletedBytes, 0);
+    expect(report.remainingBytes, 8);
+    expect(await protectedFile.exists(), isTrue);
+  });
+
   test('legacy cache cleanup is gated by its one-time index marker', () async {
     final root = await Directory.systemTemp.createTemp('pica-cache-legacy-');
     addTearDown(() => root.delete(recursive: true));
