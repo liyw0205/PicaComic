@@ -6,10 +6,12 @@ import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/state_controller.dart';
 import 'package:pica_comic/pages/image_favorites.dart';
+import 'package:pica_comic/tools/translations.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  AppTranslation.translations = const {};
   late Directory directory;
   late String path;
 
@@ -262,6 +264,7 @@ void main() {
       await ImageFavoriteManager.delete(image);
       await ImageFavoriteManager.delete(image);
     }, suppressSync: true, operationName: 'image-favorites-delete');
+    await Future<void>.delayed(Duration.zero);
 
     expect(DataMaintenance.lastStats?.syncRequests, 2);
     expect(DataMaintenance.lastStats?.suppressedSyncRequests, 2);
