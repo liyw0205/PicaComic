@@ -106,12 +106,11 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
     final latestRowId = ImageFavoriteManager.latestRowId();
     if (headRowId != null && (latestRowId == null || latestRowId < headRowId)) {
       // A table whose newest row is below the watermark has reused rowids
-      // after deleting the previous head. The old cursor would hide those
-      // rows, so restart the bounded query from the current head.
-      _images.clear();
-      _nextCursor = null;
-      _headRowId = null;
-      _hasMore = true;
+      // after deleting the previous head. Rebuild the window in one pass so
+      // stale image providers and scroll callbacks cannot observe a partial
+      // state while the database is being replaced.
+      _reload();
+      return;
     }
     if (_headRowId == null) {
       // An empty page has no watermark yet. Populate it directly so an

@@ -281,7 +281,9 @@ void main() {
     await HistoryManager().init(databasePath: path, importLegacy: false);
 
     await tester.pumpWidget(const MaterialApp(home: ImageFavoritesPage()));
+    print('image-favorites debug: after pumpWidget');
     await tester.pump();
+    print('image-favorites debug: after first pump');
     expect(find.text('Old 1'), findsOneWidget);
 
     HistoryManager().close();
@@ -293,9 +295,12 @@ void main() {
         ['new', 'New image', imagePath, 1, 1, '{}']);
     replacement.dispose();
     await HistoryManager().init(databasePath: path, importLegacy: false);
+    print('image-favorites debug: after reinit');
 
     StateController.findOrNull(tag: 'image_favorites_page')?.refresh();
+    print('image-favorites debug: after refresh');
     await tester.pump();
+    print('image-favorites debug: after second pump');
     expect(find.text('New image'), findsOneWidget);
   });
 
