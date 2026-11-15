@@ -63,6 +63,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   }
 
   void _reload() {
+    if (!HistoryManager().isOpen) return;
     _images.clear();
     _nextCursor = null;
     _headRowId = null;
@@ -72,7 +73,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   }
 
   void _loadPage() {
-    if (_loading || !_hasMore) return;
+    if (_loading || !_hasMore || !HistoryManager().isOpen) return;
     _loading = true;
     final page = ImageFavoriteManager.getPage(
       limit: _pageSize,
@@ -102,6 +103,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   }
 
   void _reconcileExternalChanges() {
+    if (!HistoryManager().isOpen) return;
     // Walk every bounded batch newer than the loaded head. Reading only one
     // page here can permanently skip rows when a sync/import adds more than
     // [_pageSize] favorites before the next refresh. The inclusive watermark

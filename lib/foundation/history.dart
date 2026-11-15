@@ -188,6 +188,10 @@ class HistoryManager {
 
   bool _isOpen = false;
 
+  /// Whether the backing database is currently available to synchronous
+  /// readers and writers.
+  bool get isOpen => _isOpen;
+
   void close() {
     if (_isOpen) {
       _db.dispose();

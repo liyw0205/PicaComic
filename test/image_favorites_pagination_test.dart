@@ -217,6 +217,7 @@ void main() {
         tileBuilder: (context, image) => Text(image.title),
       ),
     ));
+    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
     await tester.pump();
     expect(find.text('Old 1'), findsOneWidget);
 
