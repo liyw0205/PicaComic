@@ -191,7 +191,15 @@ class Webdav {
   /// Explicit configs remain supported for old callers and one-shot actions.
   static Future<List<String>?> _config(String? config) async {
     final values = _parseConfig(config ?? appdata.settings[45]);
-    if (values == null) return null;
+    if (values == null) {
+      // A missing persisted setting means sync is disabled, but an explicit
+      // one-shot request is a caller contract and must not become a silent
+      // successful no-op when its fields are malformed.
+      if (config != null) {
+        throw const FormatException('Invalid WebDAV configuration');
+      }
+      return null;
+    }
     // Only one-shot callers may provide credentials outside SecretStore.
     // Legacy credentials in persisted settings must not bypass the migration
     // boundary when secure storage is unavailable.

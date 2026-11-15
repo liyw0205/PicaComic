@@ -250,6 +250,42 @@ void main() {
     }
   });
 
+  test('malformed explicit upload config fails instead of becoming a no-op',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    var transportCreated = false;
+    try {
+      Webdav.transportFactory = (_) {
+        transportCreated = true;
+        return _FakeSyncTransport();
+      };
+
+      expect(await Webdav.uploadData('not-a-webdav-config'), isFalse);
+      expect(transportCreated, isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
+    } finally {
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('malformed explicit download config fails instead of skipping sync',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    var transportCreated = false;
+    try {
+      Webdav.transportFactory = (_) {
+        transportCreated = true;
+        return _FakeSyncTransport();
+      };
+
+      expect(await Webdav.downloadData('https://dav.example;broken'), isFalse);
+      expect(transportCreated, isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
+    } finally {
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
   test('transport close failure does not replace the sync result', () async {
     final previousFactory = Webdav.transportFactory;
     final transport = _FakeSyncTransport(failClose: true);
