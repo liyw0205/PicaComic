@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:pica_comic/components/comment.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:flutter/material.dart';
@@ -10,10 +12,119 @@ class CommentsPageLogic extends StateController {
   var comments = Comments([], "", 0, 0);
   bool sending = false;
   var controller = TextEditingController();
+  bool _initialRequestInFlight = false;
+  bool _nextPageInFlight = false;
+  int _generation = 0;
+  int _sendGeneration = 0;
 
-  void change() {
-    isLoading = !isLoading;
+  Future<void> loadInitial(String id, String type) async {
+    if (isDisposed || _initialRequestInFlight) return;
+    _initialRequestInFlight = true;
+    final generation = ++_generation;
+    try {
+      final result = await network.getCommends(id, type: type);
+      if (isDisposed || generation != _generation) return;
+      comments = result;
+      isLoading = false;
+      update();
+    } catch (_) {
+      if (isDisposed || generation != _generation) return;
+      comments = Comments([], id, 0, 0);
+      isLoading = false;
+      update();
+    } finally {
+      if (generation == _generation) {
+        _initialRequestInFlight = false;
+      }
+    }
+  }
+
+  void retry(String id) {
+    if (isDisposed || _initialRequestInFlight) return;
+    _generation++;
+    _sendGeneration++;
+    _nextPageInFlight = false;
+    sending = false;
+    isLoading = true;
+    comments = Comments([], id, 0, 0);
     update();
+  }
+
+  Future<void> sendComment(String id, String type) async {
+    if (isDisposed || sending) return;
+    final content = controller.text;
+    if (content.length < 2) {
+      showToast(message: "评论至少需要2个字".tl);
+      return;
+    }
+    final generation = ++_sendGeneration;
+    final loadGeneration = _generation;
+    sending = true;
+    update();
+    try {
+      final sent = await network.comment(id, content, false, type: type);
+      if (isDisposed ||
+          generation != _sendGeneration ||
+          loadGeneration != _generation) {
+        return;
+      }
+      if (!sent) {
+        showToast(message: "网络错误".tl);
+        return;
+      }
+      controller.clear();
+      final result = await network.getCommends(id, type: type);
+      if (isDisposed ||
+          generation != _sendGeneration ||
+          loadGeneration != _generation) {
+        return;
+      }
+      comments = result;
+      update();
+    } catch (_) {
+      if (!isDisposed &&
+          generation == _sendGeneration &&
+          loadGeneration == _generation) {
+        showToast(message: "网络错误".tl);
+      }
+    } finally {
+      if (!isDisposed && generation == _sendGeneration) {
+        sending = false;
+        update();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _sendGeneration++;
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> loadMore(String type) async {
+    final target = comments;
+    if (isDisposed ||
+        _nextPageInFlight ||
+        target.loaded == target.pages ||
+        isLoading) {
+      return;
+    }
+    _nextPageInFlight = true;
+    final generation = _generation;
+    try {
+      await network.loadMoreCommends(target, type: type);
+      if (isDisposed ||
+          generation != _generation ||
+          !identical(comments, target)) {
+        return;
+      }
+      update();
+    } catch (_) {
+      // Keep the current page visible; a later scroll can retry the request.
+    } finally {
+      _nextPageInFlight = false;
+    }
   }
 }
 
@@ -32,17 +143,16 @@ class CommentsPage extends StatelessWidget {
       init: CommentsPageLogic(),
       builder: (logic) {
         if (logic.isLoading) {
-          network.getCommends(id, type: type).then((c) {
-            logic.comments = c;
-            logic.change();
-          });
+          unawaited(logic.loadInitial(id, type));
           return const Center(
             child: CircularProgressIndicator(),
           );
         } else if (logic.comments.loaded == 0) {
           return NetworkError(
             message: "网络错误".tl,
-            retry: () => logic.change(),
+            retry: () {
+              logic.retry(id);
+            },
             withAppbar: false,
           );
         } else {
@@ -57,11 +167,7 @@ class CommentsPage extends StatelessWidget {
                           (context, index) {
                     if (index == logic.comments.comments.length - 1 &&
                         logic.comments.pages != logic.comments.loaded) {
-                      network
-                          .loadMoreCommends(logic.comments, type: type)
-                          .then((t) {
-                        logic.update();
-                      });
+                      unawaited(logic.loadMore(type));
                     }
                     var comment = logic.comments.comments[index];
                     var subInfo =
@@ -137,31 +243,8 @@ class CommentsPage extends StatelessWidget {
                                   ),
                                 )
                               : IconButton(
-                                  onPressed: () async {
-                                    if (logic.controller.text.length < 2) {
-                                      showToast(message: "评论至少需要2个字".tl);
-                                      return;
-                                    }
-                                    logic.sending = true;
-                                    logic.update();
-                                    var b = await network.comment(
-                                        id, logic.controller.text, false);
-                                    if (b) {
-                                      logic.controller.text = "";
-                                      logic.sending = false;
-                                      var res = await network.getCommends(id);
-                                      logic.comments = Comments([], id, 1, 1);
-                                      logic.update();
-                                      await Future.delayed(
-                                          const Duration(milliseconds: 200));
-                                      logic.comments = res;
-                                      logic.update();
-                                    } else {
-                                      showToast(message: "网络错误".tl);
-                                      logic.sending = false;
-                                      logic.update();
-                                    }
-                                  },
+                                  onPressed: () =>
+                                      unawaited(logic.sendComment(id, type)),
                                   icon: Icon(
                                     Icons.send,
                                     color:
@@ -207,10 +290,119 @@ class ReplyPageLogic extends StateController {
   var comments = Reply("", 0, 1, []);
   bool sending = false;
   var controller = TextEditingController();
+  bool _initialRequestInFlight = false;
+  bool _nextPageInFlight = false;
+  int _generation = 0;
+  int _sendGeneration = 0;
 
-  void change() {
-    isLoading = !isLoading;
+  Future<void> loadInitial(String id) async {
+    if (isDisposed || _initialRequestInFlight) return;
+    _initialRequestInFlight = true;
+    final generation = ++_generation;
+    try {
+      final result = await network.getReply(id);
+      if (isDisposed || generation != _generation) return;
+      comments = result;
+      isLoading = false;
+      update();
+    } catch (_) {
+      if (isDisposed || generation != _generation) return;
+      comments = Reply(id, 0, 1, []);
+      isLoading = false;
+      update();
+    } finally {
+      if (generation == _generation) {
+        _initialRequestInFlight = false;
+      }
+    }
+  }
+
+  void retry(String id) {
+    if (isDisposed || _initialRequestInFlight) return;
+    _generation++;
+    _sendGeneration++;
+    _nextPageInFlight = false;
+    sending = false;
+    isLoading = true;
+    comments = Reply(id, 0, 1, []);
     update();
+  }
+
+  Future<void> sendReply(String id) async {
+    if (isDisposed || sending) return;
+    final content = controller.text;
+    if (content.length < 2) {
+      showToast(message: "评论至少需要2个字".tl);
+      return;
+    }
+    final generation = ++_sendGeneration;
+    final loadGeneration = _generation;
+    sending = true;
+    update();
+    try {
+      final sent = await network.comment(id, content, true);
+      if (isDisposed ||
+          generation != _sendGeneration ||
+          loadGeneration != _generation) {
+        return;
+      }
+      if (!sent) {
+        showToast(message: "网络错误".tl);
+        return;
+      }
+      controller.clear();
+      final result = await network.getReply(id);
+      if (isDisposed ||
+          generation != _sendGeneration ||
+          loadGeneration != _generation) {
+        return;
+      }
+      comments = result;
+      update();
+    } catch (_) {
+      if (!isDisposed &&
+          generation == _sendGeneration &&
+          loadGeneration == _generation) {
+        showToast(message: "网络错误".tl);
+      }
+    } finally {
+      if (!isDisposed && generation == _sendGeneration) {
+        sending = false;
+        update();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _sendGeneration++;
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> loadMore() async {
+    final target = comments;
+    if (isDisposed ||
+        _nextPageInFlight ||
+        target.loaded == target.total ||
+        isLoading) {
+      return;
+    }
+    _nextPageInFlight = true;
+    final generation = _generation;
+    try {
+      await network.getMoreReply(target);
+      if (isDisposed ||
+          generation != _generation ||
+          !identical(comments, target)) {
+        return;
+      }
+      update();
+    } catch (_) {
+      // Keep the current page visible; a later scroll can retry the request.
+    } finally {
+      _nextPageInFlight = false;
+    }
   }
 }
 
@@ -228,17 +420,16 @@ class ReplyPage extends StatelessWidget {
       init: ReplyPageLogic(),
       builder: (commentsPageLogic) {
         if (commentsPageLogic.isLoading) {
-          network.getReply(id).then((c) {
-            commentsPageLogic.comments = c;
-            commentsPageLogic.change();
-          });
+          unawaited(commentsPageLogic.loadInitial(id));
           return const Center(
             child: CircularProgressIndicator(),
           );
         } else if (commentsPageLogic.comments.loaded == 0) {
           return NetworkError(
             message: "网络错误".tl,
-            retry: () => commentsPageLogic.change(),
+            retry: () {
+              commentsPageLogic.retry(id);
+            },
             withAppbar: false,
           );
         } else {
@@ -273,11 +464,7 @@ class ReplyPage extends StatelessWidget {
                             commentsPageLogic.comments.comments.length - 1 &&
                         commentsPageLogic.comments.total !=
                             commentsPageLogic.comments.loaded) {
-                      network
-                          .getMoreReply(commentsPageLogic.comments)
-                          .then((t) {
-                        commentsPageLogic.update();
-                      });
+                      unawaited(commentsPageLogic.loadMore());
                     }
                     var comment = commentsPageLogic.comments.comments[index];
                     var subInfo =
@@ -352,36 +539,8 @@ class ReplyPage extends StatelessWidget {
                                   ),
                                 )
                               : IconButton(
-                                  onPressed: () async {
-                                    if (commentsPageLogic
-                                            .controller.text.length <
-                                        2) {
-                                      showToast(message: "评论至少需要2个字".tl);
-                                      return;
-                                    }
-                                    commentsPageLogic.sending = true;
-                                    commentsPageLogic.update();
-                                    var b = await network.comment(
-                                        id,
-                                        commentsPageLogic.controller.text,
-                                        true);
-                                    if (b) {
-                                      commentsPageLogic.controller.text = "";
-                                      commentsPageLogic.sending = false;
-                                      var res = await network.getReply(id);
-                                      commentsPageLogic.comments =
-                                          Reply(id, 1, 1, []);
-                                      commentsPageLogic.update();
-                                      await Future.delayed(
-                                          const Duration(milliseconds: 200));
-                                      commentsPageLogic.comments = res;
-                                      commentsPageLogic.update();
-                                    } else {
-                                      showToast(message: "网络错误".tl);
-                                      commentsPageLogic.sending = false;
-                                      commentsPageLogic.update();
-                                    }
-                                  },
+                                  onPressed: () => unawaited(
+                                      commentsPageLogic.sendReply(id)),
                                   icon: Icon(
                                     Icons.send,
                                     color:
