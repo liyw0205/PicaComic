@@ -513,8 +513,8 @@ A2 本轮覆盖 `importDataResult`、`Appdata.readDataFromJson/writeData/updateS
 
 1. 每个功能组先独立完成目标分析、格式、差异和专项回归，再使用单一语义提交；提交后立即推送 `origin/master`，记录 commit 和本地验证结果。普通 master push 不触发 Android workflow。
 2. Android workflow 仅由 `v*` tag push 自动执行完整发布门禁；普通分支 push 和 pull request 不触发，仍保留手动 `workflow_dispatch` 供明确需要时验证。正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发。tag 创建前先完成本地静态检查，tag workflow 再确认 Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
-3. `v4.2.48` 已固定到 `8dbcb268` 并完成 Release；`v4.2.47` 已固定到 `82793767`，不得移动、重写或覆盖历史。
-4. tag workflow 失败时保留失败历史和对应提交，修复用新提交/新版本递增；禁止通过强推 tag 或覆盖 Release 规避门禁。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
+3. `v4.2.48` 当前 Release 基线指向 `8dbcb268`；每次 `v*` tag 构建只要求该次 tag 解析到本次 `GITHUB_SHA`，允许同名 tag 更新后重新发布。
+4. tag workflow 失败时保留失败 run 和对应提交；修复后可重新推送同名 tag，旧 run 会被取消，发布前的远端 SHA 校验会拒绝过期构建。已有 Release 的同名资产由 workflow 更新，避免旧资产与可变 tag 混用。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
 
 ## 13. 2026-11-15 A1/A17/A19 收口
 
@@ -678,6 +678,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A1/A9 备份恢复 | `f2db7418`, `9107ffb7` | manifest、appdata 或 SQLite 完整性校验失败时删除派生解压目录，保留原始备份供重试；清理失败不遮蔽原始校验异常 | `test/data_restore_transaction_test.dart` 验证坏备份输出目录不残留；目标分析、baseline、格式、异步边界和差异检查通过 |
 | A2/A6 WebDAV 上传 | `10a74a81` | 远端 revision 已发布但本地 sync state 写入失败时，回滚并持久化 `settings[46]`，避免磁盘 revision 声称已同步而本地 heads 未提交 | `test/webdav_sync_test.dart` 验证 upload 失败、远端 archive 保留且本地 settings revision 恢复；目标分析、baseline、格式、异步边界和差异检查通过 |
 
-上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。Flutter 测试仍受本机 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，需由标准 runner 重跑；真实双客户端 WebDAV、独立进程恢复和设备故障注入仍属于发布前验收。普通 `master` push 不触发 Android workflow，版本递增后可正常创建新的 annotated `v*` tag 触发发布，历史 tag 不移动、不重写。
+上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。Flutter 测试仍受本机 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，需由标准 runner 重跑；真实双客户端 WebDAV、独立进程恢复和设备故障注入仍属于发布前验收。普通 `master` push 不触发 Android workflow；任意 `v*` tag 的创建或更新都会触发发布，workflow 只发布仍指向当前构建 SHA 的那一次结果。
 
-本轮通过 `gh run list --workflow android.yml --commit HEAD` 复核当前普通提交没有新增 Android run；最近成功的自动发布仍对应历史 `v4.2.48` tag。该结果与 workflow 的 `push.tags: ['v*']` 和 `workflow_dispatch` 配置一致。
+本轮通过 `gh run list --workflow android.yml --commit HEAD` 复核当前普通提交没有新增 Android run；最近成功的自动发布仍对应历史 `v4.2.48` tag。该结果与 workflow 的 `push.tags: ['v*']` 和 `workflow_dispatch` 配置一致；同名 `v*` tag 更新时由并发取消和远端 SHA 校验保证只发布最新指向。
+
+## 28. 2026-11-16 下载取消与阅读器图片回调继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A11 下载队列 | `6b05638a`, `c358cfee` | 取消任务先提交 durable queue snapshot；快照失败时按原位置恢复任务并保持暂停，非队头取消失败会停止当前队头；取消写盘期间不提前通知监听器，避免启动下一项造成状态竞态 | `test/favorite_download_test.dart` 覆盖备份文件故障、重试和队列恢复；目标分析、格式和差异检查通过 |
+| A3/A16 阅读器图片 | `9410228d` | `ComicImage` 的 frame/chunk/error 回调增加 mounted 守卫；组件销毁后晚到 frame 释放 `ImageInfo`，避免 `setState after dispose` 和图像资源泄漏 | `test/reader_image_owner_test.dart` 增加晚到 error fixture；目标分析、格式和差异检查通过 |
+
+本机 Flutter 定向测试仍被 Termux 的 Kernel SDK mismatch 阻塞（`9811646114` vs `d684a576a6`），不能替代标准 runner。后续版本递增到 `4.2.49+4249` 后，推送 `v4.2.49` 即可触发发布；若该 tag 需要修正指向，重新推送同名 tag 也会正常启动新 run，旧 run 不得覆盖新构建。

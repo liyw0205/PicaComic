@@ -9,7 +9,8 @@ permissions:
   contents: read
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: false
+  # A moved v* tag supersedes an older build; never publish the stale run.
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -211,10 +212,28 @@ jobs:
             exit 1
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; refusing to overwrite immutable assets." >&2
-            exit 1
+            # A mutable tag may be rebuilt. Upload current assets first, then
+            # remove stale version-named assets and move the release target.
+            gh release upload "$tag" release/*.apk release/SHA256SUMS \
+              release/apk-metadata.json --clobber
+            current_assets="$(printf '%s\n' release/* | sed 's#^release/##')"
+            while IFS= read -r asset; do
+              case "$asset" in
+                *.apk|SHA256SUMS|apk-metadata.json)
+                  if ! grep -Fqx "$asset" <<<"$current_assets"; then
+                    gh release delete-asset "$tag" "$asset" --yes
+                  fi
+                  ;;
+              esac
+            done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+            gh release edit "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Automated Android release build."
+          else
+            gh release create "$tag" release/*.apk release/SHA256SUMS \
+              release/apk-metadata.json \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Automated Android release build."
           fi
-          gh release create "$tag" release/*.apk release/SHA256SUMS \
-            --target "$GITHUB_SHA" \
-            --title "$tag" \
-            --notes "Automated Android release build."
