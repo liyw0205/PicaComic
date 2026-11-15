@@ -453,3 +453,22 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 5. **恢复 journal 的外部根需要绑定可信运行时配置。** 当前 `DataRestoreTransaction` 会把下载目录作为 `allowedRoots` 写入 journal，导入时会传入运行中的下载目录，因此正常导入路径已覆盖；但启动恢复发生在下载管理器初始化前，后续应让恢复入口从可信的当前下载配置取得外部根，并拒绝仅由 journal 新增或修改的根。需补充“篡改 `allowedRoots`”故障注入，确保不会借恢复日志操作 `App.dataPath` 之外的任意路径。
 
 建议实施顺序调整为：先完成 A1/A2 的故障注入和真实 WebDAV 双设备验收，同时在标准 runner 验证 A15/A16；随后做 A5/A7 的设备性能采样，再将 A16 的剩余同步 I/O 扫描和 A10-A14 纳入发布矩阵。每项都保留可回滚的迁移快照和独立指标，避免一次性大范围重构。
+
+## 10. 2026-11-15 增量交付与下一步
+
+本轮在 `v4.2.46` 基线上继续拆分交付，每个功能组均独立提交并推送：
+
+| 功能组 | 提交 | 交付内容 | 验证 |
+| --- | --- | --- | --- |
+| A5 查询一致性 | `2d79e088` | `HistoryManager.count({keyword})` 与分页使用同一套 trim/lowercase 过滤和参数绑定；历史搜索页显示过滤后的总数；增加关键词和空白搜索回归 | `dart format`、`dart analyze`、`flutter analyze`、`git diff --check`；标准 CI 随后被更新提交取消 |
+| A6 WebDAV 冲突分支 | `a3d2a37d` | 共享远端夹具驱动真实 `Webdav.uploadData()`，覆盖旧 ETag 的 CAS 拒绝、immutable revision 保留，以及无 ETag 时 graph reread 暴露多 head | 本地格式/analyze/diff 检查；CI `43655226897` 全部通过 |
+| A16 异步边界 | `558a9a54` | 页面加载/重试入口返回 `Future<void>`，UI 触发点显式 fire-and-forget，测试可直接等待操作完成 | 目标分析和异步边界扫描通过，标准 CI 已覆盖 |
+
+远端门禁 `43655226897` 的 Flutter regression、native curl、Android APK 多 ABI 构建、metadata 和签名校验均成功。Termux 本机 Flutter 测试仍受 Kernel SDK hash mismatch 和部分环境缺少 `impellerc` 影响；该限制不替代标准 runner 结果，也不应通过修改业务代码规避。
+
+下一阶段按以下顺序推进：
+
+1. 在固定设备和 1,000/10,000/50,000 条数据集上测量 A5 查询 p50/p95、首屏和滚动内存，只有测量确认后再调整索引或缓存。
+2. 用双客户端真实 WebDAV 重放同秒并发、时钟偏移、离线恢复、上传中断、ETag 和无 ETag 服务；记录最终 revision 图、冲突提示和旧客户端共存行为。
+3. 为 A1/A2/A11/A16/A18 建立独立进程、低速存储和中断恢复 runner；重点确认导入失败不假成功、下载任务不丢失、目录迁移可重放。
+4. 补齐 A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收，再以连续稳定的 master CI 为条件升至 `4.2.47+4247` 并创建 annotated `v4.2.47`；tag 只指向已通过 CI 的版本提交。
