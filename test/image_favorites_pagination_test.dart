@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -200,23 +199,22 @@ void main() {
 
   testWidgets('refresh reloads after all rows are deleted and rowids reset',
       (tester) async {
-    final imagePath = '${directory.path}/pixel.png';
-    // Keep the fixture independent of platform encoders while exercising the
-    // same image-provider path as a real local thumbnail.
-    await File(imagePath).writeAsBytes(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='));
     final db = sqlite3.open(path);
     try {
       db.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
-          ['old-0', 'Old 0', imagePath, 1, 1, '{}']);
+          ['old-0', 'Old 0', '', 1, 1, '{}']);
       db.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
-          ['old-1', 'Old 1', imagePath, 1, 2, '{}']);
+          ['old-1', 'Old 1', '', 1, 2, '{}']);
     } finally {
       db.dispose();
     }
     await HistoryManager().init(databasePath: path, importLegacy: false);
 
-    await tester.pumpWidget(const MaterialApp(home: ImageFavoritesPage()));
+    await tester.pumpWidget(MaterialApp(
+      home: ImageFavoritesPage(
+        tileBuilder: (context, image) => Text(image.title),
+      ),
+    ));
     await tester.pump();
     expect(find.text('Old 1'), findsOneWidget);
 
@@ -226,7 +224,7 @@ void main() {
     emptied.dispose();
     final replacement = sqlite3.open(path);
     replacement.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
-        ['new', 'New image', imagePath, 1, 1, '{}']);
+        ['new', 'New image', '', 1, 1, '{}']);
     replacement.dispose();
     await HistoryManager().init(databasePath: path, importLegacy: false);
 

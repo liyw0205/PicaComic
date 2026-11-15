@@ -18,7 +18,11 @@ import 'package:pica_comic/components/components.dart';
 import 'reader/comic_reading_page.dart';
 
 class ImageFavoritesPage extends StatefulWidget {
-  const ImageFavoritesPage({super.key});
+  const ImageFavoritesPage({super.key, this.tileBuilder});
+
+  /// Optional lightweight tile factory for callers that need to render the
+  /// pagination surface without starting image decoding.
+  final Widget Function(BuildContext context, ImageFavorite image)? tileBuilder;
 
   @override
   State<ImageFavoritesPage> createState() => _ImageFavoritesPageState();
@@ -233,6 +237,8 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
       itemCount: _images.length,
       itemBuilder: (context, index) {
         final image = _images[index];
+        final tileBuilder = widget.tileBuilder;
+        if (tileBuilder != null) return tileBuilder(context, image);
         return FavoriteImageTile(
           image,
           onDeleted: () {
