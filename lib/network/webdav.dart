@@ -174,8 +174,11 @@ class Webdav {
           'Sync',
           'Secure credential storage is unavailable; WebDAV settings cannot be read.\n'
               '${safeNetworkError(error)}\n$stack');
-      final values = _parseConfig(appdata.settings[45]);
-      return values == null ? null : [values[0], '', '', values[3]];
+      // Do not return a partially populated config. The settings page uses
+      // this value to build one-shot upload/download requests; returning the
+      // endpoint with empty credentials would silently downgrade a configured
+      // account to anonymous WebDAV when the secure store is unavailable.
+      return null;
     }
   }
 
