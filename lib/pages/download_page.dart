@@ -214,6 +214,26 @@ class DownloadPageLogic extends StateController {
   }
 }
 
+/// Runs the font download and turns Dio cancellation into a normal result.
+///
+/// A user-initiated cancellation is not a failed download and should not
+/// surface an error toast from the page. Other Dio errors still propagate so
+/// callers can report them consistently.
+Future<bool> runFontDownload(
+  Future<void> Function(CancelToken cancelToken) download,
+  CancelToken cancelToken,
+) async {
+  try {
+    await download(cancelToken);
+    return true;
+  } on DioException catch (error) {
+    if (CancelToken.isCancel(error)) {
+      return false;
+    }
+    rethrow;
+  }
+}
+
 class DownloadPage extends StatelessWidget {
   const DownloadPage({Key? key}) : super(key: key);
 
@@ -305,7 +325,7 @@ class DownloadPage extends StatelessWidget {
     }
   }
 
-  void downloadFont() async {
+  Future<void> downloadFont() async {
     bool canceled = false;
     var cancelToken = CancelToken();
     var controller = showLoadingDialog(
@@ -319,24 +339,29 @@ class DownloadPage extends StatelessWidget {
       message: "Downloading",
     );
     var dio = logDio();
+    var completed = false;
     try {
-      await dio.download(
-        "https://raw.githubusercontent.com/Pacalini/PicaComic/master/fonts/NotoSansSC-Regular.ttf",
-        "${App.dataPath}/font.ttf",
-        cancelToken: cancelToken,
+      completed = await runFontDownload(
+        (token) => dio.download(
+          "https://raw.githubusercontent.com/Pacalini/PicaComic/master/fonts/NotoSansSC-Regular.ttf",
+          "${App.dataPath}/font.ttf",
+          cancelToken: token,
+        ),
+        cancelToken,
       );
     } catch (e) {
       showToast(message: "下载失败".tl);
-      controller.close();
       return;
-    }
-    if (!canceled) {
+    } finally {
       controller.close();
+    }
+    if (!canceled && completed) {
       showToast(message: "下载完成".tl);
     }
   }
 
-  void exportAsPdf(DownloadedItem? comic, DownloadPageLogic logic) async {
+  Future<void> exportAsPdf(
+      DownloadedItem? comic, DownloadPageLogic logic) async {
     if (comic == null) {
       for (int i = 0; i < logic.selected.length; i++) {
         if (logic.selected[i]) {
@@ -504,9 +529,8 @@ class DownloadPage extends StatelessWidget {
               ),
               DesktopMenuEntry(
                 text: "导出为pdf".tl,
-                onClick: () {
-                  exportAsPdf(logic.comics[index], logic);
-                },
+                onClick: () =>
+                    unawaited(exportAsPdf(logic.comics[index], logic)),
               ),
               DesktopMenuEntry(
                 text: "查看漫画详情".tl,
@@ -745,7 +769,7 @@ class DownloadPage extends StatelessWidget {
                     ),
                     PopupMenuItem(
                       child: Text("导出为pdf".tl),
-                      onTap: () => exportAsPdf(null, logic),
+                      onTap: () => unawaited(exportAsPdf(null, logic)),
                     ),
                     PopupMenuItem(
                       child: Text("查看漫画详情".tl),
