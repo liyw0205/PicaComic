@@ -121,4 +121,16 @@ void main() {
     expect(calls, 1);
     expect(result, DataImportResult.failed);
   });
+
+  test('import reports cancelled when the file picker returns no path',
+      () async {
+    var calls = 0;
+    final result = await importDataResult(null, pickFile: () async {
+      calls++;
+      return null;
+    });
+
+    expect(calls, 1);
+    expect(result, DataImportResult.cancelled);
+  });
 }
