@@ -547,6 +547,16 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A11 下载队列 | `22209575` | `DownloadManager.dispose()` 清空进行中任务后持久化空的 committed 快照，避免导入、重启或目录替换时旧任务复活 | `test/download_persistence_test.dart`；目标分析、格式和差异检查通过 |
 | A12 运行诊断 | `baed6f0c` | 日志目标切换等待旧写入队列；Workmanager 后台 isolate 配置应用私有日志文件，并在任务结束时 flush | `test/log_manager_test.dart`；目标分析、格式和差异检查通过 |
 | A16 阅读器异步边界 | `769f1a2a` | `ComicReadingPage.loadInfo` 暴露 `Future<void>`，构建入口显式 `unawaited`，generation 失效时旧章节响应不覆盖当前状态 | `test/reader_preload_test.dart`；异步扫描 `void_async=56`（基线 64） |
-| A5 收藏查询性能 | `3349e9a8` | 为每个收藏夹建立 `(display_order, target, type)` 复合索引，降低大列表稳定排序的临时 B-tree 和全表排序成本 | `test/database_correctness_test.dart` 的 `EXPLAIN QUERY PLAN` 回归；目标分析、格式和差异检查通过 |
+| A5 收藏查询性能 | `3349e9a8`, `b75a1f84` | 为每个收藏夹建立 `(display_order, target, type)` 复合索引，并确保运行时新建收藏夹同步创建索引，降低大列表稳定排序的临时 B-tree 和全表排序成本 | `test/database_correctness_test.dart` 的 `EXPLAIN QUERY PLAN` 回归；目标分析、格式和差异检查通过 |
 
 上述新增 Flutter 用例已尝试在本机执行，但 Termux Flutter 编译器仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`；这只能作为环境阻塞记录，不能替代标准 runner。下一步仍按方案执行 A1/A2/A6/A18 的独立进程、真实双客户端 WebDAV、设备性能和中断恢复验收。
+
+## 16. 2026-11-15 异步边界与任务取消继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A16 身份验证生命周期 | `b94000e6` | `AuthPage.auth()` 改为可等待 Future，异常安全复位进行中状态，等待后检查 mounted，并移除生命周期 observer | 目标分析、格式、差异检查和异步扫描通过；平台认证控件仍需设备验收 |
+| A7 图片任务取消 | `a8d4eb5d` | `ImageManager.clearTasks()` 增加 generation，使同 key 等待者在清理后取消而不是重新发起网络请求 | `test/jm_image_cache_test.dart`；目标分析、格式和差异检查通过 |
+| A16 下载页异步入口 | `06989077` | 字体下载和 PDF 导出入口返回 Future；Dio 用户取消不显示失败提示，加载对话框在所有路径 finally 关闭 | `test/download_page_async_test.dart`；目标分析、格式和差异检查通过 |
+
+异步边界扫描从基线 `64` 降至 `55` 个 `void async`（随后阅读器章节加载和本轮认证修复已纳入），本轮未引入新的未等待持久化写入。剩余页面入口继续按数据写入、网络请求、取消和 mounted 风险排序，不一次性重写低风险回调。
