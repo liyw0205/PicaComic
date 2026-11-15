@@ -667,5 +667,6 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A18 目录维护 | `24c85697` | committed journal 在来源目录已被删除、目标文件集合完整时仍可重放并清理 journal；其他阶段仍要求来源存在，避免把缺失来源误判为成功 | `test/directory_maintenance_test.dart`；目标分析、格式、analyzer baseline 和差异检查通过 |
 | A16 桌面窗口状态 | `3c6a8592` | 窗口布局轮询改为单飞异步循环，避免 100ms 定时器重叠调用窗口 API 和磁盘写入；仅成功写入后更新缓存，失败在下一轮重试 | 目标分析、格式、异步边界和差异检查通过；窗口插件仍需设备验收 |
 | A2/A6 WebDAV 配置 | `46ea2cfe` | 区分默认设置未配置与显式一次性配置错误；显式 malformed upload/download 返回失败并记录 `SyncStatus.failed`，不会创建 transport 或静默成功 | `test/webdav_sync_test.dart`；目标分析、格式和差异检查通过；本机 Flutter 测试受 Kernel SDK mismatch 阻塞 |
+| A5 图片收藏查询 | `b03dc1c3` | 为图片收藏标题增加可选 FTS5 trigram external-content 索引和增删改触发器；长关键词使用 MATCH 缩小候选集后仍用原 `instr(lower(title), ?)` 精确过滤，短关键词和 FTS 不可用时回退旧查询 | `test/image_favorites_pagination_test.dart` 覆盖语义、EXPLAIN、初始化后写入/删除；目标分析、格式和差异检查通过；本机 Flutter 测试受 Kernel SDK mismatch 阻塞 |
 
-上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。当前远端普通分支 HEAD 为 `46ea2cfe`；未移动或重写 `v4.2.47`、`v4.2.48`。本机 Flutter runner 仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此这些专项测试需由标准 runner 重跑。普通 `master` push 不触发 Android workflow；只有版本字段、发布产物和标准 CI 准备完成后，才创建新的 annotated `v*` tag 并推送触发发布门禁。
+上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。当前远端普通分支 HEAD 为 `b03dc1c3`；未移动或重写 `v4.2.47`、`v4.2.48`。本机 Flutter runner 仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此这些专项测试需由标准 runner 重跑。普通 `master` push 不触发 Android workflow；只有版本字段、发布产物和标准 CI 准备完成后，才创建新的 annotated `v*` tag 并推送触发发布门禁。
