@@ -1312,6 +1312,7 @@ enum NhentaiSort {
 
 class _NhentaiAuthInterceptor extends Interceptor {
   final NhentaiNetwork network;
+  Future<bool>? _refreshing;
 
   _NhentaiAuthInterceptor(this.network);
 
@@ -1350,7 +1351,7 @@ class _NhentaiAuthInterceptor extends Interceptor {
       DioException err, ErrorInterceptorHandler handler) async {
     bool refreshed;
     try {
-      refreshed = await network.refreshAuthTokens();
+      refreshed = await _refreshAuthTokensOnce();
     } catch (_) {
       handler.next(err);
       return;
@@ -1368,6 +1369,25 @@ class _NhentaiAuthInterceptor extends Interceptor {
     } catch (_) {
       handler.next(err);
     }
+  }
+
+  Future<bool> _refreshAuthTokensOnce() {
+    final current = _refreshing;
+    if (current != null) {
+      return current;
+    }
+    final future = network.refreshAuthTokens();
+    _refreshing = future;
+    future.then((_) {
+      if (identical(_refreshing, future)) {
+        _refreshing = null;
+      }
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_refreshing, future)) {
+        _refreshing = null;
+      }
+    });
+    return future;
   }
 
   bool _shouldRefresh(DioException err) {

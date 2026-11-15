@@ -137,19 +137,22 @@ Future<void> passCloudflare(
             "document.head.innerHTML.includes('#challenge-success-text')");
         if (res == 'false') {
           completionInProgress = true;
-          var ua = controller.userAgent;
-          if (ua != null) {
-            appdata.implicitData[3] = ua;
-            appdata.writeImplicitData();
-          }
-          var cookiesMap = await controller.getCookies(url);
-          if (cookiesMap['cf_clearance'] == null) {
+          try {
+            var ua = controller.userAgent;
+            if (ua != null) {
+              appdata.implicitData[3] = ua;
+              appdata.writeImplicitData();
+            }
+            var cookiesMap = await controller.getCookies(url);
+            if (cookiesMap['cf_clearance'] == null) {
+              return;
+            }
+            saveCookies(cookiesMap);
+            controller.close();
+            finishOnce();
+          } finally {
             completionInProgress = false;
-            return;
           }
-          saveCookies(cookiesMap);
-          controller.close();
-          finishOnce();
         }
       },
     );
@@ -168,18 +171,21 @@ Future<void> passCloudflare(
                   "document.head.innerHTML.includes('#challenge-success-text')");
           if (res == false) {
             completionInProgress = true;
-            var ua = await controller.getUA();
-            if (ua != null) {
-              appdata.implicitData[3] = ua;
-              appdata.writeImplicitData();
-            }
-            var cookiesMap = await controller.getCookies(url) ?? {};
-            if (cookiesMap['cf_clearance'] == null) {
+            try {
+              var ua = await controller.getUA();
+              if (ua != null) {
+                appdata.implicitData[3] = ua;
+                appdata.writeImplicitData();
+              }
+              var cookiesMap = await controller.getCookies(url) ?? {};
+              if (cookiesMap['cf_clearance'] == null) {
+                return;
+              }
+              saveCookies(cookiesMap);
+              App.globalBack();
+            } finally {
               completionInProgress = false;
-              return;
             }
-            saveCookies(cookiesMap);
-            App.globalBack();
           }
         },
         onStarted: (controller) async {

@@ -317,29 +317,32 @@ Future<void> nhLogin(void Function() onFinished) async {
             !title.contains("Register") &&
             title.contains("nhentai")) {
           completionInProgress = true;
-          var ua = controller.userAgent;
-          if (ua != null) {
-            appdata.implicitData[3] = ua;
-            appdata.writeImplicitData();
-          }
-          var cookies =
-              await controller.getCookies("${NhentaiNetwork().baseUrl}/");
-          List<io.Cookie> cookiesList = [];
-          cookies.forEach((key, value) {
-            var cookie = io.Cookie(key, value);
-            cookie.domain = ".nhentai.net";
-            cookiesList.add(cookie);
-          });
-          if (cookiesList.isEmpty) {
+          try {
+            var ua = controller.userAgent;
+            if (ua != null) {
+              appdata.implicitData[3] = ua;
+              appdata.writeImplicitData();
+            }
+            var cookies =
+                await controller.getCookies("${NhentaiNetwork().baseUrl}/");
+            List<io.Cookie> cookiesList = [];
+            cookies.forEach((key, value) {
+              var cookie = io.Cookie(key, value);
+              cookie.domain = ".nhentai.net";
+              cookiesList.add(cookie);
+            });
+            if (cookiesList.isEmpty) {
+              return;
+            }
+            NhentaiNetwork().logged = true;
+            NhentaiNetwork().cookieJar!.saveFromResponse(
+                Uri.parse(NhentaiNetwork().baseUrl), cookiesList);
+            finished = true;
+            onFinished();
+            controller.close();
+          } finally {
             completionInProgress = false;
-            return;
           }
-          NhentaiNetwork().logged = true;
-          NhentaiNetwork().cookieJar!.saveFromResponse(
-              Uri.parse(NhentaiNetwork().baseUrl), cookiesList);
-          finished = true;
-          onFinished();
-          controller.close();
         }
       },
     );

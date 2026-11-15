@@ -607,16 +607,20 @@ class ThumbnailsData {
       return;
     }
     isGetting = true;
-    var res = await load(current + 1);
-    if (res.success) {
-      thumbnails.addAll(res.data);
-      current++;
-      update();
-    } else {
-      Log.error("Network",
-          "Failed to load thumbnails: ${safeNetworkError(res.errorMessage)}");
+    try {
+      var res = await load(current + 1);
+      if (res.success) {
+        thumbnails.addAll(res.data);
+        current++;
+        update();
+      } else {
+        Log.error("Network",
+            "Failed to load thumbnails: ${safeNetworkError(res.errorMessage)}");
+      }
+    } finally {
+      // A thrown request must leave pagination retryable.
+      isGetting = false;
     }
-    isGetting = false;
   }
 
   ThumbnailsData(this.thumbnails, this.load, this.maxPage);
