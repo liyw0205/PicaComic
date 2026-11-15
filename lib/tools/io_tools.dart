@@ -372,6 +372,18 @@ Future<bool> runExportData(bool includeDownload) async {
 
 enum DataImportResult { imported, skipped, cancelled, failed }
 
+typedef DataImportFilePicker = Future<String?> Function();
+
+Future<String?> _pickDataImportFile() async {
+  if (App.isMobile) {
+    return FlutterFileDialog.pickFile(params: const OpenFileDialogParams());
+  }
+  return (await openFile(acceptedTypeGroups: [
+    const XTypeGroup(label: 'data'),
+  ]))
+      ?.path;
+}
+
 /// Compatibility wrapper for the original boolean import API.
 ///
 /// A skipped archive is a successful no-op for the revision-based sync API,
@@ -386,16 +398,16 @@ Future<bool> importData([String? filePath]) async {
 }
 
 Future<DataImportResult> importDataResult(String? filePath,
-    {bool checkVersion = false, bool preserveSettings = false}) async {
+    {bool checkVersion = false,
+    bool preserveSettings = false,
+    @visibleForTesting DataImportFilePicker? pickFile}) async {
   if (filePath == null) {
-    if (App.isMobile) {
-      filePath = await FlutterFileDialog.pickFile(
-          params: const OpenFileDialogParams());
-    } else {
-      filePath = (await openFile(acceptedTypeGroups: [
-        const XTypeGroup(label: 'data'),
-      ]))
-          ?.path;
+    try {
+      filePath = await (pickFile ?? _pickDataImportFile)();
+    } catch (e, s) {
+      Log.error('importData',
+          'Failed to select data archive.\n${safeNetworkError(e)}\n$s');
+      return DataImportResult.failed;
     }
     if (filePath == null) return DataImportResult.cancelled;
   }

@@ -110,4 +110,15 @@ void main() {
       DataImportResult.failed,
     );
   });
+
+  test('import reports failed when the file picker throws', () async {
+    var calls = 0;
+    final result = await importDataResult(null, pickFile: () async {
+      calls++;
+      throw const FileSystemException('picker unavailable');
+    });
+
+    expect(calls, 1);
+    expect(result, DataImportResult.failed);
+  });
 }
