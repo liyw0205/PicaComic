@@ -634,3 +634,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A11 下载队列 | `650a4b12` | 下载根目录切换时清理静态目录缓存；拒绝数据库中含路径分隔符、`.`/`..` 或清洗后变化的目录，避免误删其他目录并保留坏记录重试 | `test/download_persistence_test.dart`；目标分析、格式、analyzer baseline、异步边界、差异检查通过 |
 
 本机对应 Flutter 专项测试均被 Termux 环境的 Kernel SDK mismatch 阻塞（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能宣称本地 Flutter runner 通过；需由标准 runner 重跑。三项提交作者均为 `liyw0205 <2650115317@qq.com>`，当前普通 `master` 提交只推送分支，不触发 Android workflow；`v4.2.47`、`v4.2.48` 未移动或重写。真实 WebDAV 双客户端、独立进程恢复和设备目录切换仍属于发布前验收。
+
+## 24. 2026-11-16 下载生命周期、迁移 journal 与同步结果收口
+
+本轮继续沿 A11/A18/A2 的可复现路径推进：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A11 下载取消 | `c4257716`, `76a42a5b` | 重复取消按任务 identity 合并 Future，等待 stop 和队列快照写入；即使队列项已移除，按 id 的重复取消仍等待同一持久化操作 | `test/favorite_download_test.dart`；目标分析、格式、差异检查通过 |
+| A11 下载生命周期 | `7a2b557d` | `updatePath`/`dispose` 使用生命周期 gate 串行化，取消请求不会在目录切换或销毁期间交错；dispose 不会对同一任务重复 stop | `test/favorite_download_test.dart`；目标分析、格式、差异检查通过 |
+| A18 迁移 journal | `b88b2900`, `d4871601` | 严格校验 journal 类型、大小、摘要、完成标记、重复路径和总字节数；拒绝 staging/目标符号链接，并在 rename 后重新校验完整文件集合 | `test/directory_maintenance_test.dart`；目标分析、格式、差异检查通过 |
+| A2 WebDAV 上传结果 | `0a63face` | 将 late coalesced upload 纳入同一个稳定 Future，调用方等待最终批次结果，错误也不会在微任务窗口中丢失或提前报告 | `lib/network/webdav.dart`、目标分析、格式、analyzer baseline、差异检查通过 |
+
+本轮 A2 静态审计未发现导入逐条上传、同步抑制泄漏或错误吞掉的稳定缺口；`importDataResult(null)` 的文件选择器异常和真实双客户端远端计数仍需平台/服务 fixture 验收。对应 Flutter 测试在本机加载阶段仍受 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner。普通 `master` push 与版本发布分开处理：正常发布可创建新的 annotated `v*` tag 触发 Android workflow；只禁止移动或重写既有历史 tag。
