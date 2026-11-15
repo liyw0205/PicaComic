@@ -223,13 +223,13 @@ class ImageFavoriteManager {
       parameters.add(normalizedKeyword);
     }
     if (afterRowId != null) {
-      conditions.add('rowid < ?');
+      conditions.add('i.rowid < ?');
       parameters.add(afterRowId);
     }
     if (newerThanOrEqualRowId != null) {
       // The inclusive bound also catches SQLite reusing the highest rowid
       // after that row was deleted between two refreshes.
-      conditions.add('rowid >= ?');
+      conditions.add('i.rowid >= ?');
       parameters.add(newerThanOrEqualRowId);
     }
     parameters.add(limit + 1);

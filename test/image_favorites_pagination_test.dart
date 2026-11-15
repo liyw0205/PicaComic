@@ -85,6 +85,17 @@ void main() {
             .items
             .map((item) => item.id),
         ['image-1', 'image-0']);
+    final firstTitlePage =
+        ImageFavoriteManager.getPage(keyword: 'title', limit: 1);
+    expect(
+        ImageFavoriteManager.getPage(
+                keyword: 'title',
+                limit: 1,
+                afterRowId: firstTitlePage.nextCursor)
+            .items
+            .single
+            .id,
+        'image-0');
     // Two-character terms are deliberately kept on the old contains path;
     // the trigram tokenizer only guarantees matches for three code points.
     expect(ImageFavoriteManager.count(keyword: 'le'), 2);
