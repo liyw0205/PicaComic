@@ -84,6 +84,8 @@ abstract class LoadingState<T extends StatefulWidget, S extends Object>
     extends State<T> {
   bool isLoading = false;
 
+  int _requestGeneration = 0;
+
   S? data;
 
   String? error;
@@ -103,11 +105,19 @@ abstract class LoadingState<T extends StatefulWidget, S extends Object>
   }
 
   void retry() {
+    if (!mounted) return;
     setState(() {
       isLoading = true;
       error = null;
     });
-    loadData().then((value) {
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final generation = ++_requestGeneration;
+    try {
+      final value = await loadData();
+      if (!mounted || generation != _requestGeneration) return;
       if (value.success) {
         setState(() {
           isLoading = false;
@@ -116,10 +126,16 @@ abstract class LoadingState<T extends StatefulWidget, S extends Object>
       } else {
         setState(() {
           isLoading = false;
-          error = value.errorMessage!;
+          error = value.errorMessage ?? "Network Error";
         });
       }
-    });
+    } catch (e) {
+      if (!mounted || generation != _requestGeneration) return;
+      setState(() {
+        isLoading = false;
+        error = safeNetworkError(e);
+      });
+    }
   }
 
   Widget buildError() {
@@ -144,23 +160,15 @@ abstract class LoadingState<T extends StatefulWidget, S extends Object>
   @override
   @mustCallSuper
   void initState() {
-    isLoading = true;
-    Future.microtask(() {
-      loadData().then((value) {
-        if (value.success) {
-          setState(() {
-            isLoading = false;
-            data = value.data;
-          });
-        } else {
-          setState(() {
-            isLoading = false;
-            error = value.errorMessage!;
-          });
-        }
-      });
-    });
     super.initState();
+    isLoading = true;
+    Future.microtask(() => unawaited(_load()));
+  }
+
+  @override
+  void dispose() {
+    _requestGeneration++;
+    super.dispose();
   }
 
   @override

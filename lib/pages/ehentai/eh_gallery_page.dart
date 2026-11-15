@@ -347,34 +347,62 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
     bool loading = true;
     ArchiveDownloadInfo? info;
     bool cancelUnlock = false;
+    String? loadError;
+    Future<void>? loadFuture;
+    int loadGeneration = 0;
 
     showDialog(
         context: App.globalContext!,
         builder: (dialogContext) => Dialog(
               child: StatefulBuilder(
                 builder: (context, setState) {
-                  void load() async {
-                    if (data?.auth?["archiveDownload"] == null) {
+                  void load() {
+                    if (loadFuture != null || !loading) return;
+                    final archiveUrl = data?.auth?["archiveDownload"];
+                    if (archiveUrl == null) {
+                      loading = false;
+                      loadError = "归档下载信息不可用".tl;
                       return;
                     }
 
-                    Res<ArchiveDownloadInfo> res;
-                    if (cancelUnlock) {
-                      cancelUnlock = false;
-                      res = await EhNetwork().cancelAndReloadArchiveInfo(info!);
-                    } else {
-                      res = await EhNetwork().getArchiveDownloadInfo(
-                          data!.auth!["archiveDownload"]!);
-                    }
-                    if (res.error) {
-                      showToast(message: "网络错误".tl);
-                    } else {
-                      info = res.data;
-                      loading = false;
-                      if (context.mounted) {
-                        setState(() {});
+                    final shouldCancelUnlock = cancelUnlock;
+                    cancelUnlock = false;
+                    final generation = ++loadGeneration;
+                    late Future<void> task;
+                    task = () async {
+                      try {
+                        final res = shouldCancelUnlock
+                            ? await EhNetwork()
+                                .cancelAndReloadArchiveInfo(info!)
+                            : await EhNetwork()
+                                .getArchiveDownloadInfo(archiveUrl);
+                        if (!context.mounted || generation != loadGeneration) {
+                          return;
+                        }
+                        if (res.error) {
+                          loading = false;
+                          loadError = res.errorMessage ?? "网络错误".tl;
+                        } else {
+                          info = res.data;
+                          loading = false;
+                          loadError = null;
+                        }
+                      } catch (error) {
+                        if (!context.mounted || generation != loadGeneration) {
+                          return;
+                        }
+                        loading = false;
+                        loadError = safeNetworkError(error);
+                      } finally {
+                        if (identical(loadFuture, task)) {
+                          loadFuture = null;
+                        }
+                        if (context.mounted && generation == loadGeneration) {
+                          setState(() {});
+                        }
                       }
-                    }
+                    }();
+                    loadFuture = task;
                   }
 
                   if (loading) {
@@ -405,6 +433,22 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
                               const CircularProgressIndicator()
                                   .paddingVertical(8)
                                   .toCenter()
+                            else if (info == null)
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(loadError ?? "网络错误".tl),
+                                  TextButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        loading = true;
+                                        loadError = null;
+                                      });
+                                    },
+                                    child: Text("重试".tl),
+                                  ),
+                                ],
+                              )
                             else
                               Column(
                                 mainAxisSize: MainAxisSize.min,

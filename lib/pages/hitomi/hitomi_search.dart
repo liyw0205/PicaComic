@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:pica_comic/components/components.dart';
+import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
+import 'package:pica_comic/tools/translations.dart';
 import 'package:shimmer_animation/shimmer_animation.dart';
 
 import '../../foundation/app.dart';
@@ -135,38 +139,111 @@ class HitomiComicTileDynamicLoading extends StatefulWidget {
 class _HitomiComicTileDynamicLoadingState
     extends State<HitomiComicTileDynamicLoading> {
   HitomiComicBrief? comic;
-  bool onScreen = true;
+  String? _error;
+  bool _loading = false;
+  int _requestGeneration = 0;
 
   static List<HitomiComicBrief> cache = [];
 
   @override
+  void initState() {
+    super.initState();
+    _loadComic();
+  }
+
+  @override
+  void didUpdateWidget(covariant HitomiComicTileDynamicLoading oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.id == widget.id) return;
+    _requestGeneration++;
+    comic = null;
+    _loadComic();
+  }
+
+  @override
   void dispose() {
-    onScreen = false;
+    _requestGeneration++;
     super.dispose();
+  }
+
+  HitomiComicBrief? _cachedComic() {
+    for (var cachedComic in cache) {
+      var id = RegExp(r"\d+(?=\.html)").firstMatch(cachedComic.link)![0]!;
+      if (id == widget.id.toString()) {
+        return cachedComic;
+      }
+    }
+    return null;
+  }
+
+  void _loadComic() {
+    final cached = _cachedComic();
+    if (cached != null) {
+      comic = cached;
+      _error = null;
+      _loading = false;
+      return;
+    }
+    if (_loading) return;
+    _loading = true;
+    _error = null;
+    final generation = ++_requestGeneration;
+    final id = widget.id.toString();
+    unawaited(() async {
+      try {
+        final result = await HiNetwork().getComicInfoBrief(id);
+        if (!mounted ||
+            generation != _requestGeneration ||
+            id != widget.id.toString()) {
+          return;
+        }
+        if (result.error) {
+          if (mounted && generation == _requestGeneration) {
+            setState(() {
+              _error = result.errorMessage ?? "Network Error";
+            });
+          }
+          return;
+        }
+        final existing = _cachedComic();
+        if (existing == null) {
+          cache.add(result.data);
+        }
+        setState(() {
+          comic = existing ?? result.data;
+        });
+      } catch (error, stack) {
+        if (mounted && generation == _requestGeneration) {
+          setState(() {
+            _error = safeNetworkError(error);
+          });
+          LogManager.addLog(
+            LogLevel.error,
+            "Network",
+            "Failed to load Hitomi comic brief: "
+                "${safeNetworkError(error)}\n$stack",
+          );
+        }
+      } finally {
+        if (generation == _requestGeneration) {
+          _loading = false;
+        }
+      }
+    }());
   }
 
   @override
   Widget build(BuildContext context) {
-    for (var cachedComic in cache) {
-      var id = RegExp(r"\d+(?=\.html)").firstMatch(cachedComic.link)![0]!;
-      if (id == widget.id.toString()) {
-        comic = cachedComic;
-      }
-    }
     if (comic == null) {
-      HiNetwork().getComicInfoBrief(widget.id.toString()).then((c) {
-        if (c.error) {
-          showToast(message: c.errorMessage!);
-          return;
-        }
-        cache.add(c.data);
-        if (onScreen) {
-          setState(() {
-            comic = c.data;
-          });
-        }
-      });
-
+      if (_error != null) {
+        return Center(
+          child: IconButton(
+            tooltip: "重试".tl,
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadComic,
+          ),
+        );
+      }
       return buildLoadingWidget();
     } else {
       return buildComicTile(context, comic!, 'hitomi');

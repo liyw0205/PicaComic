@@ -98,25 +98,48 @@ class _EhProfileSelectPageState extends State<EhProfileSelectPage> {
   Map<String, String>? profiles;
 
   String? error;
+  Future<void>? _loadFuture;
+  int _loadGeneration = 0;
 
-  Future<void> loadData() async {
-    final res = await EhNetwork().getProfiles();
-    if (!mounted) return;
-    setState(() {
-      loading = false;
-      if (res.error) {
-        error = res.errorMessageWithoutNull;
-      } else {
-        profiles = res.data;
+  @override
+  void initState() {
+    super.initState();
+    _startLoad();
+  }
+
+  void _startLoad() {
+    if (!loading || _loadFuture != null) return;
+    final generation = ++_loadGeneration;
+    late Future<void> task;
+    task = () async {
+      try {
+        final res = await EhNetwork().getProfiles();
+        if (!mounted || generation != _loadGeneration) return;
+        if (res.error) {
+          error = res.errorMessageWithoutNull;
+        } else {
+          profiles = res.data;
+          error = null;
+        }
+      } catch (e) {
+        if (!mounted || generation != _loadGeneration) return;
+        error = safeNetworkError(e);
+      } finally {
+        if (identical(_loadFuture, task)) {
+          _loadFuture = null;
+        }
+        if (mounted && generation == _loadGeneration) {
+          setState(() {
+            loading = false;
+          });
+        }
       }
-    });
+    }();
+    _loadFuture = task;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      unawaited(loadData());
-    }
     return Scaffold(
       appBar: AppBar(
         title: const Text("Profile"),
@@ -126,7 +149,24 @@ class _EhProfileSelectPageState extends State<EhProfileSelectPage> {
               child: CircularProgressIndicator(),
             )
           : error != null
-              ? Center(child: Text(error!))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(error!),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            loading = true;
+                            error = null;
+                          });
+                          _startLoad();
+                        },
+                        child: Text("重试".tl),
+                      ),
+                    ],
+                  ),
+                )
               : profiles == null
                   ? const Center(child: Text("Unknown Error"))
                   : buildBody(),
