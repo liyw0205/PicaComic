@@ -23,16 +23,17 @@ void main() {
     final chunks = StreamController<ImageChunkEvent>();
     final chunkSubscription = chunks.stream.listen((_) {});
     final load = provider.loadWithCancellation(chunks, cancellation);
+    final loadExpectation = expectLater(
+      load,
+      throwsA(isA<ImageTaskCancelledException>()),
+    );
 
     try {
       await Future<void>.delayed(Duration.zero);
       await cancellation.cancel();
       await cancellation.cancel();
 
-      await expectLater(
-        load,
-        throwsA(isA<ImageTaskCancelledException>()),
-      );
+      await loadExpectation;
       expect(sourceCancelled, isTrue);
     } finally {
       await chunks.close();
