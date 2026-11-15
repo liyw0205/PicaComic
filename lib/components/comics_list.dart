@@ -25,6 +25,8 @@ class ComicsPageLogic<T> extends StateController {
 
   bool showFloatingButton = true;
 
+  bool pageSelectionInFlight = false;
+
   int _generation = 0;
 
   Future<void> get(Future<Res<List<T>>> Function(int) getComics) async {
@@ -462,9 +464,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                 ActionChip(
                   label: Text(
                       "${"页面".tl}: ${logic.current}/${logic.maxPage?.toString() ?? "?"}"),
-                  onPressed: () async {
-                    selectPage(logic);
-                  },
+                  onPressed: () => unawaited(selectPage(logic)),
                   elevation: 1,
                   side: BorderSide.none,
                 ),
@@ -519,9 +519,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                   ),
                   Expanded(
                       child: InkWell(
-                    onTap: () {
-                      selectPage(logic);
-                    },
+                    onTap: () => unawaited(selectPage(logic)),
                     child: SizedBox.expand(
                       child: Center(
                         child: Text(
@@ -572,12 +570,24 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
     }
   }
 
-  void selectPage(ComicsPageLogic logic) async {
-    String res = "";
-    await showDialog(
-        context: App.globalContext!,
+  Future<void> selectPage(ComicsPageLogic logic) async {
+    if (logic.isDisposed || logic.pageSelectionInFlight) return;
+    final context = App.globalContext;
+    if (context == null || !context.mounted) return;
+    final generation = logic._generation;
+    logic.pageSelectionInFlight = true;
+    try {
+      final res = await showDialog<String>(
+        context: context,
         builder: (dialogContext) {
-          var controller = TextEditingController();
+          final controller = TextEditingController();
+
+          void submit(String value) {
+            if (dialogContext.mounted) {
+              Navigator.of(dialogContext).pop(value);
+            }
+          }
+
           return SimpleDialog(
             title: const Text("切换页面"),
             children: [
@@ -594,34 +604,39 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                         "${"输入范围: ".tl}1-${logic.maxPage?.toString() ?? "?"}",
                   ),
                   controller: controller,
-                  onSubmitted: (s) {
-                    res = s;
-                    App.globalBack();
-                  },
+                  onSubmitted: submit,
                 ),
               ),
               Center(
                 child: FilledButton(
+                  onPressed: () => submit(controller.text),
                   child: Text("提交".tl),
-                  onPressed: () {
-                    res = controller.text;
-                    App.globalBack();
-                  },
                 ),
               )
             ],
           );
-        });
-    if (res.isNum) {
-      int i = int.parse(res);
-      if (logic.maxPage == null || (i > 0 && i <= logic.maxPage!)) {
-        logic.current = i;
-        logic.update();
+        },
+      );
+      if (logic.isDisposed ||
+          generation != logic._generation ||
+          !context.mounted) {
         return;
       }
-    }
-    if (res != "") {
-      showToast(message: "输入的数字不正确".tl);
+      final page = int.tryParse(res?.trim() ?? "");
+      if (page != null &&
+          page > 0 &&
+          (logic.maxPage == null || page <= logic.maxPage!)) {
+        logic.current = page;
+        logic.update();
+      } else if (res != null && res.trim().isNotEmpty) {
+        showToast(message: "输入的数字不正确".tl);
+      }
+    } catch (error) {
+      if (!logic.isDisposed && context.mounted) {
+        showToast(message: safeNetworkError(error));
+      }
+    } finally {
+      logic.pageSelectionInFlight = false;
     }
   }
 
