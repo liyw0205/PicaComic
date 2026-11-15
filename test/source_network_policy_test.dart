@@ -183,7 +183,44 @@ void main() {
         DioExceptionType.cancel,
       )),
     );
+    final health = policy.diagnosticSummary()['fixture']! as Map;
+    expect(health['requests'], 2);
+    expect(health['failures'], 1);
+    expect(health['cancelled'], 1);
     first.release();
+  });
+
+  test('cancellation during source pacing is accounted without opening circuit',
+      () async {
+    final policy = SourceNetworkPolicy();
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(
+        maxConcurrent: 1,
+        minInterval: Duration(seconds: 1),
+      ),
+    );
+    final request = RequestOptions(
+      path: 'https://fixture.test/paced',
+      extra: {'sourceKey': 'fixture'},
+    );
+    final first = await policy.beforeRequest(request);
+    first.release();
+
+    final cancel = Future<void>.delayed(const Duration(milliseconds: 1));
+    await expectLater(
+      policy.beforeRequest(request, cancelFuture: cancel),
+      throwsA(isA<DioException>().having(
+        (error) => error.type,
+        'type',
+        DioExceptionType.cancel,
+      )),
+    );
+    final health = policy.diagnosticSummary()['fixture']! as Map;
+    expect(health['requests'], 2);
+    expect(health['failures'], 1);
+    expect(health['cancelled'], 1);
+    expect(health['state'], 'healthy');
   });
 
   test('resizing a source budget preserves queued requests', () async {

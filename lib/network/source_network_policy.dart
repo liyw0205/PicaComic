@@ -179,8 +179,9 @@ class SourceNetworkPolicy {
       );
     }
 
-    final permit = await bucket.limiter.acquire(options, cancelFuture);
+    _Permit? permit;
     try {
+      permit = await bucket.limiter.acquire(options, cancelFuture);
       final wait = bucket.nextAllowed.difference(_now());
       if (wait > Duration.zero) {
         final cancelled = await _waitOrCancel(wait, cancelFuture);
@@ -198,10 +199,17 @@ class SourceNetworkPolicy {
         );
       }
       return SourceNetworkLease._(bucket, permit, key);
-    } catch (_) {
-      permit.release();
+    } catch (error) {
+      permit?.release();
+      _recordPreLeaseFailure(bucket, error);
       rethrow;
     }
+  }
+
+  void _recordPreLeaseFailure(_SourceBucket bucket, Object error) {
+    if (classify(error) != SourceNetworkErrorKind.cancelled) return;
+    bucket.health.failures++;
+    bucket.health.cancellations++;
   }
 
   bool shouldRetry(
