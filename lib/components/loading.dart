@@ -114,6 +114,7 @@ abstract class LoadingState<T extends StatefulWidget, S extends Object>
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     final generation = ++_requestGeneration;
     try {
       final value = await loadData();
