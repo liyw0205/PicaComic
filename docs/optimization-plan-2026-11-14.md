@@ -559,4 +559,4 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A7 图片任务取消 | `a8d4eb5d` | `ImageManager.clearTasks()` 增加 generation，使同 key 等待者在清理后取消而不是重新发起网络请求 | `test/jm_image_cache_test.dart`；目标分析、格式和差异检查通过 |
 | A16 下载页异步入口 | `06989077` | 字体下载和 PDF 导出入口返回 Future；Dio 用户取消不显示失败提示，加载对话框在所有路径 finally 关闭 | `test/download_page_async_test.dart`；目标分析、格式和差异检查通过 |
 
-异步边界扫描从基线 `64` 降至 `55` 个 `void async`（随后阅读器章节加载和本轮认证修复已纳入），本轮未引入新的未等待持久化写入。剩余页面入口继续按数据写入、网络请求、取消和 mounted 风险排序，不一次性重写低风险回调。
+异步边界扫描从基线 `64` 降至 `53` 个 `void async`（已包含阅读器章节加载、认证页和下载页修复），本轮未引入新的未等待持久化写入。剩余页面入口继续按数据写入、网络请求、取消和 mounted 风险排序，不一次性重写低风险回调。
