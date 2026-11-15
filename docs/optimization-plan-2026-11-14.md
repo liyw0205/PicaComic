@@ -512,7 +512,7 @@ A2 本轮覆盖 `importDataResult`、`Appdata.readDataFromJson/writeData/updateS
 ### 提交、推送与 tag 规则
 
 1. 每个功能组先独立完成目标分析、格式、差异和专项回归，再使用单一语义提交；提交后立即推送 `origin/master`，记录 commit 和本地验证结果。普通 master push 不触发 Android workflow。
-2. Android workflow 仅由 `v*` tag push 执行完整发布门禁，另保留 pull request 和手动触发用于显式验证；正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发。tag 创建前先完成本地静态检查，tag workflow 再确认 Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
+2. Android workflow 仅由 `v*` tag push 自动执行完整发布门禁；普通分支 push 和 pull request 不触发，仍保留手动 `workflow_dispatch` 供明确需要时验证。正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发。tag 创建前先完成本地静态检查，tag workflow 再确认 Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
 3. `v4.2.48` 已固定到 `8dbcb268` 并完成 Release；`v4.2.47` 已固定到 `82793767`，不得移动、重写或覆盖历史。
 4. tag workflow 失败时保留失败历史和对应提交，修复用新提交/新版本递增；禁止通过强推 tag 或覆盖 Release 规避门禁。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
 
@@ -538,7 +538,7 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A13 图片收藏 | `425678f6` | 检测最高 rowid 回退或空表并重置 keyset 分页水印，覆盖删除全部后重新插入的复用场景 | `test/image_favorites_pagination_test.dart` |
 | A2/A6 WebDAV 上传边界 | `89d82a70` | 维护任务忙时 one-shot upload 排队等待维护 scope 释放，避免返回假成功并丢弃上传；增加忙碌状态回归 | `test/webdav_sync_test.dart` |
 
-`.github/workflows/android.yml` 的 `push` 触发已收窄为 `v*` tag；普通 `master` 提交推送不再启动 Android workflow。`pull_request` 和 `workflow_dispatch` 仍保留，分别用于合并前验证和人工显式运行；正式发布只由版本字段、annotated tag 与 tag commit 一致的 tag workflow 门禁完成。此次修改不移动、不重写 `v4.2.47` 或 `v4.2.48`。
+`.github/workflows/android.yml` 的自动触发已收窄为 `v*` tag push；普通 `master` 提交推送和 pull request 不再启动 Android workflow，`workflow_dispatch` 仅供人工显式运行。正式发布只由版本字段、annotated tag 与 tag commit 一致的 tag workflow 门禁完成。此次修改不移动、不重写 `v4.2.47` 或 `v4.2.48`。
 
 ## 15. 2026-11-15 按方案继续开发
 
