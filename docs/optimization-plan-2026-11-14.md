@@ -589,3 +589,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A3/A16 阅读器手势与自动翻页 | `ff963522` | 双击/长按延迟回调绑定原 reader 并校验当前 controller；自动翻页改 generation 单循环，退出时失效旧任务，toolbar 显式 `unawaited` | 目标分析、格式、差异检查和异步扫描通过；真实触摸、图片流取消和设备生命周期仍需验收 |
 
 本轮异步边界扫描从基线 `64` 降至 `40` 个 `void async`。`362ad032` 仅为 reader touch 控制文件的独立格式化提交，不改变行为。Flutter 测试仍被本机 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)` 阻塞，不能替代标准 CI 和设备验收。
+
+## 20. 2026-11-15 网络重试与提交触发收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A19/A16 网络异步边界 | `b0ac1314`, `1a570011` | Cloudflare 和 nhentai 登录完成回调保持幂等并在异常后释放互斥；鉴权 401 刷新共享进行中的 Future，避免并发重复刷新；Dio 错误重试仍回传原始错误 | `test/cloudflare_interceptor_test.dart`；目标分析、格式、差异检查和 analyzer baseline 通过 |
+| A16 缩略图分页 | `1a570011` | 分页请求用 `finally` 复位 `isGetting`，网络异常后可再次请求同一页，不改变失败结果的传播语义 | `test/thumbnails_data_test.dart`；异步边界扫描 `void_async=34` |
+| CI 触发门禁 | `f1f56774` | Android workflow 自动触发仅保留 `v*` tag push；普通分支 push 和 pull request 不触发，手动 `workflow_dispatch` 保留为显式验证入口 | `gh run list --commit HEAD` 为空；现有 `v4.2.47`、`v4.2.48` tag 未移动 |
+
+本机 Flutter 测试仍受 Termux SDK/kernel 不匹配阻塞（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner。新提交均使用 `liyw0205 <2650115317@qq.com>`，未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 保护文件未纳入提交。
