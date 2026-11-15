@@ -753,7 +753,8 @@ String _canonicalRestoreRootSync(String root) {
 /// Checks a journal artifact against the current canonical restore roots.
 /// `allowedRoots` must have already passed the journal root identity check.
 bool _isSafeRestorePathSync(String dataPath, String target,
-    {Iterable<String> allowedRoots = const []}) {
+    {Iterable<String> allowedRoots = const [],
+    bool allowMissingRoots = false}) {
   if (!File(target).isAbsolute ||
       target.contains('\u0000') ||
       target
@@ -778,7 +779,6 @@ bool _isSafeRestorePathSync(String dataPath, String target,
         : File(target).resolveSymbolicLinksSync();
     return roots.any((root) => _isRestorePathWithin(root, resolved));
   }
-  if (roots.any((root) => _isRestorePathWithin(root, target))) return true;
   var ancestor = File(target).parent;
   while (true) {
     final ancestorType =
@@ -786,12 +786,25 @@ bool _isSafeRestorePathSync(String dataPath, String target,
     if (ancestorType != FileSystemEntityType.notFound) {
       if (ancestorType != FileSystemEntityType.directory) return false;
       final resolved = ancestor.resolveSymbolicLinksSync();
-      return roots.any((root) => _isRestorePathWithin(root, resolved));
+      if (roots.any((root) => _isRestorePathWithin(root, resolved))) {
+        return true;
+      }
+      break;
     }
     final parent = ancestor.parent;
-    if (parent.path == ancestor.path) return false;
+    if (parent.path == ancestor.path) break;
     ancestor = parent;
   }
+  // A committed journal may outlive a removed external root. It is safe to
+  // accept that lexical tail only for cleanup; active rollback must have an
+  // existing ancestor that resolves inside a trusted root.
+  if (allowMissingRoots) {
+    return roots.any((root) =>
+        FileSystemEntity.typeSync(root, followLinks: false) ==
+            FileSystemEntityType.notFound &&
+        _isRestorePathWithin(root, target));
+  }
+  return false;
 }
 
 Future<List<String>> _canonicalRestoreRoots(Iterable<String> roots) async {
@@ -810,7 +823,8 @@ Future<List<String>> _canonicalRestoreRoots(Iterable<String> roots) async {
 /// restore target outside the application's data directory. Missing target
 /// files are valid; their existing ancestor is still checked.
 Future<bool> _isSafeRestoreTarget(String dataPath, String target,
-    {Iterable<String> allowedRoots = const []}) async {
+    {Iterable<String> allowedRoots = const [],
+    bool allowMissingRoots = false}) async {
   if (!File(target).isAbsolute ||
       target.contains('\u0000') ||
       target
@@ -844,23 +858,31 @@ Future<bool> _isSafeRestoreTarget(String dataPath, String target,
         : await File(target).resolveSymbolicLinks();
     return roots.any((root) => _isRestorePathWithin(root, resolvedTarget));
   }
-  // When the configured external root itself is missing, there is no
-  // existing ancestor at which to resolve the target. The canonical root
-  // above has already resolved its nearest existing ancestor, so a lexical
-  // containment check is sufficient for this missing-tail case.
-  if (roots.any((root) => _isRestorePathWithin(root, target))) return true;
   var ancestor = File(target).parent;
   while (true) {
     final type = FileSystemEntity.typeSync(ancestor.path, followLinks: false);
     if (type != FileSystemEntityType.notFound) {
       if (type != FileSystemEntityType.directory) return false;
       final resolved = await ancestor.resolveSymbolicLinks();
-      return roots.any((root) => _isRestorePathWithin(root, resolved));
+      if (roots.any((root) => _isRestorePathWithin(root, resolved))) {
+        return true;
+      }
+      break;
     }
     final parent = ancestor.parent;
-    if (parent.path == ancestor.path) return false;
+    if (parent.path == ancestor.path) break;
     ancestor = parent;
   }
+  // A committed journal may outlive a removed external root. It is safe to
+  // accept that lexical tail only for cleanup; active rollback must have an
+  // existing ancestor that resolves inside a trusted root.
+  if (allowMissingRoots) {
+    return roots.any((root) =>
+        FileSystemEntity.typeSync(root, followLinks: false) ==
+            FileSystemEntityType.notFound &&
+        _isRestorePathWithin(root, target));
+  }
+  return false;
 }
 
 /// The journal lives outside temporary work directories and precedes each move.
@@ -902,12 +924,15 @@ class DataRestoreTransaction {
     return roots;
   }
 
-  void _validateEntryBoundaries(Map entry, List<String> allowedRoots) {
+  void _validateEntryBoundaries(Map entry, List<String> allowedRoots,
+      {bool allowMissingRoots = false}) {
     final dataPath = journal.parent.parent.path;
     for (final key in const ['target', 'staged', 'backup']) {
       final path = entry[key];
       if (path is! String ||
-          !_isSafeRestorePathSync(dataPath, path, allowedRoots: allowedRoots)) {
+          !_isSafeRestorePathSync(dataPath, path,
+              allowedRoots: allowedRoots,
+              allowMissingRoots: allowMissingRoots)) {
         throw const FormatException('Restore path changed before operation');
       }
     }
@@ -1058,7 +1083,8 @@ class DataRestoreTransaction {
     final allowedRoots = _validateRestoreRootIdentity();
     for (final entry in entries) {
       _validateRestoreEntryArtifacts(entry);
-      _validateEntryBoundaries(entry, allowedRoots);
+      _validateEntryBoundaries(entry, allowedRoots,
+          allowMissingRoots: state['phase'] == 'committed');
       if (entry['existed'] == false &&
           FileSystemEntity.typeSync(entry['backup'] as String,
                   followLinks: false) !=
@@ -1246,7 +1272,8 @@ Future<void> recoverPendingDataRestore(String dataPath,
         _isRestorePathWithin(
             _normaliseRestorePath('$dataPath/data-restore'), target) ||
         !await _isSafeRestoreTarget(dataPath, target,
-            allowedRoots: journalRoots) ||
+            allowedRoots: journalRoots,
+            allowMissingRoots: state['phase'] == 'committed') ||
         entry['existed'] is! bool ||
         entry['backup'] != '$target.restore-old-${state['id']}' ||
         entry['staged'] != '$target.restore-new-${state['id']}') {

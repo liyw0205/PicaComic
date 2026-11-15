@@ -603,6 +603,46 @@ void main() {
     await transaction.recover();
   });
 
+  test('recovery rejects a missing target below a data-path symlink', () async {
+    final dataPath = '${root.path}/data';
+    final attackerRoot = Directory('${root.path}/attacker')..createSync();
+    final linkParent = Link('$dataPath/link-to-attacker');
+    await linkParent.create(attackerRoot.path, recursive: true);
+    final target = '${linkParent.path}/new-settings';
+    final backup = File('$target.restore-old-123')
+      ..writeAsStringSync('attacker-backup');
+    final journal = File('$dataPath/data-restore/journal.json')
+      ..createSync(recursive: true);
+    await journal.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'phase': 'replace',
+          'id': '123',
+          'allowedRoots': <String>[],
+          'preferences': {
+            'firstUse': ['old'],
+            'blockingKeyword': null,
+            'favoriteTags': null,
+          },
+          'entries': [
+            {
+              'target': target,
+              'staged': '$target.restore-new-123',
+              'backup': backup.path,
+              'existed': true,
+            },
+          ],
+        }),
+        flush: true);
+
+    await expectLater(
+      recoverPendingDataRestore(dataPath),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await backup.readAsString(), 'attacker-backup');
+    expect(journal.existsSync(), isTrue);
+  });
+
   test('recovery cleans a committed journal after external root removal',
       () async {
     final dataPath = '${root.path}/data';
@@ -623,6 +663,35 @@ void main() {
     await recoverPendingDataRestore(dataPath,
         trustedAllowedRoots: [externalRoot.path]);
     expect(transaction.journal.existsSync(), isFalse);
+  });
+
+  test('recovery rejects a missing external root before commit', () async {
+    final dataPath = '${root.path}/data';
+    final externalRoot = Directory('${root.path}/downloads')..createSync();
+    final relocatedRoot = Directory('${root.path}/downloads-relocated');
+    final target = File('${externalRoot.path}/settings')
+      ..writeAsStringSync('old');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path},
+        allowedRoots: [externalRoot.path]);
+    transaction.apply();
+
+    final state = jsonDecode(await transaction.journal.readAsString())
+        as Map<String, dynamic>;
+    final id = state['id'] as String;
+    final relocatedBackup =
+        File('${relocatedRoot.path}/settings.restore-old-$id');
+    await externalRoot.rename(relocatedRoot.path);
+
+    await expectLater(
+      recoverPendingDataRestore(dataPath,
+          trustedAllowedRoots: [externalRoot.path]),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await relocatedBackup.readAsString(), 'old');
+    expect(transaction.journal.existsSync(), isTrue);
   });
 
   test('ZIP rejects traversal, links, duplicate paths, count and expanded size',
