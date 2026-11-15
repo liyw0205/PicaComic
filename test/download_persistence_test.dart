@@ -393,6 +393,86 @@ void main() {
     expect(manager.total, 0);
   });
 
+  test('directory cache is scoped to the active download root', () async {
+    const id = 'cache-root-switch';
+    final secondDirectory =
+        await Directory.systemTemp.createTemp('pica-download-persistence-');
+
+    void createDatabase(Directory root, String storedDirectory) {
+      final db = sqlite3.open('${root.path}/download.db');
+      db.execute('''
+        create table download (
+          id text primary key,
+          title text,
+          subtitle text,
+          time int,
+          directory text,
+          size int,
+          json text
+        )
+      ''');
+      db.execute(
+        'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+        [id, 'title', '', 1, storedDirectory, 0, '{}'],
+      );
+      db.dispose();
+    }
+
+    try {
+      createDatabase(directory, 'first-root');
+      await manager.init();
+      expect(manager.getDirectory(id), 'first-root');
+
+      await manager.dispose();
+      appdata.settings[22] = secondDirectory.path;
+      createDatabase(secondDirectory, 'second-root');
+      await manager.init();
+
+      expect(manager.getDirectory(id), 'second-root');
+    } finally {
+      await manager.dispose();
+      if (await secondDirectory.exists()) {
+        await secondDirectory.delete(recursive: true);
+      }
+    }
+  });
+
+  test('unsafe database directories are rejected before deletion', () async {
+    final db = sqlite3.open('${directory.path}/download.db');
+    db.execute('''
+      create table download (
+        id text primary key,
+        title text,
+        subtitle text,
+        time int,
+        directory text,
+        size int,
+        json text
+      )
+    ''');
+    db.execute(
+      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+      ['unsafe-directory', 'title', '', 1, 'owned/path', 0, '{}'],
+    );
+    db.dispose();
+
+    // Sanitizing `owned/path` would resolve to `owned path` and could delete
+    // an unrelated directory. The malformed row must remain retryable.
+    final unrelated = Directory('${directory.path}/owned path');
+    await unrelated.create();
+    final marker = File('${unrelated.path}/keep.txt');
+    await marker.writeAsString('keep');
+
+    await manager.init();
+
+    await expectLater(
+      manager.delete(['unsafe-directory']),
+      throwsA(isA<StateError>()),
+    );
+    expect(await marker.exists(), isTrue);
+    expect(manager.total, 1);
+  });
+
   test('download sorting accepts only mapped columns and directions', () async {
     final db = sqlite3.open('${directory.path}/download.db');
     db.execute('''

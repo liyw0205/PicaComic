@@ -485,6 +485,7 @@ class DownloadManager with _DownloadDb implements Listenable {
     await _queueWriteTail;
     _db?.dispose();
     _db = null;
+    _DownloadDb.clearAllDirectoryCache();
   }
 
   ///初始化下载管理器
@@ -507,6 +508,10 @@ class DownloadManager with _DownloadDb implements Listenable {
     _startRequestedDuringStop = false;
     _pauseRequestedDuringStop = false;
     _downloadControlGeneration++;
+    // Directory lookups are scoped to the currently opened download root.
+    // A singleton manager may be reinitialized after a path switch, so a
+    // cached directory from the previous database must never be reused.
+    _DownloadDb.clearAllDirectoryCache();
     try {
       await _getPath();
       await _getInfo();
@@ -1124,6 +1129,8 @@ abstract mixin class _DownloadDb {
 
   static void clearDirectoryCache(String id) => _cache.remove(id);
 
+  static void clearAllDirectoryCache() => _cache.clear();
+
   String? _directoryOrNull(String id) {
     var directory = _cache[id];
     if (directory == null) {
@@ -1152,6 +1159,20 @@ abstract mixin class _DownloadDb {
   }
 
   String _findAccurateDirectory(String directory) {
-    return sanitizeFileName(directory);
+    if (directory.isEmpty || directory == '.' || directory == '..') {
+      throw StateError('Unsafe downloaded directory');
+    }
+    if (directory.contains('/') || directory.contains(r'\')) {
+      throw StateError('Unsafe downloaded directory');
+    }
+    try {
+      if (sanitizeFileName(directory) != directory) {
+        throw StateError('Unsafe downloaded directory');
+      }
+    } catch (error) {
+      if (error is StateError) rethrow;
+      throw StateError('Unsafe downloaded directory');
+    }
+    return directory;
   }
 }
