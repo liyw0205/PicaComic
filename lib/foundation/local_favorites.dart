@@ -786,6 +786,12 @@ class LocalFavoritesManager {
         primary key (target, type)
       );
     """);
+    final indexName =
+        _identifier('pica_favorites_${name}_display_order_target_type');
+    _db.execute('''
+      create index if not exists $indexName
+      on ${_identifier(name)}(display_order, target, type);
+    ''');
     _modifiedAfterLastCache = true;
     saveData();
     return name;
