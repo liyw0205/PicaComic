@@ -240,10 +240,10 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 - 将未被 `flutter test` 自动发现、且与 `network_logging_test.dart` 重复的旧回归入口合并后删除；主测试补齐 Dio 响应体脱敏断言，行为覆盖不减少。
 - 下载并发回归仍跨越 16 MiB 分块阈值，但 fixture 从 32 MiB+1 降为 16 MiB+1，保留两块并发调度验证，减少 CI 内存和写盘成本。
-- 新增 `tool/run_flutter_tests.sh` 作为唯一 Flutter 测试入口，默认使用 2 个并发测试进程并启用 `--fail-fast`；可通过 `FLUTTER_TEST_CONCURRENCY` 调整。Android tag workflow 仍执行全量 `flutter test` 集合，普通 `master` push 不触发该 workflow。
+- 新增 `tool/run_flutter_tests.sh` 作为唯一 Flutter 测试入口，默认串行执行并启用 `--fail-fast`；可通过 `FLUTTER_TEST_CONCURRENCY` 显式调整。由于 `DownloadManager`、`appdata.settings` 和网络 override 仍有跨 suite 的进程级状态，tag 门禁保持串行，待隔离完成后再启用并发。Android tag workflow 仍执行全量 `flutter test` 集合，普通 `master` push 不触发该 workflow。
 - 同领域 fixture 已合并到测试文件内部的 helper（下载 SQLite schema、队列任务、收藏项、WebDAV HTTP server 生命周期），不合并具有不同全局状态或持久化隔离语义的 `setUp`。
 
-优化后的验证边界：并发只改变测试调度，不改变断言集合；若出现全局状态串扰，先将 `FLUTTER_TEST_CONCURRENCY=1` 作为回退基线，再定位具体 suite。
+优化后的验证边界：并发只改变测试调度，不改变断言集合，但当前只作为显式实验参数；若出现全局状态串扰，先将 `FLUTTER_TEST_CONCURRENCY=1` 作为回退基线，再定位具体 suite。
 
 | 批次 | 顺序与范围 | 交付条件 |
 | --- | --- | --- |

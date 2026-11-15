@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Keep the default conservative because a few suites exercise process-wide
-# networking and storage overrides. CI and local runs can tune this without
-# changing the workflow.
-jobs="${FLUTTER_TEST_CONCURRENCY:-2}"
+# Keep the default serial because a few suites exercise process-wide singletons
+# and storage overrides. Once those suites are isolated, CI/local runs can opt
+# into parallel jobs without changing the workflow.
+jobs="${FLUTTER_TEST_CONCURRENCY:-1}"
 if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
   echo "FLUTTER_TEST_CONCURRENCY must be a positive integer" >&2
   exit 2
