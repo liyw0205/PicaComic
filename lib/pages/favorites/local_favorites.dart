@@ -23,6 +23,7 @@ import '../../network/hitomi_network/hitomi_main_network.dart';
 import '../../network/htmanga_network/htmanga_main_network.dart';
 import '../../network/jm_network/jm_network.dart';
 import '../../network/nhentai_network/nhentai_main_network.dart';
+import '../../network/network_logging.dart';
 import '../../network/picacg_network/methods.dart';
 import '../../tools/io_tools.dart';
 
@@ -117,28 +118,34 @@ class _UpdateFavoritesInfoDialogState extends State<UpdateFavoritesInfoDialog> {
 
   bool cancel = false;
 
-  void load() async {
+  Future<void> load() async {
     for (var comic in widget.comics) {
-      if (cancel) return;
-      if (await comic.updateInfo(widget.folder)) {
-        finished++;
+      if (cancel || !mounted) return;
+      try {
+        if (await comic.updateInfo(widget.folder)) {
+          finished++;
+        }
+      } catch (error, stack) {
+        log(
+            "Failed to update favorite information.\n"
+                "${safeNetworkError(error)}\n$stack",
+            "Network",
+            LogLevel.error);
       }
-      if (!cancel) {
-        setState(() {});
-      }
+      if (cancel || !mounted) return;
+      setState(() {});
     }
-    if (mounted) {
-      StateController.findOrNull<SimpleController>(
-              tag: "ComicsPageView ${widget.folder}")
-          ?.refresh();
-      context.pop();
-    }
+    if (!mounted || cancel) return;
+    StateController.findOrNull<SimpleController>(
+            tag: "ComicsPageView ${widget.folder}")
+        ?.refresh();
+    context.pop();
   }
 
   @override
   void initState() {
-    load();
     super.initState();
+    unawaited(load());
   }
 
   @override
@@ -615,7 +622,7 @@ class LocalFavoriteTile extends ComicTile {
             ));
   }
 
-  void readComic() async {
+  Future<void> readComic() async {
     if (DownloadManager().isExists(comic.toDownloadId())) {
       var download =
           await DownloadManager().getComicOrNull(comic.toDownloadId());
@@ -630,152 +637,169 @@ class LocalFavoriteTile extends ComicTile {
       onCancel: () => cancel = true,
       barrierDismissible: false,
     );
-    switch (comic.type.comicType) {
-      case ComicType.picacg:
-        {
-          var res = await network.getEps(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await HistoryManager().find(comic.target);
-            if (history == null) {
-              history = History(
-                HistoryType.picacg,
-                DateTime.now(),
-                comic.name,
-                comic.author,
-                comic.coverPath,
-                0,
-                0,
-                comic.target,
-              );
-              await HistoryManager().addHistory(history);
-            }
-            App.globalTo(
-              () => ComicReadingPage.picacg(
-                comic.target,
-                history!.ep,
-                res.data,
-                comic.name,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      case ComicType.ehentai:
-        {
-          var res = await EhNetwork().getGalleryInfo(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage.ehentai(
-                res.data,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      case ComicType.jm:
-        {
-          var res = await JmNetwork().getComicInfo(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage.jmComic(
-                res.data,
-                history.ep,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      case ComicType.hitomi:
-        {
-          var res = await HiNetwork().getComicInfo(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage.hitomi(
-                res.data,
-                comic.target,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      case ComicType.htManga:
-        {
-          var res = await HtmangaNetwork().getComicInfo(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage.htmanga(
-                res.data.id,
-                comic.name,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      case ComicType.nhentai:
-        {
-          var res = await NhentaiNetwork().getComicInfo(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage.nhentai(
-                res.data.id,
-                res.data.title,
-                initialPage: history.page,
-              ),
-            );
-          }
-        }
-      default:
-        {
-          var res = await comic.type.comicSource.loadComicInfo!(comic.target);
-          if (cancel) return;
-          controller.close();
-          if (res.error) {
-            showToast(message: res.errorMessage ?? "Error");
-          } else {
-            var history = await History.findOrCreate(res.data);
-            App.globalTo(
-              () => ComicReadingPage(
-                CustomReadingData(
-                  res.data.target,
-                  res.data.title,
-                  comic.type.comicSource,
-                  res.data.chapters,
+    try {
+      switch (comic.type.comicType) {
+        case ComicType.picacg:
+          {
+            var res = await network.getEps(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await HistoryManager().find(comic.target);
+              if (history == null) {
+                history = History(
+                  HistoryType.picacg,
+                  DateTime.now(),
+                  comic.name,
+                  comic.author,
+                  comic.coverPath,
+                  0,
+                  0,
+                  comic.target,
+                );
+                await HistoryManager().addHistory(history);
+              }
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.picacg(
+                  comic.target,
+                  history!.ep,
+                  res.data,
+                  comic.name,
+                  initialPage: history.page,
                 ),
-                history.page,
-                history.ep,
-              ),
-            );
+              );
+            }
           }
-        }
+        case ComicType.ehentai:
+          {
+            var res = await EhNetwork().getGalleryInfo(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.ehentai(
+                  res.data,
+                  initialPage: history.page,
+                ),
+              );
+            }
+          }
+        case ComicType.jm:
+          {
+            var res = await JmNetwork().getComicInfo(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.jmComic(
+                  res.data,
+                  history.ep,
+                  initialPage: history.page,
+                ),
+              );
+            }
+          }
+        case ComicType.hitomi:
+          {
+            var res = await HiNetwork().getComicInfo(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.hitomi(
+                  res.data,
+                  comic.target,
+                  initialPage: history.page,
+                ),
+              );
+            }
+          }
+        case ComicType.htManga:
+          {
+            var res = await HtmangaNetwork().getComicInfo(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.htmanga(
+                  res.data.id,
+                  comic.name,
+                  initialPage: history.page,
+                ),
+              );
+            }
+          }
+        case ComicType.nhentai:
+          {
+            var res = await NhentaiNetwork().getComicInfo(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage.nhentai(
+                  res.data.id,
+                  res.data.title,
+                  initialPage: history.page,
+                ),
+              );
+            }
+          }
+        default:
+          {
+            var res = await comic.type.comicSource.loadComicInfo!(comic.target);
+            if (cancel) return;
+            controller.close();
+            if (res.error) {
+              showToast(message: res.errorMessage ?? "Error");
+            } else {
+              var history = await History.findOrCreate(res.data);
+              if (cancel) return;
+              App.globalTo(
+                () => ComicReadingPage(
+                  CustomReadingData(
+                    res.data.target,
+                    res.data.title,
+                    comic.type.comicSource,
+                    res.data.chapters,
+                  ),
+                  history.page,
+                  history.ep,
+                ),
+              );
+            }
+          }
+      }
+    } catch (error, stack) {
+      if (!cancel) {
+        log("Failed to open favorite comic.\n${safeNetworkError(error)}\n$stack",
+            "Network", LogLevel.error);
+        showToast(message: safeNetworkError(error));
+      }
+    } finally {
+      controller.close();
     }
   }
 
