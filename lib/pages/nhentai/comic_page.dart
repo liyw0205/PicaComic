@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
@@ -87,7 +89,7 @@ class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
       },
       cancelPlatformFavorite: () async {
         var res = await NhentaiNetwork().unfavoriteComic(id, data!.token);
-        if(res.success) {
+        if (res.success) {
           data!.favorite = false;
         }
         return res;
@@ -139,32 +141,60 @@ class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
   String? get subTitle => data?.subTitle;
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
+  void read(History? history) {
+    unawaited(_read(history));
+  }
+
+  Future<void> _read(History? history) async {
+    final logic = _pageLogic;
+    final comic = logic?.data;
+    if (!_isCurrent(logic, comic)) return;
+    history = await History.createIfNull(history, comic!);
+    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
     App.globalTo(() => ComicReadingPage.nhentai(
-        data!.id,
-        data!.title,
-        initialPage: history!.page,
-      )
-    );
+          comic.id,
+          comic.title,
+          initialPage: history!.page,
+        ));
   }
 
   @override
-  void onThumbnailTapped(int index) async {
-    await History.findOrCreate(data!);
+  void onThumbnailTapped(int index) {
+    unawaited(_openThumbnail(index));
+  }
+
+  Future<void> _openThumbnail(int index) async {
+    final logic = _pageLogic;
+    final comic = logic?.data;
+    if (!_isCurrent(logic, comic)) return;
+    await History.findOrCreate(comic!);
+    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
     App.globalTo(
       () => ComicReadingPage.nhentai(
-        data!.id,
-        data!.title,
+        comic.id,
+        comic.title,
         initialPage: index + 1,
       ),
     );
   }
 
+  ComicPageLogic<NhentaiComic>? get _pageLogic =>
+      StateController.findOrNull<ComicPageLogic<NhentaiComic>>(tag: tag);
+
+  bool _isCurrent(ComicPageLogic<NhentaiComic>? logic, NhentaiComic? comic) =>
+      logic != null &&
+      !logic.isDisposed &&
+      comic != null &&
+      identical(logic.data, comic) &&
+      identical(
+          StateController.findOrNull<ComicPageLogic<NhentaiComic>>(tag: tag),
+          logic);
+
   @override
   Future<bool> loadFavorite(NhentaiComic data) async {
     return data.favorite ||
-        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem())).isNotEmpty;
+        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem()))
+            .isNotEmpty;
   }
 
   @override
