@@ -770,6 +770,10 @@ class DownloadManager with _DownloadDb implements Listenable {
       // successful delete without requiring the database row to still exist.
       final directory = _directoryOrNull(id);
       if (directory == null) {
+        // A legacy or partially migrated row may not have a directory. There
+        // is no filesystem target to remove, but the database record is still
+        // deletable and must not become an orphan.
+        _deleteFromDb(id);
         _DownloadDb.clearDirectoryCache(id);
         continue;
       }

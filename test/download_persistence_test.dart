@@ -344,6 +344,36 @@ void main() {
     expect(manager.total, 0);
   });
 
+  test('deleting a record without a directory removes the orphaned row',
+      () async {
+    final db = sqlite3.open('${directory.path}/download.db');
+    db.execute('''
+      create table download (
+        id text primary key,
+        title text,
+        subtitle text,
+        time int,
+        directory text,
+        size int,
+        json text
+      )
+    ''');
+    db.execute(
+      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+      ['orphaned-directory', 'title', '', 1, null, 0, '{}'],
+    );
+    db.dispose();
+
+    await manager.init();
+    expect(manager.total, 1);
+
+    await manager.delete(['orphaned-directory']);
+
+    expect(manager.total, 0);
+    await expectLater(manager.delete(['orphaned-directory']), completes);
+    expect(manager.total, 0);
+  });
+
   test('download sorting accepts only mapped columns and directions', () async {
     final db = sqlite3.open('${directory.path}/download.db');
     db.execute('''
