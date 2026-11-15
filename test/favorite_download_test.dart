@@ -26,6 +26,7 @@ class _TestDownloadingItem extends DownloadingItem {
   Completer<void>? stopGate;
   Completer<void>? onFinishCleanupStarted;
   Completer<void>? finishCleanupGate;
+  Future<void> Function()? onStopFinished;
   Completer<CancelToken>? onCoverRequestStarted;
   Completer<void>? downloadedItemGate;
   DownloadedItem? downloadedItem;
@@ -48,6 +49,7 @@ class _TestDownloadingItem extends DownloadingItem {
     await super.pause();
     onStopStarted?.complete();
     await stopGate?.future;
+    await onStopFinished?.call();
   }
 
   @override
@@ -398,6 +400,50 @@ void main() {
       if (!stopGate.isCompleted) stopGate.complete();
       await firstCancellation;
     }
+  });
+
+  test('failed cancellation snapshot restores task and keeps queue paused',
+      () async {
+    final first = _TestDownloadingItem('first')..directory = 'first';
+    final next = _TestDownloadingItem('next')..directory = 'next';
+    manager.downloading
+      ..add(first)
+      ..add(next);
+    manager.isDownloading = true;
+    await manager.persistQueueForTesting();
+
+    final backupDirectory = Directory('${temp.path}/newDownload.json.bak');
+    var sabotage = true;
+    first.onStopFinished = () async {
+      if (sabotage) {
+        sabotage = false;
+        await backupDirectory.create();
+      }
+    };
+
+    await expectLater(
+      manager.cancel(first.id),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(manager.downloading.toList(), [first, next]);
+    expect(manager.isDownloading, isFalse);
+    expect(first.stopCount, 1);
+    expect(next.startCount, 0);
+
+    final persistedAfterFailure =
+        jsonDecode(await File('${temp.path}/newDownload.json').readAsString())
+            as Map;
+    expect((persistedAfterFailure['downloading'] as List), hasLength(2));
+
+    await backupDirectory.delete(recursive: true);
+    await manager.cancel(first.id);
+    expect(manager.downloading.toList(), [next]);
+    expect(next.startCount, 0);
+    final persistedAfterRetry =
+        jsonDecode(await File('${temp.path}/newDownload.json').readAsString())
+            as Map;
+    expect((persistedAfterRetry['downloading'] as List), hasLength(1));
+    expect((persistedAfterRetry['downloading'] as List).single['id'], 'next');
   });
 
   test('dispose waits for cancellation before stopping the same task',

@@ -836,8 +836,13 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   Future<void> _cancelItem(DownloadingItem item) async {
-    final wasFirst = identical(downloading.firstOrNull, item);
+    final originalItems = downloading.toList();
+    final originalIndex =
+        originalItems.indexWhere((queued) => identical(queued, item));
+    if (originalIndex < 0) return;
+    final wasFirst = originalIndex == 0;
     final wasDownloading = isDownloading;
+    var removed = false;
 
     if (wasFirst) _downloadControlGeneration++;
 
@@ -851,11 +856,11 @@ class DownloadManager with _DownloadDb implements Listenable {
         LogManager.addLog(LogLevel.error, "Download",
             "Failed to remove download: ${safeNetworkError(e)}\n$s");
       } finally {
-        _removeDownloadingIdentity(item);
+        removed = _removeDownloadingIdentity(item);
         _stopping.remove(item);
       }
     } else {
-      _removeDownloadingIdentity(item);
+      removed = _removeDownloadingIdentity(item);
     }
 
     final shouldResume = wasFirst &&
@@ -866,15 +871,45 @@ class DownloadManager with _DownloadDb implements Listenable {
       _pauseRequestedDuringStop = false;
     }
 
-    notifyListeners();
+    // Do not release the queue head or start another task until the durable
+    // snapshot reflects the removal. If persistence fails, restore the task
+    // at its original position and leave the manager paused so the caller can
+    // fix storage and retry without resurrecting a stale snapshot on restart.
+    try {
+      await _saveInfo();
+    } catch (_) {
+      if (removed && !downloading.any((queued) => identical(queued, item))) {
+        final items = downloading.toList();
+        var restoreIndex = originalIndex;
+        if (restoreIndex > items.length) restoreIndex = items.length;
+        items.insert(restoreIndex, item);
+        downloading
+          ..clear()
+          ..addAll(items);
+      }
+      if (!wasFirst && wasDownloading) {
+        try {
+          await pause();
+        } catch (e, s) {
+          LogManager.addLog(
+              LogLevel.warning,
+              "Download",
+              "Failed to pause queue after cancellation persistence failure: "
+                  "${safeNetworkError(e)}\n$s");
+        }
+      }
+      isDownloading = false;
+      notifyListeners();
+      rethrow;
+    }
 
+    notifyListeners();
     if (downloading.isEmpty) {
       isDownloading = false;
       await notifications.endProgress();
     } else if (shouldResume) {
       start();
     }
-    await _saveInfo();
   }
 
   Future<DownloadedItem?> getComicOrNull(String id) async {
