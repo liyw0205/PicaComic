@@ -136,7 +136,10 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   bool _isPageActive(HtComicInfo comic) {
     final logic =
         StateController.findOrNull<ComicPageLogic<HtComicInfo>>(tag: tag);
-    return logic != null && !logic.isDisposed && identical(logic.data, comic);
+    return App.globalContext?.mounted == true &&
+        logic != null &&
+        !logic.isDisposed &&
+        identical(logic.data, comic);
   }
 
   @override
