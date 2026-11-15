@@ -622,3 +622,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A16 列表页选择器 | `1141bb2c` | 页码对话框增加重复触发锁、generation、dispose/context 守卫和异常处理，入口显式 `unawaited` | 目标分析、格式、差异检查和异步扫描通过 |
 
 本轮全仓异步边界扫描为 `void_async=2`（基线 64）、`future_void_async=235`、同步 I/O 命中 49；剩余两个 `void async` 属于插件/固定回调边界，保留并在方案中持续跟踪。新增 Flutter 专项测试在本机仍受 Termux Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner；普通 `master` push 不触发 Android workflow，版本 tag 未移动或重写。
+
+## 23. 2026-11-16 恢复、WebDAV 与下载队列边界复核
+
+本轮针对持久化和同步路径继续做可复现审计，确认并修复三处边界：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A1 恢复事务 | `ac8919d1` | 恢复目标带尾部分隔符时先规范化路径，确保 `restore-new`/`restore-old` 产物位于目标旁侧，不会落入待替换目录内部 | `test/data_restore_transaction_test.dart`；目标分析、格式、差异检查通过 |
+| A6 WebDAV 传输 | `d6b3339e` | transport 关闭异常不覆盖主操作结果；指针 GET 遇 405/501 时降级为无 ETag 的 revision graph 检测，兼容不支持指针方法的服务端 | `test/webdav_sync_test.dart`；目标分析、格式、analyzer baseline、差异检查通过 |
+| A11 下载队列 | `650a4b12` | 下载根目录切换时清理静态目录缓存；拒绝数据库中含路径分隔符、`.`/`..` 或清洗后变化的目录，避免误删其他目录并保留坏记录重试 | `test/download_persistence_test.dart`；目标分析、格式、analyzer baseline、异步边界、差异检查通过 |
+
+本机对应 Flutter 专项测试均被 Termux 环境的 Kernel SDK mismatch 阻塞（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能宣称本地 Flutter runner 通过；需由标准 runner 重跑。三项提交作者均为 `liyw0205 <2650115317@qq.com>`，当前普通 `master` 提交只推送分支，不触发 Android workflow；`v4.2.47`、`v4.2.48` 未移动或重写。真实 WebDAV 双客户端、独立进程恢复和设备目录切换仍属于发布前验收。
