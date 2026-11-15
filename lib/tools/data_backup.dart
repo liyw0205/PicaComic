@@ -545,51 +545,63 @@ Future<Map<String, dynamic>> extractDataBackup(String source, Directory root,
   } finally {
     input.closeSync();
   }
-  final manifestFile = File('${root.path}/$backupManifestName');
-  Map<String, dynamic> manifest = {};
-  if (manifestFile.existsSync()) {
-    manifest = Map<String, dynamic>.from(
-        jsonDecode(await manifestFile.readAsString()) as Map);
-    if (manifest['formatVersion'] != 1 || manifest['files'] is! Map) {
-      throw const FormatException('Unsupported backup format');
-    }
-    final listed = Map<String, dynamic>.from(manifest['files'] as Map);
-    final actual = <String>{};
-    await for (final entity in root.list(recursive: true, followLinks: false)) {
-      if (entity is! File || entity.path == manifestFile.path) continue;
-      final name =
-          entity.path.substring(root.path.length + 1).replaceAll('\\', '/');
-      actual.add(name);
-      final record = listed[name];
-      if (record is! Map ||
-          record['size'] != await entity.length() ||
-          record['sha256'] != await fileDigest(entity)) {
-        throw const FormatException('Backup integrity check failed');
+  try {
+    final manifestFile = File('${root.path}/$backupManifestName');
+    Map<String, dynamic> manifest = {};
+    if (manifestFile.existsSync()) {
+      manifest = Map<String, dynamic>.from(
+          jsonDecode(await manifestFile.readAsString()) as Map);
+      if (manifest['formatVersion'] != 1 || manifest['files'] is! Map) {
+        throw const FormatException('Unsupported backup format');
+      }
+      final listed = Map<String, dynamic>.from(manifest['files'] as Map);
+      final actual = <String>{};
+      await for (final entity
+          in root.list(recursive: true, followLinks: false)) {
+        if (entity is! File || entity.path == manifestFile.path) continue;
+        final name =
+            entity.path.substring(root.path.length + 1).replaceAll('\\', '/');
+        actual.add(name);
+        final record = listed[name];
+        if (record is! Map ||
+            record['size'] != await entity.length() ||
+            record['sha256'] != await fileDigest(entity)) {
+          throw const FormatException('Backup integrity check failed');
+        }
+      }
+      if (actual.length != listed.length) {
+        throw const FormatException('Backup file is missing');
       }
     }
-    if (actual.length != listed.length)
-      throw const FormatException('Backup file is missing');
-  }
-  final data = jsonDecode(await File('${root.path}/appdata').readAsString());
-  if (data is! Map ||
-      data['settings'] is! List ||
-      (data['settings'] as List).isEmpty ||
-      (data['settings'] as List).any((e) => e is! String)) {
-    throw const FormatException('Invalid backup settings');
-  }
-  for (final entry in {
-    'local_favorite.db': 'folder_order',
-    'history.db': 'history',
-    'cookies.db': 'cookies'
-  }.entries) {
-    final file = File('${root.path}/${entry.key}');
-    if (file.existsSync())
-      checkBackupDatabase(file.path, entry.value);
-    else if (manifest.isNotEmpty && entry.key != 'cookies.db') {
-      throw FormatException('Missing ${entry.key}');
+    final data = jsonDecode(await File('${root.path}/appdata').readAsString());
+    if (data is! Map ||
+        data['settings'] is! List ||
+        (data['settings'] as List).isEmpty ||
+        (data['settings'] as List).any((e) => e is! String)) {
+      throw const FormatException('Invalid backup settings');
     }
+    for (final entry in {
+      'local_favorite.db': 'folder_order',
+      'history.db': 'history',
+      'cookies.db': 'cookies'
+    }.entries) {
+      final file = File('${root.path}/${entry.key}');
+      if (file.existsSync()) {
+        checkBackupDatabase(file.path, entry.value);
+      } else if (manifest.isNotEmpty && entry.key != 'cookies.db') {
+        throw FormatException('Missing ${entry.key}');
+      }
+    }
+    return manifest;
+  } catch (_) {
+    // The root is a derived extraction, so discard invalid output while the
+    // original backup remains available for inspection and retry.
+    if (FileSystemEntity.typeSync(root.path, followLinks: false) ==
+        FileSystemEntityType.directory) {
+      root.deleteSync(recursive: true);
+    }
+    rethrow;
   }
-  return manifest;
 }
 
 /// Copies a validated backup entity without blocking the caller on file I/O.

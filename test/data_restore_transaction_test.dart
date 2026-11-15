@@ -690,9 +690,10 @@ void main() {
             'files': <String, Object>{},
           }))
     ]);
+    final missingOutput = Directory('${root.path}/missing');
     await expectLater(
-        extractDataBackup(good.path, Directory('${root.path}/missing')),
-        throwsA(anything));
+        extractDataBackup(good.path, missingOutput), throwsA(anything));
+    expect(missingOutput.existsSync(), isFalse);
 
     final manifest = jsonEncode({
       'formatVersion': 1,
@@ -704,8 +705,9 @@ void main() {
       ArchiveFile.string('appdata', '{"settings":[]}'),
       ArchiveFile.string(backupManifestName, manifest)
     ]);
-    await expectLater(
-        extractDataBackup(tampered.path, Directory('${root.path}/tampered')),
+    final tamperedOutput = Directory('${root.path}/tampered');
+    await expectLater(extractDataBackup(tampered.path, tamperedOutput),
         throwsA(isA<FormatException>()));
+    expect(tamperedOutput.existsSync(), isFalse);
   });
 }
