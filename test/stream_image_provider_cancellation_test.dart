@@ -26,6 +26,7 @@ void main() {
     try {
       await Future<void>.delayed(Duration.zero);
       await cancellation.cancel();
+      await cancellation.cancel();
 
       await expectLater(
         load,

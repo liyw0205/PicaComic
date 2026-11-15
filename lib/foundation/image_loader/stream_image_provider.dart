@@ -41,7 +41,9 @@ class StreamImageProvider extends BaseImageProvider<StreamImageProvider> {
 
     final stream = taskScope?.bind(streamBuilder) ?? streamBuilder();
     final iterator = StreamIterator(stream);
-    cancellation?.register(iterator.cancel);
+    Future<void>? iteratorCancel;
+    Future<void> cancelIterator() => iteratorCancel ??= iterator.cancel();
+    cancellation?.register(cancelIterator);
     try {
       while (await iterator.moveNext()) {
         final progress = iterator.current;
@@ -66,7 +68,7 @@ class StreamImageProvider extends BaseImageProvider<StreamImageProvider> {
       var file = finishProgress.getFile();
       return await file.readAsBytes();
     } finally {
-      await iterator.cancel();
+      await cancelIterator();
     }
   }
 
