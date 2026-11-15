@@ -290,10 +290,10 @@ class RenameFolderDialog extends StatelessWidget {
           child: TextField(
             controller: controller,
             focusNode: focusNode,
-            onEditingComplete: () {
+            onEditingComplete: () async {
               try {
-                LocalFavoritesManager().rename(before, controller.text);
-                context.pop();
+                await LocalFavoritesManager().rename(before, controller.text);
+                if (context.mounted) context.pop();
               } catch (e) {
                 showToast(message: e.toString());
               }
@@ -312,10 +312,11 @@ class RenameFolderDialog extends StatelessWidget {
             height: 35,
             child: Center(
               child: TextButton(
-                  onPressed: () {
+                  onPressed: () async {
                     try {
-                      LocalFavoritesManager().rename(before, controller.text);
-                      context.pop();
+                      await LocalFavoritesManager()
+                          .rename(before, controller.text);
+                      if (context.mounted) context.pop();
                     } catch (e) {
                       showToast(message: e.toString());
                     }
