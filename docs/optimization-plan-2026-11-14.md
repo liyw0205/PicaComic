@@ -471,7 +471,7 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 1. 在固定设备和 1,000/10,000/50,000 条数据集上测量 A5 查询 p50/p95、首屏和滚动内存，只有测量确认后再调整索引或缓存。
 2. 用双客户端真实 WebDAV 重放同秒并发、时钟偏移、离线恢复、上传中断、ETag 和无 ETag 服务；记录最终 revision 图、冲突提示和旧客户端共存行为。
 3. 为 A1/A2/A11/A16/A18 建立独立进程、低速存储和中断恢复 runner；重点确认导入失败不假成功、下载任务不丢失、目录迁移可重放。
-4. A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收完成后，先对当前 master 重新跑完整 CI；下一次递增版本（预计 `4.2.48+4248`）时再创建新的 annotated tag，现有 `v4.2.47` 保持不可变。tag 只指向已通过 CI 的版本提交。
+4. A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收完成后，先对当前 master 重新跑完整 CI；版本递增后推送与版本字段一致的 `v*` tag。tag 创建或更新都只发布仍指向本次构建 SHA 的 run。
 
 ## 11. 2026-11-15 后续缺口修复
 
@@ -512,7 +512,7 @@ A2 本轮覆盖 `importDataResult`、`Appdata.readDataFromJson/writeData/updateS
 ### 提交、推送与 tag 规则
 
 1. 每个功能组先独立完成目标分析、格式、差异和专项回归，再使用单一语义提交；提交后立即推送 `origin/master`，记录 commit 和本地验证结果。普通 master push 不触发 Android workflow。
-2. Android workflow 仅由 `v*` tag push 自动执行完整发布门禁；普通分支 push 和 pull request 不触发，仍保留手动 `workflow_dispatch` 供明确需要时验证。正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发。tag 创建前先完成本地静态检查，tag workflow 再确认 Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
+2. Android workflow 仅由 `v*` tag push 自动执行完整发布门禁；普通分支 push 和 pull request 不触发，仍保留手动 `workflow_dispatch` 供明确需要时验证。正式发布要求版本字段、tag 名称和本次 tag commit 一致；tag 创建或更新都可触发，tag workflow 再确认 Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
 3. `v4.2.48` 当前 Release 基线指向 `8dbcb268`；每次 `v*` tag 构建只要求该次 tag 解析到本次 `GITHUB_SHA`，允许同名 tag 更新后重新发布。
 4. tag workflow 失败时保留失败 run 和对应提交；修复后可重新推送同名 tag，旧 run 会被取消，发布前的远端 SHA 校验会拒绝过期构建。已有 Release 的同名资产由 workflow 更新，避免旧资产与可变 tag 混用。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
 
@@ -538,7 +538,7 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A13 图片收藏 | `425678f6` | 检测最高 rowid 回退或空表并重置 keyset 分页水印，覆盖删除全部后重新插入的复用场景 | `test/image_favorites_pagination_test.dart` |
 | A2/A6 WebDAV 上传边界 | `89d82a70` | 维护任务忙时 one-shot upload 排队等待维护 scope 释放，避免返回假成功并丢弃上传；增加忙碌状态回归 | `test/webdav_sync_test.dart` |
 
-`.github/workflows/android.yml` 的自动触发已收窄为 `v*` tag push；普通 `master` 提交推送和 pull request 不再启动 Android workflow，`workflow_dispatch` 仅供人工显式运行。正式发布只由版本字段、annotated tag 与 tag commit 一致的 tag workflow 门禁完成。此次修改不移动、不重写 `v4.2.47` 或 `v4.2.48`。
+`.github/workflows/android.yml` 的自动触发已收窄为 `v*` tag push；普通 `master` 提交推送和 pull request 不再启动 Android workflow，`workflow_dispatch` 仅供人工显式运行。正式发布只由版本字段、tag 名称与本次 tag commit 一致的 tag workflow 门禁完成；同名 tag 更新会取消旧 run，并允许已有 Release 资产更新到当前构建。
 
 ## 15. 2026-11-15 按方案继续开发
 
@@ -608,7 +608,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A2 WebDAV 临时目录清理 | `f235c0e1` | 上传/下载临时目录改为异步清理并记录 warning；清理失败不覆盖已经完成的上传或导入结果，也不触发重复同步 | 目标分析、格式、差异检查和 analyzer baseline 通过；异步边界扫描 `void_async=29`、`sync_io=49` |
 | A16 设置类型收窄 | `f235c0e1` | 设置网络操作使用显式 `Res` 类型，保持异步结果契约清晰 | 目标分析和 analyzer baseline 通过 |
 
-本机专项 Flutter 测试仍因 Termux Flutter 编译器与 SDK/kernel 不匹配失败（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner；真实 WebDAV 双客户端、设备生命周期和中断恢复仍需发布前验收。普通 `master` push 不触发 Android workflow，只有 `v*` tag push 才触发，版本 tag 未移动或重写。
+本机专项 Flutter 测试仍因 Termux Flutter 编译器与 SDK/kernel 不匹配失败（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner；真实 WebDAV 双客户端、设备生命周期和中断恢复仍需发布前验收。普通 `master` push 不触发 Android workflow，`v*` tag 创建或更新均触发，旧 run 不得覆盖新构建。
 
 ## 22. 2026-11-16 来源页面异步边界继续收口
 
@@ -621,7 +621,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A16 PicACG/JM/通用详情 | `2ce905c4`, `3b45fbc1` | 推荐页 loader 注入、请求互斥和坏响应校验；阅读/章节入口改为 Future 内部任务并检查历史提交、controller 和 context；下载状态读取异常可记录并恢复 | `test/picacg_collections_async_test.dart`、目标分析、格式和差异检查通过 |
 | A16 列表页选择器 | `1141bb2c` | 页码对话框增加重复触发锁、generation、dispose/context 守卫和异常处理，入口显式 `unawaited` | 目标分析、格式、差异检查和异步扫描通过 |
 
-本轮全仓异步边界扫描为 `void_async=2`（基线 64）、`future_void_async=235`、同步 I/O 命中 49；剩余两个 `void async` 属于插件/固定回调边界，保留并在方案中持续跟踪。新增 Flutter 专项测试在本机仍受 Termux Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner；普通 `master` push 不触发 Android workflow，版本 tag 未移动或重写。
+本轮全仓异步边界扫描为 `void_async=2`（基线 64）、`future_void_async=235`、同步 I/O 命中 49；剩余两个 `void async` 属于插件/固定回调边界，保留并在方案中持续跟踪。新增 Flutter 专项测试在本机仍受 Termux Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner；普通 `master` push 不触发 Android workflow，`v*` tag 创建或更新均触发。
 
 ## 23. 2026-11-16 恢复、WebDAV 与下载队列边界复核
 
@@ -646,7 +646,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A18 迁移 journal | `b88b2900`, `d4871601` | 严格校验 journal 类型、大小、摘要、完成标记、重复路径和总字节数；拒绝 staging/目标符号链接，并在 rename 后重新校验完整文件集合 | `test/directory_maintenance_test.dart`；目标分析、格式、差异检查通过 |
 | A2 WebDAV 上传结果 | `0a63face` | 将 late coalesced upload 纳入同一个稳定 Future，调用方等待最终批次结果，错误也不会在微任务窗口中丢失或提前报告 | `lib/network/webdav.dart`、目标分析、格式、analyzer baseline、差异检查通过 |
 
-本轮 A2 静态审计未发现导入逐条上传、同步抑制泄漏或错误吞掉的稳定缺口；`importDataResult(null)` 的文件选择器异常和真实双客户端远端计数仍需平台/服务 fixture 验收。对应 Flutter 测试在本机加载阶段仍受 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner。普通 `master` push 与版本发布分开处理：正常发布可创建新的 annotated `v*` tag 触发 Android workflow；只禁止移动或重写既有历史 tag。
+本轮 A2 静态审计未发现导入逐条上传、同步抑制泄漏或错误吞掉的稳定缺口；`importDataResult(null)` 的文件选择器异常和真实双客户端远端计数仍需平台/服务 fixture 验收。对应 Flutter 测试在本机加载阶段仍受 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner。普通 `master` push 与版本发布分开处理：`v*` tag 创建或更新均触发 Android workflow，旧 run 会在并发组中取消。
 
 ## 25. 2026-11-16 页面加载与评论请求生命周期继续收口
 
@@ -658,7 +658,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A16 PicACG 评论/回复 | `634027b2`, `1d8c99c2` | 首屏和分页请求互斥，retry 会失效旧分页；评论发送等待刷新结果，异常、dispose 和代际变化不再回写 controller 或状态；旧分页 finally 不会清除新请求的锁 | 目标 `dart analyze`、格式、差异检查通过；需标准 Flutter runner 补充注入网络 fixture |
 | A16 桌面窗口状态 | `634027b2` | 最大化状态查询使用 mounted 守卫和异常兜底，窗口销毁后不再调用 `setState` | 目标分析、格式和差异检查通过 |
 
-本轮未移动或重写 `v4.2.47`、`v4.2.48`。普通 `master` 提交仍只推送分支，不触发 Android workflow；版本号、发布产物和标准 CI 准备完成后，按正常流程创建新的 annotated `v*` tag 并推送，让 tag workflow 执行发布门禁。新 tag 可以按版本递增正常创建，历史 tag 只保持不可变。
+普通 `master` 提交仍只推送分支，不触发 Android workflow；版本号、发布产物和标准 CI 准备完成后，推送名称与版本一致的 `v*` tag，让 tag workflow 执行发布门禁。同名 tag 后续更新也会触发新 run，已有 Release 资产按当前构建更新。
 
 ## 26. 2026-11-16 目录恢复、窗口轮询与 WebDAV 配置边界
 
@@ -669,7 +669,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A2/A6 WebDAV 配置 | `46ea2cfe` | 区分默认设置未配置与显式一次性配置错误；显式 malformed upload/download 返回失败并记录 `SyncStatus.failed`，不会创建 transport 或静默成功 | `test/webdav_sync_test.dart`；目标分析、格式和差异检查通过；本机 Flutter 测试受 Kernel SDK mismatch 阻塞 |
 | A5 图片收藏查询 | `b03dc1c3`, `73d8d3d8`, `a9eaac38`, `c1b75d5e` | 为图片收藏标题增加可选 FTS5 trigram external-content 索引和增删改触发器；长关键词使用 MATCH 缩小候选集后仍用原 `instr(lower(title), ?)` 精确过滤，短关键词和 FTS 不可用时回退旧查询；补齐 JOIN 后 keyset 游标限定、第二页回归和非 FTS 辅助表降级 fixture | `test/image_favorites_pagination_test.dart` 覆盖语义、EXPLAIN、初始化后写入/删除、分页和启动回退；目标分析、格式和差异检查通过；本机 Flutter 测试受 Kernel SDK mismatch 阻塞 |
 
-上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。未移动或重写 `v4.2.47`、`v4.2.48`。本机 Flutter runner 仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此这些专项测试需由标准 runner 重跑。普通 `master` push 不触发 Android workflow；只有版本字段、发布产物和标准 CI 准备完成后，才创建新的 annotated `v*` tag 并推送触发发布门禁。
+上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。本机 Flutter runner 仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此这些专项测试需由标准 runner 重跑。普通 `master` push 不触发 Android workflow；tag 名称与版本字段一致时，创建或更新 `v*` tag 都会触发发布门禁。
 
 ## 27. 2026-11-16 恢复校验清理与 WebDAV 本地状态一致性
 
