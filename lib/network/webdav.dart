@@ -46,6 +46,21 @@ bool _sameRevision(SyncRevision left, SyncRevision right) {
   return true;
 }
 
+Future<void> _cleanupSyncWork(io.Directory work, String operation) async {
+  try {
+    if (await work.exists()) {
+      await work.delete(recursive: true);
+    }
+  } catch (error, stack) {
+    // Temporary cleanup must remain observable without turning a completed
+    // upload/import into a false failure or triggering a duplicate retry.
+    Log.warning(
+        'Sync',
+        'Failed to clean temporary $operation directory.\n'
+            '${safeNetworkError(error)}\n$stack');
+  }
+}
+
 class _SecretStoreReadError implements Exception {
   _SecretStoreReadError(this.error);
 
@@ -483,7 +498,9 @@ class Webdav {
       return false;
     } finally {
       transport?.close();
-      if (work != null && work.existsSync()) work.deleteSync(recursive: true);
+      if (work != null) {
+        await _cleanupSyncWork(work, 'upload');
+      }
     }
   }
 
@@ -566,7 +583,7 @@ class Webdav {
         throw StateError('Sync import failed');
       }
     } finally {
-      if (work.existsSync()) work.deleteSync(recursive: true);
+      await _cleanupSyncWork(work, 'download');
     }
   }
 

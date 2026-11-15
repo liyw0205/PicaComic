@@ -27,7 +27,7 @@ class JmSettings extends StatefulWidget {
     final context = App.globalContext;
     if (showLoading && (context == null || !context.mounted)) return;
     var controller = showLoading ? showLoadingDialog(context!) : null;
-    final res;
+    final Res<dynamic> res;
     try {
       res = await JmNetwork().getApiDomains();
     } finally {
@@ -64,7 +64,7 @@ class JmSettings extends StatefulWidget {
     final context = App.globalContext;
     if (showLoading && (context == null || !context.mounted)) return;
     var controller = showLoading ? showLoadingDialog(context!) : null;
-    final res;
+    final Res<bool> res;
     try {
       res = await JmNetwork().dailyChk();
     } finally {

@@ -1,35 +1,74 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/network/jm_network/jm_network.dart';
 import 'package:pica_comic/network/jm_network/jm_models.dart';
+import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/components/components.dart';
 
+typedef JmWeekRecommendationLoader = Future<Res<Map<String, String>>>
+    Function();
+typedef JmWeekRecommendationComicsLoader = Future<Res<List<JmComicBrief>>>
+    Function(String id, WeekRecommendationType type);
+
 class JWRPLogic extends StateController {
+  JWRPLogic({JmWeekRecommendationLoader? loader})
+      : _loader = loader ?? (() => jmNetwork.getWeekRecommendation());
+
+  final JmWeekRecommendationLoader _loader;
+
   bool loading = true;
   Map<String, String>? rec;
   String? message;
   String currentName = "";
   String currentId = "";
+  bool _requestInFlight = false;
+  int _generation = 0;
 
   void change() {
-    loading = !loading;
+    if (isDisposed) return;
+    _generation++;
+    _requestInFlight = false;
+    loading = true;
+    rec = null;
+    message = null;
+    currentName = "";
+    currentId = "";
     update();
   }
 
-  void get() async {
+  Future<void> get() async {
+    if (isDisposed || _requestInFlight) return;
+    final requestGeneration = _generation;
+    _requestInFlight = true;
     rec = null;
     message = null;
-    var res = await JmNetwork().getWeekRecommendation();
-    if (res.error) {
-      message = res.errorMessage;
-    } else {
-      rec = res.data;
-      currentName = rec!.values.first;
-      currentId = rec!.keys.first;
+    try {
+      final res = await _loader();
+      if (isDisposed || requestGeneration != _generation) return;
+      if (res.error) {
+        message = res.errorMessage;
+      } else if (res.data.isEmpty) {
+        message = "暂无可用分类".tl;
+      } else {
+        rec = res.data;
+        currentName = rec!.values.first;
+        currentId = rec!.keys.first;
+      }
+      loading = false;
+      update();
+    } catch (error) {
+      if (isDisposed || requestGeneration != _generation) return;
+      message = error.toString();
+      loading = false;
+      update();
+    } finally {
+      if (requestGeneration == _generation) {
+        _requestInFlight = false;
+      }
     }
-    loading = false;
-    update();
   }
 }
 
@@ -116,7 +155,7 @@ class JmWeekRecommendationPage extends StatelessWidget {
             child: StateBuilder<JWRPLogic>(
               builder: (logic) {
                 if (logic.loading) {
-                  logic.get();
+                  unawaited(logic.get());
                   return const Center(
                     child: CircularProgressIndicator(),
                   );
@@ -125,7 +164,7 @@ class JmWeekRecommendationPage extends StatelessWidget {
                     message: logic.message!,
                     retry: () {
                       logic.change();
-                      logic.get();
+                      unawaited(logic.get());
                     },
                   );
                 } else {
@@ -144,27 +183,54 @@ class JmWeekRecommendationPage extends StatelessWidget {
 }
 
 class WRLLogic extends StateController {
+  WRLLogic({JmWeekRecommendationComicsLoader? loader})
+      : _loader = loader ??
+            ((id, type) => jmNetwork.getWeekRecommendationComics(id, type));
+
+  final JmWeekRecommendationComicsLoader _loader;
+
   var comics = <List<JmComicBrief>>[[], [], []];
   var messages = <String?>[null, null, null];
   var loading = <bool>[true, true, true];
+  final _requestInFlight = <bool>[false, false, false];
+  final _generation = <int>[0, 0, 0];
 
-  void get(int index, String id) async {
-    var res = await JmNetwork()
-        .getWeekRecommendationComics(id, WeekRecommendationType.values[index]);
-    if (res.error) {
-      messages[index] = res.errorMessage;
-    } else {
-      comics[index] = res.data;
+  Future<void> get(int index, String id) async {
+    if (isDisposed || index < 0 || index >= loading.length) return;
+    if (_requestInFlight[index]) return;
+    final requestGeneration = _generation[index];
+    _requestInFlight[index] = true;
+    try {
+      final res = await _loader(id, WeekRecommendationType.values[index]);
+      if (isDisposed || requestGeneration != _generation[index]) return;
+      if (res.error) {
+        messages[index] = res.errorMessage;
+      } else {
+        comics[index] = res.data;
+      }
+      loading[index] = false;
+      update();
+    } catch (error) {
+      if (isDisposed || requestGeneration != _generation[index]) return;
+      messages[index] = error.toString();
+      loading[index] = false;
+      update();
+    } finally {
+      if (requestGeneration == _generation[index]) {
+        _requestInFlight[index] = false;
+      }
     }
-    loading[index] = false;
-    update();
   }
 
   void retry(int index, String id) {
+    if (isDisposed || index < 0 || index >= loading.length) return;
+    _generation[index]++;
+    _requestInFlight[index] = false;
     loading[index] = true;
     messages[index] = null;
+    comics[index] = [];
     update();
-    get(index, id);
+    unawaited(get(index, id));
   }
 }
 
@@ -205,7 +271,7 @@ class WeekRecommendationList extends StatelessWidget {
 
   Widget buildPage(int index, WRLLogic logic, BuildContext context) {
     if (logic.loading[index]) {
-      logic.get(index, id);
+      unawaited(logic.get(index, id));
       return const Center(
         child: CircularProgressIndicator(),
       );
