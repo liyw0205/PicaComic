@@ -40,6 +40,30 @@ void main() {
     }
   }
 
+  test('falls back when the optional title index is not an FTS table',
+      () async {
+    final db = sqlite3.open(path);
+    db.execute('''
+      create table history(
+        target text primary key, title text, subtitle text, cover text,
+        time int, type int, ep int, page int, readEpisode text, max_page int
+      );
+      create table image_favorites(
+        id text, title text not null, cover text not null, ep int not null,
+        page int not null, other text not null, primary key(id, ep, page)
+      );
+      create table image_favorites_title_fts(rowid integer, title text);
+      insert into image_favorites values
+        ('fallback', 'Fallback title', '', 1, 1, '{}');
+    ''');
+    db.dispose();
+
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+    expect(ImageFavoriteManager.getPage(keyword: 'title').items.single.id,
+        'fallback');
+    expect(ImageFavoriteManager.count(keyword: 'title'), 1);
+  });
+
   test('keyset pages remain stable across deletes and inserts', () async {
     insertRows([
       ('image-0', 'Title 0'),
