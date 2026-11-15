@@ -560,3 +560,12 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A16 下载页异步入口 | `06989077` | 字体下载和 PDF 导出入口返回 Future；Dio 用户取消不显示失败提示，加载对话框在所有路径 finally 关闭 | `test/download_page_async_test.dart`；目标分析、格式和差异检查通过 |
 
 异步边界扫描从基线 `64` 降至 `53` 个 `void async`（已包含阅读器章节加载、认证页和下载页修复），本轮未引入新的未等待持久化写入。剩余页面入口继续按数据写入、网络请求、取消和 mounted 风险排序，不一次性重写低风险回调。
+
+## 17. 2026-11-15 导入契约与探索页并发收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A2 导入结果契约 | `9a7b62ca` | staging 目录创建失败统一返回 `DataImportResult.failed`；清理失败只记录 warning，不覆盖已完成或失败的导入结果 | `test/data_import_contract_test.dart`；目标分析、格式和差异检查通过；Flutter 测试仍受本机 Kernel SDK mismatch 阻塞 |
+| A16 探索页异步边界 | `96cc9b84` | multipart 探索页增加请求中的互斥和 generation；refresh 后旧响应丢弃，避免 build 重复发起网络请求 | `test/explore_page_async_test.dart`；目标分析、格式、差异检查和异步扫描通过，`void_async=52` |
+
+A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 journal、可信根、完整文件集合校验更可靠的新缺口；独立进程、真实 WebDAV 双客户端、设备性能和中断恢复仍是发布前验收，不以静态检查替代。

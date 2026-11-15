@@ -606,9 +606,10 @@ Future<DataImportResult> importDataResult(String? filePath,
           // Cleanup cannot undo a committed restore or turn it into a
           // failed import. Leave the staging directory for maintenance and
           // report it instead of masking the result contract.
-          Log.warning('importData',
+          Log.warning(
+              'importData',
               'Failed to remove import staging directory.\n'
-              '${safeNetworkError(cleanupError)}\n$cleanupStack');
+                  '${safeNetworkError(cleanupError)}\n$cleanupStack');
         }
       }
     }
