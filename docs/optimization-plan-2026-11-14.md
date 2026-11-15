@@ -679,3 +679,5 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A2/A6 WebDAV 上传 | `10a74a81` | 远端 revision 已发布但本地 sync state 写入失败时，回滚并持久化 `settings[46]`，避免磁盘 revision 声称已同步而本地 heads 未提交 | `test/webdav_sync_test.dart` 验证 upload 失败、远端 archive 保留且本地 settings revision 恢复；目标分析、baseline、格式、异步边界和差异检查通过 |
 
 上述提交均使用 `liyw0205 <2650115317@qq.com>` 并已推送 `origin/master`。Flutter 测试仍受本机 Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，需由标准 runner 重跑；真实双客户端 WebDAV、独立进程恢复和设备故障注入仍属于发布前验收。普通 `master` push 不触发 Android workflow，版本递增后可正常创建新的 annotated `v*` tag 触发发布，历史 tag 不移动、不重写。
+
+本轮通过 `gh run list --workflow android.yml --commit HEAD` 复核当前普通提交没有新增 Android run；最近成功的自动发布仍对应历史 `v4.2.48` tag。该结果与 workflow 的 `push.tags: ['v*']` 和 `workflow_dispatch` 配置一致。
