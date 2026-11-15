@@ -42,6 +42,8 @@ void main() {
 
   test('falls back when the optional title index is not an FTS table',
       () async {
+    HistoryManager().close();
+    await File(path).delete();
     final db = sqlite3.open(path);
     db.execute('''
       create table history(
