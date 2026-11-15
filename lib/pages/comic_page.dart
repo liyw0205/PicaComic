@@ -75,9 +75,29 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
   String? get cover => comicCover ?? data?.cover;
 
   @override
-  void download() async {
+  void download() {
+    unawaited(_downloadWithErrorHandling());
+  }
+
+  Future<void> _downloadWithErrorHandling() async {
+    try {
+      await _download();
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to prepare comic download: ${safeNetworkError(error)}\n$stack");
+      if (App.globalContext?.mounted == true) {
+        showToast(message: safeNetworkError(error));
+      }
+    }
+  }
+
+  Future<void> _download() async {
+    final pageLogic =
+        StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
+    final comic = pageLogic?.data;
+    if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
     final downloadId = DownloadManager().generateId(sourceKey, id);
-    final eps = data!.chapters?.values.toList();
+    final eps = comic.chapters?.values.toList();
     for (var i in DownloadManager().downloading) {
       if (i.id == downloadId) {
         showToast(message: "下载中".tl);
@@ -90,22 +110,29 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
         showToast(message: "已下载".tl);
         return;
       }
-      var downloadedComic = await DownloadManager().getComicOrNull(downloadId);
-      downloaded.addAll(downloadedComic!.downloadedEps);
+      final downloadedComic =
+          await DownloadManager().getComicOrNull(downloadId);
+      if (downloadedComic == null) return;
+      downloaded.addAll(downloadedComic.downloadedEps);
     } else {
       if (eps == null) {
-        DownloadManager().addCustomDownload(data!, [0]);
+        DownloadManager().addCustomDownload(comic, [0]);
         App.globalBack();
         showToast(message: "已加入下载队列".tl);
         return;
       }
+    }
+    if (pageLogic.isDisposed ||
+        !identical(pageLogic.data, comic) ||
+        App.globalContext?.mounted != true) {
+      return;
     }
     if (UiMode.m1(App.globalContext!)) {
       showModalBottomSheet(
           context: App.globalContext!,
           builder: (context) {
             return SelectDownloadChapter(eps, (selectedEps) {
-              DownloadManager().addCustomDownload(data!, selectedEps);
+              DownloadManager().addCustomDownload(comic, selectedEps);
               App.globalBack();
               showToast(message: "已加入下载队列".tl);
             }, downloaded);
@@ -114,7 +141,7 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
       showSideBar(
           App.globalContext!,
           SelectDownloadChapter(eps, (selectedEps) {
-            DownloadManager().addCustomDownload(data!, selectedEps);
+            DownloadManager().addCustomDownload(comic, selectedEps);
             App.globalBack();
             showToast(message: "已加入下载队列".tl);
           }, downloaded),
@@ -127,21 +154,7 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
     if (data!.chapters != null && data!.chapters!.isNotEmpty) {
       return EpsData(
         data!.chapters!.values.toList(),
-        (ep) async {
-          await History.findOrCreate(data!);
-          App.globalTo(
-            () => ComicReadingPage(
-              CustomReadingData(
-                data!.target,
-                data!.title,
-                ComicSource.find(sourceKey)!,
-                data!.chapters,
-              ),
-              0,
-              ep + 1,
-            ),
-          );
-        },
+        (ep) => unawaited(_openEpisode(ep)),
       );
     }
     return null;
@@ -168,15 +181,65 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
   int? get pages => null;
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
+  void read(History? history) {
+    unawaited(_read(history));
+  }
+
+  Future<void> _openEpisode(int ep) async {
+    final pageLogic =
+        StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
+    final comic = pageLogic?.data;
+    if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
+    try {
+      await History.findOrCreate(comic);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to save comic reading history: ${safeNetworkError(error)}\n$stack");
+      return;
+    }
+    if (pageLogic.isDisposed ||
+        !identical(pageLogic.data, comic) ||
+        App.globalContext?.mounted != true) {
+      return;
+    }
     App.globalTo(
       () => ComicReadingPage(
         CustomReadingData(
-          data!.target,
-          data!.title,
+          comic.target,
+          comic.title,
           ComicSource.find(sourceKey)!,
-          data!.chapters,
+          comic.chapters,
+        ),
+        0,
+        ep + 1,
+      ),
+    );
+  }
+
+  Future<void> _read(History? history) async {
+    final pageLogic =
+        StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
+    final comic = pageLogic?.data;
+    if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
+    try {
+      history = await History.createIfNull(history, comic);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to save comic reading history: ${safeNetworkError(error)}\n$stack");
+      return;
+    }
+    if (pageLogic.isDisposed ||
+        !identical(pageLogic.data, comic) ||
+        App.globalContext?.mounted != true) {
+      return;
+    }
+    App.globalTo(
+      () => ComicReadingPage(
+        CustomReadingData(
+          comic.target,
+          comic.title,
+          ComicSource.find(sourceKey)!,
+          comic.chapters,
         ),
         history!.page,
         history.ep,
