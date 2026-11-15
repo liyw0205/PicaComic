@@ -99,4 +99,15 @@ void main() {
         DataImportResult.skipped);
     expect(await importData(file.path), isFalse);
   });
+
+  test('import reports failed when staging cache is unavailable', () async {
+    final cache = Directory(App.cachePath);
+    await cache.delete(recursive: true);
+    addTearDown(() => cache.create(recursive: true));
+
+    expect(
+      await importDataResult('${root.path}/missing.picadata'),
+      DataImportResult.failed,
+    );
+  });
 }

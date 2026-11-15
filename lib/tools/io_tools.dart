@@ -401,8 +401,8 @@ Future<DataImportResult> importDataResult(String? filePath,
   }
   final selected = filePath;
   return DataMaintenance.run(() async {
-    final work = await Directory(App.cachePath).createTemp('data-import-');
-    final extracted = Directory('${work.path}/input');
+    Directory? work;
+    late Directory extracted;
     DataRestoreTransaction? transaction;
     var stopped = false;
     var committed = false;
@@ -428,6 +428,11 @@ Future<DataImportResult> importDataResult(String? filePath,
     }
 
     try {
+      // Keep setup failures inside the import result contract. A cache that
+      // disappears between startup and a user import must report `failed`,
+      // rather than escaping before the transaction's error boundary exists.
+      work = await Directory(App.cachePath).createTemp('data-import-');
+      extracted = Directory('${work.path}/input');
       await recoverPendingDataRestore(App.dataPath,
           trustedAllowedRoots: trustedRestoreRoots);
       await compute<List<String>, void>((paths) async {
@@ -594,7 +599,18 @@ Future<DataImportResult> importDataResult(String? filePath,
       }
       return DataImportResult.failed;
     } finally {
-      if (work.existsSync()) work.deleteSync(recursive: true);
+      if (work != null && work.existsSync()) {
+        try {
+          work.deleteSync(recursive: true);
+        } catch (cleanupError, cleanupStack) {
+          // Cleanup cannot undo a committed restore or turn it into a
+          // failed import. Leave the staging directory for maintenance and
+          // report it instead of masking the result contract.
+          Log.warning('importData',
+              'Failed to remove import staging directory.\n'
+              '${safeNetworkError(cleanupError)}\n$cleanupStack');
+        }
+      }
     }
   }, suppressSync: true, operationName: 'data-import');
 }
