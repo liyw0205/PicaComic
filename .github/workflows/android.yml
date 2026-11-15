@@ -2,8 +2,6 @@ name: Android CI and release
 run-name: Android CI and release
 on:
   push:
-    branches:
-      - master
     tags:
       - 'v*'
   pull_request:
