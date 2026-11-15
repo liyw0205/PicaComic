@@ -281,7 +281,9 @@ class ComicReadingPage extends StatelessWidget {
           body: StateBuilder<ComicReadingPageLogic>(builder: (logic) {
             if (logic.isLoading) {
               history?.readEpisode.add(logic.order);
-              loadInfo(logic);
+              // Loading is intentionally detached from build, but remains
+              // observable as a Future for tests and lifecycle callers.
+              unawaited(loadInfo(logic));
               return const Center(
                 child: CircularProgressIndicator(),
               );
@@ -465,7 +467,7 @@ class ComicReadingPage extends StatelessWidget {
     ));
   }
 
-  void loadInfo(ComicReadingPageLogic logic) async {
+  Future<void> loadInfo(ComicReadingPageLogic logic) async {
     if (logic.loadInFlight) {
       return;
     }

@@ -7,6 +7,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 import 'package:pica_comic/foundation/state_controller.dart';
+import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 import 'package:pica_comic/pages/reader/reader_image_controller.dart';
 
@@ -38,6 +39,16 @@ class _ReadingData extends PicacgReadingData {
   ImageProvider createImageProvider(int ep, int page, String url,
           {ImageTaskScope? taskScope}) =>
       provider;
+}
+
+class _ControlledReadingData extends _ReadingData {
+  _ControlledReadingData(this.loadEpResult)
+      : super(_ControlledImageProvider(Completer<ImageInfo>()));
+
+  final Future<Res<List<String>>> loadEpResult;
+
+  @override
+  Future<Res<List<String>>> loadEp(int ep) => loadEpResult;
 }
 
 void main() {
@@ -201,6 +212,51 @@ void main() {
         }
       }
     }
+  });
+
+  test('chapter loading exposes completion to lifecycle callers', () async {
+    final result = Completer<Res<List<String>>>();
+    final data = _ControlledReadingData(result.future);
+    final page = ComicReadingPage(data, 1, 1);
+    final logic = StateController.find<ComicReadingPageLogic>();
+    addTearDown(() {
+      logic.releaseImageTasks();
+      logic.pageController.dispose();
+      StateController.remove<ComicReadingPageLogic>();
+    });
+
+    final pending = page.loadInfo(logic);
+    expect(logic.loadInFlight, isTrue);
+    result.complete(const Res<List<String>>(<String>['one', 'two']));
+
+    await pending;
+
+    expect(logic.urls, ['one', 'two']);
+    expect(logic.isLoading, isFalse);
+    expect(logic.loadInFlight, isFalse);
+  });
+
+  test('chapter loading ignores a response after lifecycle invalidation',
+      () async {
+    final result = Completer<Res<List<String>>>();
+    final data = _ControlledReadingData(result.future);
+    final page = ComicReadingPage(data, 1, 1);
+    final logic = StateController.find<ComicReadingPageLogic>();
+    addTearDown(() {
+      logic.releaseImageTasks();
+      logic.pageController.dispose();
+      StateController.remove<ComicReadingPageLogic>();
+    });
+
+    final pending = page.loadInfo(logic);
+    logic.resetPreloadState();
+    result.complete(const Res<List<String>>(<String>['stale']));
+
+    await pending;
+
+    expect(logic.urls, isEmpty);
+    expect(logic.isLoading, isTrue);
+    expect(logic.loadInFlight, isFalse);
   });
 }
 
