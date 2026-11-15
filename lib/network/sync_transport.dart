@@ -79,9 +79,24 @@ class WebdavSyncTransport implements SyncTransport {
               options.responseType = ResponseType.plain);
       final statusCode = response.statusCode;
       if (statusCode == 404) return const SyncPointer('*');
+      // Some WebDAV servers reject GET/PUT for the optional pointer file
+      // altogether.  The immutable revision graph remains usable in that
+      // case, and its reread detects races after an unconditional write.
+      if (statusCode == 405 || statusCode == 501) {
+        return const SyncPointer(null);
+      }
       if (statusCode != 200) return const SyncPointer(null, known: false);
       final etag = response.headers.value('etag');
       return SyncPointer(etag != null && !etag.startsWith('W/') ? etag : null);
+    } on DioException catch (error) {
+      // Depending on the adapter's status validation, unsupported methods can
+      // arrive as a DioException instead of a response.
+      final statusCode = error.response?.statusCode;
+      if (statusCode == 404) return const SyncPointer('*');
+      if (statusCode == 405 || statusCode == 501) {
+        return const SyncPointer(null);
+      }
+      return const SyncPointer(null, known: false);
     } catch (_) {
       return const SyncPointer(null, known: false);
     }

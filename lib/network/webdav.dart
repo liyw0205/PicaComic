@@ -61,6 +61,19 @@ Future<void> _cleanupSyncWork(io.Directory work, String operation) async {
   }
 }
 
+void _closeSyncTransport(SyncTransport transport, String operation) {
+  try {
+    transport.close();
+  } catch (error, stack) {
+    // Closing a client is cleanup. It must remain observable without
+    // replacing the result of the completed sync operation.
+    Log.warning(
+        'Sync',
+        'Failed to close $operation transport.\n'
+            '${safeNetworkError(error)}\n$stack');
+  }
+}
+
 class _SecretStoreReadError implements Exception {
   _SecretStoreReadError(this.error);
 
@@ -497,7 +510,9 @@ class Webdav {
       Log.error('Sync', 'Failed to upload data.\n${safeNetworkError(e)}\n$s');
       return false;
     } finally {
-      transport?.close();
+      if (transport != null) {
+        _closeSyncTransport(transport, 'upload');
+      }
       if (work != null) {
         await _cleanupSyncWork(work, 'upload');
       }
@@ -560,7 +575,9 @@ class Webdav {
               'Sync', 'Failed to download data.\n${safeNetworkError(e)}\n$s');
           return false;
         } finally {
-          transport?.close();
+          if (transport != null) {
+            _closeSyncTransport(transport, 'download');
+          }
           timer.finish(success: succeeded);
         }
       });
@@ -633,7 +650,9 @@ class Webdav {
           Log.error('Sync', '${safeNetworkError(e)}\n$s');
           return false;
         } finally {
-          transport?.close();
+          if (transport != null) {
+            _closeSyncTransport(transport, 'conflict resolution');
+          }
           timer.finish(success: succeeded);
         }
       });

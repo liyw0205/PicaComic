@@ -20,11 +20,13 @@ class _FakeSyncTransport implements SyncTransport {
   _FakeSyncTransport({
     this.failList = false,
     this.failDownloads = false,
+    this.failClose = false,
     this.pointerValue = const SyncPointer(null),
   });
 
   final bool failList;
   final bool failDownloads;
+  final bool failClose;
   final SyncPointer pointerValue;
   final List<String> names = <String>[];
   final Map<String, String> text = <String, String>{};
@@ -43,6 +45,7 @@ class _FakeSyncTransport implements SyncTransport {
   @override
   void close() {
     closed = true;
+    if (failClose) throw StateError('injected close failure');
   }
 
   @override
@@ -247,6 +250,21 @@ void main() {
     }
   });
 
+  test('transport close failure does not replace the sync result', () async {
+    final previousFactory = Webdav.transportFactory;
+    final transport = _FakeSyncTransport(failClose: true);
+    try {
+      Webdav.transportFactory = (_) => transport;
+
+      expect(await Webdav.downloadData('https://dav.example;;;close-failure'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.unchanged);
+      expect(transport.closed, isTrue);
+    } finally {
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
   test('stale local parent is rejected before publishing an orphan revision',
       () async {
     final previousFactory = Webdav.transportFactory;
@@ -399,6 +417,33 @@ void main() {
     addTearDown(transport.close);
 
     expect(transport.directory, '/pica/backups/');
+  });
+
+  test('unsupported pointer methods fall back to graph-based detection',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final requests = server.listen((request) async {
+      request.response.statusCode = request.method == 'GET'
+          ? HttpStatus.methodNotAllowed
+          : HttpStatus.notImplemented;
+      await request.response.close();
+    });
+    final transport = WebdavSyncTransport([
+      'http://${server.address.address}:${server.port}',
+      '',
+      '',
+      '/pica',
+    ]);
+    try {
+      final pointer = await transport.pointer();
+      expect(pointer.known, isTrue);
+      expect(pointer.etag, isNull);
+      expect(await transport.compareAndSetPointer(pointer, '{}'), isTrue);
+    } finally {
+      transport.close();
+      await requests.cancel();
+      await server.close(force: true);
+    }
   });
 
   test('revision graph rejects an orphan parent', () {
