@@ -536,7 +536,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
             child: Text("重命名".tl),
             onTap: () {
               App.globalBack();
-              rename(folder);
+              unawaited(rename(folder));
             },
           ),
           PopupMenuItem(
@@ -552,7 +552,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
             child: Text("导出".tl),
             onTap: () {
               App.globalBack();
-              export(folder);
+              unawaited(export(folder));
             },
           ),
           PopupMenuItem(
@@ -589,7 +589,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
       DesktopMenuEntry(
           text: "重命名".tl,
           onClick: () {
-            rename(folder);
+            unawaited(rename(folder));
           }),
       DesktopMenuEntry(
           text: "检查漫画存活".tl,
@@ -601,7 +601,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
       DesktopMenuEntry(
           text: "导出".tl,
           onClick: () {
-            export(folder);
+            unawaited(export(folder));
           }),
       DesktopMenuEntry(
           text: "下载全部".tl,
@@ -632,14 +632,17 @@ mixin class _LocalFavoritesManager {
     });
   }
 
-  void rename(String folder) async {
-    await showDialog(
+  Future<void> rename(String folder) async {
+    await showDialog<void>(
         context: App.globalContext!,
         builder: (context) => RenameFolderDialog(folder));
-    StateController.find<FavoritesPageController>().update();
+    final controller = StateController.findOrNull<FavoritesPageController>();
+    if (controller != null && !controller.isDisposed) {
+      controller.update();
+    }
   }
 
-  void export(String folder) async {
+  Future<void> export(String folder) async {
     var controller = showLoadingDialog(
       App.globalContext!,
       onCancel: () {},
@@ -648,11 +651,11 @@ mixin class _LocalFavoritesManager {
     try {
       await exportStringDataAsFile(
           LocalFavoritesManager().folderToJsonString(folder), "$folder.json");
-      controller.close();
     } catch (e, s) {
-      controller.close();
       showToast(message: e.toString());
       log("${safeNetworkError(e)}\n$s", "IO", LogLevel.error);
+    } finally {
+      controller.close();
     }
   }
 
