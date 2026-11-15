@@ -108,6 +108,43 @@ void main() {
     expect(nextCalls, 1);
   });
 
+  test('pagination restores its cursor when brief parsing fails', () async {
+    final list = _list([1], total: 2);
+    list.toLoad = 1;
+    var nextCalls = 0;
+    var briefCalls = 0;
+    final logic = HitomiHomePageLogic(
+      loadComics: (_) async => Res(list),
+      loadNextPage: (current) async {
+        nextCalls++;
+        current.comicIds.add(2);
+        current.toLoad = 2;
+        return const Res(true);
+      },
+      loadComicInfoBrief: (id) async {
+        if (id == '2' && briefCalls++ == 0) {
+          return const Res.error('temporary failure');
+        }
+        return Res(_brief(int.parse(id)));
+      },
+    );
+
+    await logic.get('fixture');
+    await logic.loadNextPage('fixture');
+    expect(logic.hitomiComics.map((comic) => comic.id), [
+      'https://hitomi.la/galleries/1.html',
+    ]);
+    expect(list.toLoad, 1);
+    expect(list.comicIds, isEmpty);
+
+    await logic.loadNextPage('fixture');
+    expect(nextCalls, 2);
+    expect(logic.hitomiComics.map((comic) => comic.id), [
+      'https://hitomi.la/galleries/1.html',
+      'https://hitomi.la/galleries/2.html',
+    ]);
+  });
+
   test('disposed request cannot publish its result', () async {
     final response = Completer<Res<ComicList>>();
     final logic = HitomiHomePageLogic(

@@ -75,11 +75,22 @@ class HitomiHomePageLogic extends StateController {
       return;
     }
     final generation = _generation;
+    final previousToLoad = current.toLoad;
+    final previousIds = List<int>.from(current.comicIds);
     _nextPageInFlight = true;
+
+    void restorePageCursor() {
+      current.toLoad = previousToLoad;
+      current.comicIds
+        ..clear()
+        ..addAll(previousIds);
+    }
+
     try {
       final res = await _loadNextPage(current);
       if (!_isCurrent(generation) || !identical(comics, current)) return;
       if (res.error) {
+        restorePageCursor();
         showToast(message: res.errorMessage ?? "Error");
       } else {
         final parseRes = await parseIds(current, generation: generation);
@@ -87,11 +98,13 @@ class HitomiHomePageLogic extends StateController {
         if (parseRes) {
           update();
         } else {
+          restorePageCursor();
           showToast(message: message ?? "Error");
         }
       }
     } catch (error) {
       if (_isCurrent(generation) && identical(comics, current)) {
+        restorePageCursor();
         showToast(message: safeNetworkError(error));
       }
     } finally {
