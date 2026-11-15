@@ -599,3 +599,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | CI 触发门禁 | `f1f56774` | Android workflow 自动触发仅保留 `v*` tag push；普通分支 push 和 pull request 不触发，手动 `workflow_dispatch` 保留为显式验证入口 | `gh run list --commit HEAD` 为空；现有 `v4.2.47`、`v4.2.48` tag 未移动 |
 
 本机 Flutter 测试仍受 Termux SDK/kernel 不匹配阻塞（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner。新提交均使用 `liyw0205 <2650115317@qq.com>`，未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 保护文件未纳入提交。
+
+## 21. 2026-11-15 推荐页与同步清理继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A16 JM 每周推荐生命周期 | `f235c0e1` | 推荐分类和三类漫画 loader 可注入；同一分类请求互斥，retry/切换使用 generation 丢弃旧响应；dispose 后不再更新状态；空分类和异常进入可恢复错误态，页面入口显式 `unawaited` | `test/jm_week_recommendation_async_test.dart` 覆盖重复请求、旧响应丢弃和 dispose；目标分析、格式、差异检查通过 |
+| A2 WebDAV 临时目录清理 | `f235c0e1` | 上传/下载临时目录改为异步清理并记录 warning；清理失败不覆盖已经完成的上传或导入结果，也不触发重复同步 | 目标分析、格式、差异检查和 analyzer baseline 通过；异步边界扫描 `void_async=29`、`sync_io=49` |
+| A16 设置类型收窄 | `f235c0e1` | 设置网络操作使用显式 `Res` 类型，保持异步结果契约清晰 | 目标分析和 analyzer baseline 通过 |
+
+本机专项 Flutter 测试仍因 Termux Flutter 编译器与 SDK/kernel 不匹配失败（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner；真实 WebDAV 双客户端、设备生命周期和中断恢复仍需发布前验收。普通 `master` push 不触发 Android workflow，只有 `v*` tag push 才触发，版本 tag 未移动或重写。
