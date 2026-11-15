@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/comic_source/built_in/picacg.dart';
 import 'package:pica_comic/components/select_download_eps.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/picacg_network/methods.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/res.dart';
@@ -14,6 +17,7 @@ import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/history.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/components/components.dart';
 import '../../network/picacg_network/picacg_download_model.dart';
@@ -58,7 +62,7 @@ class PicacgComicPage extends BaseComicPage<ComicItem> {
       },
       cancelPlatformFavorite: () async {
         var res = await network.favouriteOrUnfavouriteComic(id);
-        if(res) {
+        if (res) {
           data!.isFavourite = false;
           return const Res(true);
         }
@@ -67,7 +71,7 @@ class PicacgComicPage extends BaseComicPage<ComicItem> {
       selectFolderCallback: (name, p) async {
         if (p == 0) {
           var res = await network.favouriteOrUnfavouriteComic(id);
-          if(res) {
+          if (res) {
             data!.isFavourite = true;
             update();
             return const Res(true);
@@ -115,14 +119,33 @@ class PicacgComicPage extends BaseComicPage<ComicItem> {
   int? get pages => data?.pagesCount;
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
+  void read(History? history) {
+    unawaited(_read(history));
+  }
+
+  Future<void> _read(History? history) async {
+    final logic =
+        StateController.findOrNull<ComicPageLogic<ComicItem>>(tag: tag);
+    final comic = logic?.data;
+    if (logic == null || logic.isDisposed || comic == null) return;
+    try {
+      history = await History.createIfNull(history, comic);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to save PicACG reading history: ${safeNetworkError(error)}\n$stack");
+      return;
+    }
+    if (logic.isDisposed ||
+        !identical(logic.data, comic) ||
+        App.globalContext?.mounted != true) {
+      return;
+    }
     App.globalTo(
       () => ComicReadingPage.picacg(
-        id,
+        comic.id,
         history!.ep,
-        data!.eps,
-        data!.title,
+        comic.eps,
+        comic.title,
         initialPage: history.page,
       ),
     );
@@ -179,7 +202,8 @@ class PicacgComicPage extends BaseComicPage<ComicItem> {
   @override
   Future<bool> loadFavorite(ComicItem data) async {
     return data.isFavourite ||
-        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem())).isNotEmpty;
+        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem()))
+            .isNotEmpty;
   }
 
   @override
@@ -255,8 +279,8 @@ void _downloadComic(
   }
   var downloaded = <int>[];
   if (DownloadManager().isExists(comic.id)) {
-    var downloadedComic = (await DownloadManager().getComicOrNull(comic.id))!
-      as DownloadedComic;
+    var downloadedComic =
+        (await DownloadManager().getComicOrNull(comic.id))! as DownloadedComic;
     downloaded.addAll(downloadedComic.downloadedEps);
   }
   var content = SelectDownloadChapter(

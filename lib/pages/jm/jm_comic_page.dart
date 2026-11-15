@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/built_in/jm.dart';
@@ -15,10 +17,12 @@ import 'package:pica_comic/tools/translations.dart';
 import '../../foundation/app.dart';
 import '../../foundation/history.dart';
 import '../../foundation/local_favorites.dart';
+import '../../foundation/log.dart';
 import '../../foundation/ui_mode.dart';
 import '../../network/download.dart';
 import '../../network/jm_network/jm_models.dart';
 import '../../network/jm_network/jm_network.dart';
+import '../../network/network_logging.dart';
 import 'jm_comments_page.dart';
 
 class JmComicPage extends BaseComicPage<JmComicInfo> {
@@ -82,7 +86,7 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
       },
       cancelPlatformFavorite: () async {
         var res = await jmNetwork.favorite(id, null);
-        if(res.success) {
+        if (res.success) {
           data!.favorite = false;
         }
         return res;
@@ -134,15 +138,35 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
   @override
   Future<bool> loadFavorite(JmComicInfo data) async {
     return data.favorite ||
-        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem())).isNotEmpty;
+        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem()))
+            .isNotEmpty;
   }
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
+  void read(History? history) {
+    unawaited(_read(history));
+  }
+
+  Future<void> _read(History? history) async {
+    final logic =
+        StateController.findOrNull<ComicPageLogic<JmComicInfo>>(tag: tag);
+    final comic = logic?.data;
+    if (logic == null || logic.isDisposed || comic == null) return;
+    try {
+      history = await History.createIfNull(history, comic);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to save JM reading history: ${safeNetworkError(error)}\n$stack");
+      return;
+    }
+    if (logic.isDisposed ||
+        !identical(logic.data, comic) ||
+        App.globalContext?.mounted != true) {
+      return;
+    }
     App.globalTo(
       () => ComicReadingPage.jmComic(
-        data!,
+        comic,
         history!.ep,
         initialPage: history.page,
       ),
@@ -160,12 +184,9 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
   Map<String, List<String>>? get tags => {
         "ID": "JM${data!.id}".toList(),
         "作者".tl: (data!.author.isEmpty) ? "未知".tl.toList() : data!.author,
-        if (data!.works.isNotEmpty)
-          "作品".tl: data!.works,
-        if (data!.actors.isNotEmpty)
-          "登场人物".tl: data!.actors,
-        if (data!.tags.isNotEmpty)
-          "标签".tl: data!.tags
+        if (data!.works.isNotEmpty) "作品".tl: data!.works,
+        if (data!.actors.isNotEmpty) "登场人物".tl: data!.actors,
+        if (data!.tags.isNotEmpty) "标签".tl: data!.tags
       };
 
   @override
@@ -191,8 +212,7 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
       id,
       data!.author.elementAtOrNull(0) ?? "",
       data!.name,
-      data!.description,
-      []));
+      data!.description, []));
 
   @override
   String get downloadedId => "jm${data!.id}";
@@ -201,7 +221,11 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
   String get sourceKey => "jm";
 }
 
-void downloadComic(JmComicInfo comic, BuildContext context) async {
+void downloadComic(JmComicInfo comic, BuildContext context) {
+  unawaited(_downloadComic(comic, context));
+}
+
+Future<void> _downloadComic(JmComicInfo comic, BuildContext context) async {
   for (var i in downloadManager.downloading) {
     if (i.id == comic.id) {
       showToast(message: "下载中".tl);
@@ -219,11 +243,22 @@ void downloadComic(JmComicInfo comic, BuildContext context) async {
 
   var downloaded = <int>[];
   if (DownloadManager().isExists("jm${comic.id}")) {
-    var downloadedComic =
-        (await DownloadManager().getComicOrNull("jm${comic.id}"))!
-        as DownloadedJmComic;
-    downloaded.addAll(downloadedComic.downloadedEps);
+    try {
+      final downloadedComic =
+          await DownloadManager().getComicOrNull("jm${comic.id}");
+      if (downloadedComic is! DownloadedJmComic) return;
+      downloaded.addAll(downloadedComic.downloadedEps);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "UI",
+          "Failed to load JM download state: ${safeNetworkError(error)}\n$stack");
+      if (context.mounted) {
+        showToast(message: safeNetworkError(error));
+      }
+      return;
+    }
   }
+
+  if (!context.mounted || App.globalContext?.mounted != true) return;
 
   if (UiMode.m1(App.globalContext!)) {
     showModalBottomSheet(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:html/dom.dart' as dom;
@@ -8,38 +10,71 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/image_loader/cached_image.dart';
 import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
+import 'package:pica_comic/network/network_logging.dart';
+import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/tools/app_links.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/time.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+typedef EhCommentsLoader = Future<Res<List<Comment>>> Function(String url);
+
 class CommentsPageLogic extends StateController {
+  CommentsPageLogic({EhCommentsLoader? loader})
+      : _loader = loader ?? ((url) => EhNetwork().getComments(url));
+
+  final EhCommentsLoader _loader;
+
   bool isLoading = true;
   var comments = <Comment>[];
   bool sending = false;
   String? message;
   var controller = TextEditingController();
+  bool _requestInFlight = false;
+  int _generation = 0;
 
-  void change() {
-    isLoading = !isLoading;
+  void retry() {
+    if (isDisposed) return;
+    _generation++;
+    _requestInFlight = false;
+    isLoading = true;
+    comments = [];
+    message = null;
     update();
   }
 
-  void get(String url) async {
-    var res = await EhNetwork().getComments(url);
-    if (res.error) {
-      message = res.errorMessageWithoutNull;
-    } else {
-      comments = res.data;
+  Future<void> get(String url) async {
+    if (isDisposed || _requestInFlight) return;
+    final requestGeneration = _generation;
+    _requestInFlight = true;
+    try {
+      final res = await _loader(url);
+      if (isDisposed || requestGeneration != _generation) return;
+      if (res.error) {
+        message = res.errorMessageWithoutNull;
+      } else {
+        comments = res.data;
+        message = null;
+      }
+      isLoading = false;
+      update();
+    } catch (error) {
+      if (isDisposed || requestGeneration != _generation) return;
+      message = safeNetworkError(error);
+      isLoading = false;
+      update();
+    } finally {
+      if (requestGeneration == _generation) {
+        _requestInFlight = false;
+      }
     }
-    isLoading = false;
-    update();
   }
 }
 
 class _EhCommentWidget extends StatefulWidget {
-  const _EhCommentWidget({required this.comment, required this.uploader, required this.auth});
+  const _EhCommentWidget(
+      {required this.comment, required this.uploader, required this.auth});
 
   final Comment comment;
 
@@ -60,49 +95,46 @@ class _EhCommentWidgetState extends State<_EhCommentWidget> {
 
   bool isVoteDown = false;
 
-  void voteUp() async {
-    if(isVoteUp || isVoteDown){
-      return;
-    }
-    setState(() {
-      isVoteUp = true;
-    });
-    var res = await EhNetwork().voteComment(widget.auth, comment.id, true);
-    if(res.success){
-      var isCancel = comment.voteUP == true;
-      comment.voteUP = isCancel ? null : true;
-      comment.score = res.data;
-      setState(() {
-        isVoteUp = false;
-      });
-    } else {
-      setState(() {
-        isVoteUp = false;
-      });
-      showToast(message: res.errorMessageWithoutNull);
-    }
-  }
+  Future<void> voteUp() => _vote(true);
 
-  void voteDown() async {
-    if(isVoteUp || isVoteDown){
+  Future<void> voteDown() => _vote(false);
+
+  Future<void> _vote(bool up) async {
+    if (isVoteUp || isVoteDown) {
       return;
     }
+    if (!mounted) return;
     setState(() {
-      isVoteDown = true;
+      if (up) {
+        isVoteUp = true;
+      } else {
+        isVoteDown = true;
+      }
     });
-    var res = await EhNetwork().voteComment(widget.auth, comment.id, false);
-    if(res.success){
-      var isCancel = comment.voteUP == false;
-      comment.voteUP = isCancel ? null : false;
-      comment.score = res.data;
-      setState(() {
-        isVoteDown = false;
-      });
-    } else {
-      setState(() {
-        isVoteDown = false;
-      });
-      showToast(message: res.errorMessageWithoutNull);
+    try {
+      var res = await EhNetwork().voteComment(widget.auth, comment.id, up);
+      if (!mounted) return;
+      if (res.success) {
+        var isCancel = comment.voteUP == up;
+        comment.voteUP = isCancel ? null : up;
+        comment.score = res.data;
+      } else {
+        showToast(message: res.errorMessageWithoutNull);
+      }
+    } catch (error) {
+      if (mounted) {
+        showToast(message: safeNetworkError(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (up) {
+            isVoteUp = false;
+          } else {
+            isVoteDown = false;
+          }
+        });
+      }
     }
   }
 
@@ -110,11 +142,11 @@ class _EhCommentWidgetState extends State<_EhCommentWidget> {
   Widget build(BuildContext context) {
     var upColor = context.colorScheme.outline;
     bool darkMode = context.colorScheme.brightness == Brightness.dark;
-    if(comment.voteUP == true) {
+    if (comment.voteUP == true) {
       upColor = darkMode ? Colors.red.shade200 : Colors.red.shade600;
     }
     var downColor = context.colorScheme.outline;
-    if(comment.voteUP == false) {
+    if (comment.voteUP == false) {
       downColor = darkMode ? Colors.blue.shade200 : Colors.blue.shade600;
     }
 
@@ -169,7 +201,7 @@ class _EhCommentWidgetState extends State<_EhCommentWidget> {
                         icon: const Icon(Icons.arrow_upward),
                         size: 18,
                         color: upColor,
-                        onPressed: voteUp,
+                        onPressed: () => unawaited(voteUp()),
                       ),
                       const SizedBox(
                         width: 4,
@@ -183,7 +215,7 @@ class _EhCommentWidgetState extends State<_EhCommentWidget> {
                         icon: const Icon(Icons.arrow_downward),
                         size: 18,
                         color: downColor,
-                        onPressed: voteDown,
+                        onPressed: () => unawaited(voteDown()),
                       ),
                     ],
                   ),
@@ -211,14 +243,14 @@ class CommentsPage extends StatelessWidget {
       init: CommentsPageLogic(),
       builder: (logic) {
         if (logic.isLoading) {
-          logic.get(url);
+          unawaited(logic.get(url));
           return const Center(
             child: CircularProgressIndicator(),
           );
         } else if (logic.message != null) {
           return NetworkError(
             message: logic.message!,
-            retry: () => logic.change(),
+            retry: logic.retry,
             withAppbar: false,
           );
         } else {
@@ -336,7 +368,8 @@ class CommentsPage extends StatelessWidget {
   }
 }
 
-void showComments(BuildContext context, String url, String uploader, Map<String, String> auth) {
+void showComments(BuildContext context, String url, String uploader,
+    Map<String, String> auth) {
   showSideBar(
     context,
     CommentsPage(

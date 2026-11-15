@@ -91,15 +91,25 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
     final logic = _pageLogic;
     final comic = data;
     if (!_isCurrent(logic, comic)) return;
-    history = await History.createIfNull(history, comic!);
-    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
-    App.globalTo(
-      () => ComicReadingPage.hitomi(
-        comic,
-        link,
-        initialPage: history!.page,
-      ),
-    );
+    try {
+      history = await History.createIfNull(history, comic!);
+      if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) {
+        return;
+      }
+      await App.globalTo(
+        () => ComicReadingPage.hitomi(
+          comic,
+          link,
+          initialPage: history!.page,
+        ),
+      );
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open Hitomi reader: ${safeNetworkError(error)}\n$stack",
+      );
+    }
   }
 
   @override
@@ -201,13 +211,24 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
     final logic = _pageLogic;
     final comic = data;
     if (!_isCurrent(logic, comic)) return;
-    await History.findOrCreate(comic!, page: index + 1);
-    if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) return;
-    App.globalTo(() => ComicReadingPage.hitomi(
-          comic,
-          link,
-          initialPage: index + 1,
-        ));
+    try {
+      await History.findOrCreate(comic!, page: index + 1);
+      if (!_isCurrent(logic, comic) || App.globalContext?.mounted != true) {
+        return;
+      }
+      await App.globalTo(() => ComicReadingPage.hitomi(
+            comic,
+            link,
+            initialPage: index + 1,
+          ));
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open Hitomi thumbnail: "
+            "${safeNetworkError(error)}\n$stack",
+      );
+    }
   }
 
   ComicPageLogic<HitomiComic>? get _pageLogic =>
