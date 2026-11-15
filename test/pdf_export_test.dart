@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
 import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/tools/pdf.dart';
 
@@ -18,6 +19,10 @@ void main() {
     await File('${root.path}/cover.png').writeAsBytes(bytes);
     await File('${root.path}/0.png').writeAsBytes(bytes);
     await File('${root.path}/1.png').writeAsBytes(bytes);
+    final rotated = image.Image(width: 2, height: 3);
+    rotated.exif.imageIfd.orientation = 6;
+    await File('${root.path}/2.jpg')
+        .writeAsBytes(image.encodeJpg(rotated, quality: 90));
     return root;
   }
 
@@ -72,7 +77,7 @@ void main() {
     expect(bytes.take(5), <int>[37, 80, 68, 70, 45]);
     expect(progress.first.completedPages, 0);
     expect(progress.last.completedPages, 3);
-    expect(progress.last.totalPages, 3);
+    expect(progress.last.totalPages, 4);
     final metric = RuntimeMetrics.snapshot()['pdf.export']!;
     expect(metric.success, 1);
     expect(metric.bytes, greaterThan(0));

@@ -209,10 +209,13 @@ Future<ImageProvider> _loadDeferredImage(File file) async {
   if (width == null || height == null) {
     throw StateError('Unable to determine image dimensions: ${file.path}');
   }
+  // ImageProvider exposes dimensions after applying orientation, while its
+  // constructor expects the encoded image's unrotated dimensions.
+  final transposed = decoded.orientation.index >= 4;
   return _DeferredFileImage(
     file.path,
-    width: width,
-    height: height,
+    width: transposed ? height : width,
+    height: transposed ? width : height,
     orientation: decoded.orientation,
   );
 }
