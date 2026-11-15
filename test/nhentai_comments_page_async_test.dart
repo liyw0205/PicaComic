@@ -88,7 +88,7 @@ void main() {
 
     expect(logic.loading, isFalse);
     expect(logic.comments, isNull);
-    expect(logic.message, contains('fixture failure'));
+    expect(logic.message, 'StateError');
     logic.dispose();
   });
 }

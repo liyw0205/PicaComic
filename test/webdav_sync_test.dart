@@ -163,7 +163,6 @@ class _SharedSyncTransport implements SyncTransport {
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
 
   setUpAll(() async {

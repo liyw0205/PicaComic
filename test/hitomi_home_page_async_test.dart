@@ -23,6 +23,8 @@ ComicList _list(Iterable<int> ids, {int total = 100}) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('initial request is coalesced while loading', () async {
     final response = Completer<Res<ComicList>>();
     var calls = 0;

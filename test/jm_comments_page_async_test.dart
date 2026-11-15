@@ -102,7 +102,9 @@ void main() {
       2,
       loader: (id, page, mode) {
         calls++;
-        if (page == 1) return Future.value(Res([_comment('one')]));
+        if (page == 1 && calls == 1) {
+          return Future.value(Res([_comment('one')]));
+        }
         if (calls == 2) return pageTwo.future;
         return refreshed.future;
       },

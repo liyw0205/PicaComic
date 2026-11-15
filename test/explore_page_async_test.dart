@@ -6,8 +6,12 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/explore_page.dart';
+import 'package:pica_comic/tools/translations.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  AppTranslation.translations = const {};
+
   testWidgets('refresh ignores stale multipart results', (tester) async {
     final requests = <Completer<Res<List<ExplorePagePart>>>>[];
     var calls = 0;
