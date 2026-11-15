@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/network/network_logging.dart';
 
 void main() {
@@ -19,6 +21,7 @@ void main() {
     LogManager.maxRotatedLogFiles = 10;
     LogManager.logFile = logFile;
     LogManager.clear();
+    RuntimeMetrics.reset();
     await LogManager.flush();
   });
 
@@ -149,6 +152,10 @@ void main() {
     expect(LogManager.writeFailureCount, failuresBefore + 1);
     expect(LogManager.lastWriteError, isA<FileSystemException>());
     expect(LogManager.lastWriteStackTrace, isNotNull);
+    final exported = LogManager.exportString();
+    expect(exported,
+        contains('"logWriteFailures": ${LogManager.writeFailureCount}'));
+    expect(exported, isNot(contains(blockedPath)));
     expect(LogManager.logs.last.content, 'still in memory');
 
     LogManager.logFile = logFile;
@@ -177,6 +184,28 @@ void main() {
     final persisted = await logFile.readAsString();
     expect(persisted, isNot(contains(secret)));
     expect(persisted, contains('page=4'));
+  });
+
+  test('export includes bounded metrics and log write health', () async {
+    RuntimeMetrics.record('network.request',
+        elapsed: const Duration(milliseconds: 12), success: false);
+
+    final exported = LogManager.exportString();
+    final marker = exported.indexOf('Diagnostics\n');
+    expect(marker, greaterThanOrEqualTo(0));
+    final diagnostics = jsonDecode(
+      exported.substring(marker + 'Diagnostics\n'.length),
+    ) as Map<String, dynamic>;
+
+    expect(diagnostics['logWriteFailures'], LogManager.writeFailureCount);
+    expect(
+        diagnostics['logHasLastWriteError'], LogManager.lastWriteError != null);
+    final runtime = diagnostics['runtime'] as Map<String, dynamic>;
+    final metrics = runtime['metrics'] as Map<String, dynamic>;
+    final request = metrics['network.request'] as Map<String, dynamic>;
+    expect(request['count'], 1);
+    expect(request['failure'], 1);
+    expect(exported, isNot(contains('12ms')));
   });
 
   test('Android log destination stays under application data path', () {

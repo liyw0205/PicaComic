@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:pica_comic/foundation/runtime_metrics.dart';
 import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 
@@ -111,7 +112,23 @@ class LogManager {
   ///
   /// In-memory logs remain available to the diagnostics page, while exported
   /// text is protected even when an older caller recorded raw network data.
-  static String exportString() => _formatLogs(redact: true);
+  static String exportString() {
+    final logs = _formatLogs(redact: true);
+    final diagnostics = const JsonEncoder.withIndent('  ').convert(
+      diagnosticSummary(),
+    );
+    return '$logs\nDiagnostics\n$diagnostics\n';
+  }
+
+  /// Returns bounded, non-sensitive state needed to interpret an export.
+  ///
+  /// Error objects and stacks are intentionally represented only by presence:
+  /// their text may contain paths, URLs, or credentials from a failed write.
+  static Map<String, Object?> diagnosticSummary() => {
+        'logWriteFailures': writeFailureCount,
+        'logHasLastWriteError': lastWriteError != null,
+        'runtime': RuntimeMetrics.diagnosticSummary(),
+      };
 
   static String _formatLogs({required bool redact}) {
     var res = "Logs\n\n";
