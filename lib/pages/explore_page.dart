@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
@@ -30,10 +32,13 @@ class _ExplorePageState extends State<ExplorePage>
   @override
   void initState() {
     pages = appdata.appSettings.explorePages;
-    var all = ComicSource.sources.map((e) => e.explorePages).expand((e) => e.map((e) => e.title)).toList();
+    var all = ComicSource.sources
+        .map((e) => e.explorePages)
+        .expand((e) => e.map((e) => e.title))
+        .toList();
     pages = pages.where((e) => all.contains(e)).toList();
-    if(pages.isEmpty && appdata.appSettings.explorePages.isNotEmpty) {
-      if(appdata.appSettings.explorePages.first.isNum) {
+    if (pages.isEmpty && appdata.appSettings.explorePages.isNotEmpty) {
+      if (appdata.appSettings.explorePages.first.isNum) {
         // is odd data, update
         appdata.appSettings.explorePages = all;
         pages = all;
@@ -115,9 +120,7 @@ class _ExplorePageState extends State<ExplorePage>
                   removeTop: true,
                   child: TabBarView(
                     controller: controller,
-                    children: pages
-                        .map((e) => buildBody(e))
-                        .toList(),
+                    children: pages.map((e) => buildBody(e)).toList(),
                   ),
                 ),
               ),
@@ -167,6 +170,8 @@ class _SingleExplorePageState extends StateWithController<_SingleExplorePage> {
   late final String comicSourceKey;
 
   int key = 0;
+  bool _loadInFlight = false;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -212,23 +217,31 @@ class _SingleExplorePageState extends StateWithController<_SingleExplorePage> {
   Widget buildComicList() =>
       _ComicList(data.loadPage!, tag.toString(), comicSourceKey);
 
-  void load() async {
-    var res = await data.loadMultiPart!();
-    loading = false;
-    if (mounted) {
+  Future<void> load() async {
+    if (!mounted || _loadInFlight) return;
+    _loadInFlight = true;
+    final generation = ++_loadGeneration;
+    try {
+      final res = await data.loadMultiPart!();
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
+        loading = false;
         if (res.error) {
           message = res.errorMessageWithoutNull;
         } else {
           parts = res.data;
         }
       });
+    } finally {
+      if (generation == _loadGeneration) {
+        _loadInFlight = false;
+      }
     }
   }
 
   Widget buildMultiPart() {
     if (loading) {
-      load();
+      unawaited(load());
       return const Center(
         child: CircularProgressIndicator(),
       );
@@ -262,6 +275,8 @@ class _SingleExplorePageState extends StateWithController<_SingleExplorePage> {
   void refresh() {
     message = null;
     if (data.loadMultiPart != null) {
+      _loadGeneration++;
+      _loadInFlight = false;
       setState(() {
         loading = true;
       });
