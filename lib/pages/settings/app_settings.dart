@@ -951,18 +951,23 @@ void clearUserData(BuildContext context) {
 }
 
 void exportDataSetting(BuildContext context) {
-  void export(bool includeDownloads) async {
-    var dialog = showLoadingDialog(context, allowCancel: false);
-    var res = await runExportData(includeDownloads);
-    if (context.mounted) {
-      if (res) {
-        dialog.close();
-        showToast(message: "成功导出".tl);
-      } else {
-        dialog.close();
-        showToast(message: "导出失败".tl);
-      }
+  Future<void> export(bool includeDownloads) async {
+    final dialog = showLoadingDialog(context, allowCancel: false);
+    var result = false;
+    try {
+      result = await runExportData(includeDownloads);
+    } catch (e, s) {
+      Log.error("IO", "${safeNetworkError(e)}\n$s");
+      result = false;
+    } finally {
+      dialog.close();
     }
+    if (!context.mounted) return;
+    showToast(message: result ? "成功导出".tl : "导出失败".tl);
+  }
+
+  void startExport(bool includeDownloads) {
+    unawaited(export(includeDownloads));
   }
 
   showDialog(
@@ -976,13 +981,13 @@ void exportDataSetting(BuildContext context) {
               TextButton(
                   onPressed: () {
                     App.globalBack();
-                    export(false);
+                    startExport(false);
                   },
                   child: Text("导出不含下载的数据".tl)),
               TextButton(
                   onPressed: () {
                     App.globalBack();
-                    export(true);
+                    startExport(true);
                   },
                   child: Text("导出所有数据".tl))
             ],
