@@ -724,19 +724,31 @@ class WindowPlacement {
   static WindowPlacement cache = defaultPlacement;
 
   static Timer? timer;
+  static bool _pollInFlight = false;
 
-  static void loop() async {
-    timer ??= Timer.periodic(const Duration(milliseconds: 100), (timer) async {
-      var placement = await WindowPlacement.current;
-      if (!validate(placement.rect)) {
+  static void loop() {
+    timer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_pollInFlight) return;
+      _pollInFlight = true;
+      unawaited(_poll());
+    });
+  }
+
+  static Future<void> _poll() async {
+    try {
+      final placement = await WindowPlacement.current;
+      if (!validate(placement.rect) ||
+          (placement.rect == cache.rect &&
+              placement.isMaximized == cache.isMaximized)) {
         return;
       }
-      if (placement.rect != cache.rect ||
-          placement.isMaximized != cache.isMaximized) {
-        cache = placement;
-        await placement.writeToFile();
-      }
-    });
+      await placement.writeToFile();
+      cache = placement;
+    } catch (_) {
+      // A transient window or storage failure is retried on the next tick.
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   static bool validate(Rect rect) {
