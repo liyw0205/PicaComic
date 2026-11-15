@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
@@ -223,6 +225,7 @@ class _LoginPageState extends State<_LoginPage> {
   }
 
   void login() {
+    if (loading) return;
     if (username.isEmpty || password.isEmpty) {
       showToast(message: "不能为空".tl, icon: const Icon(Icons.error_outline));
       return;
@@ -230,18 +233,30 @@ class _LoginPageState extends State<_LoginPage> {
     setState(() {
       loading = true;
     });
-    widget.login(username, password).then((value) {
+    unawaited(_login());
+  }
+
+  Future<void> _login() async {
+    try {
+      final value = await widget.login(username, password);
+      if (!mounted) return;
       if (value.error) {
-        showToast(message: value.errorMessage!);
+        showToast(message: value.errorMessage ?? "网络错误".tl);
         setState(() {
           loading = false;
         });
       } else {
         showToast(message: "登录成功".tl, icon: const Icon(Icons.check));
-        if(mounted) {
+        if (mounted) {
           context.pop();
         }
       }
-    });
+    } catch (_) {
+      if (!mounted) return;
+      showToast(message: "网络错误".tl);
+      setState(() {
+        loading = false;
+      });
+    }
   }
 }
