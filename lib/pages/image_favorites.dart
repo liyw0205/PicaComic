@@ -102,6 +102,17 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
     // page here can permanently skip rows when a sync/import adds more than
     // [_pageSize] favorites before the next refresh. The inclusive watermark
     // also handles SQLite reusing a deleted highest rowid.
+    final headRowId = _headRowId;
+    final latestRowId = ImageFavoriteManager.latestRowId();
+    if (headRowId != null && (latestRowId == null || latestRowId < headRowId)) {
+      // A table whose newest row is below the watermark has reused rowids
+      // after deleting the previous head. The old cursor would hide those
+      // rows, so restart the bounded query from the current head.
+      _images.clear();
+      _nextCursor = null;
+      _headRowId = null;
+      _hasMore = true;
+    }
     if (_headRowId == null) {
       // An empty page has no watermark yet. Populate it directly so an
       // external add can transition out of the empty state without requiring

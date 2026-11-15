@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/state_controller.dart';
+import 'package:pica_comic/pages/image_favorites.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
@@ -112,6 +114,108 @@ void main() {
 
     expect(refreshed.map((item) => item.id),
         ['image-new-2', 'image-new-1', 'image-new-0']);
+  });
+
+  testWidgets('refresh reloads after all rows are deleted and rowids reset',
+      (tester) async {
+    final imagePath = '${directory.path}/pixel.png';
+    await File(imagePath).writeAsBytes(const <int>[
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x08,
+      0x06,
+      0x00,
+      0x00,
+      0x00,
+      0x1f,
+      0x15,
+      0xc4,
+      0x89,
+      0x00,
+      0x00,
+      0x00,
+      0x0a,
+      0x49,
+      0x44,
+      0x41,
+      0x54,
+      0x78,
+      0x9c,
+      0x63,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x05,
+      0x00,
+      0x01,
+      0x0d,
+      0x0a,
+      0x2d,
+      0xb4,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x49,
+      0x45,
+      0x4e,
+      0x44,
+      0xae,
+      0x42,
+      0x60,
+      0x82,
+    ]);
+    final db = sqlite3.open(path);
+    try {
+      db.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
+          ['old-0', 'Old 0', imagePath, 1, 1, '{}']);
+      db.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
+          ['old-1', 'Old 1', imagePath, 1, 2, '{}']);
+    } finally {
+      db.dispose();
+    }
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    await tester.pumpWidget(const MaterialApp(home: ImageFavoritesPage()));
+    await tester.pump();
+    expect(find.text('Old 1'), findsOneWidget);
+
+    HistoryManager().close();
+    final emptied = sqlite3.open(path);
+    emptied.execute('delete from image_favorites;');
+    emptied.dispose();
+    final replacement = sqlite3.open(path);
+    replacement.execute('insert into image_favorites values(?, ?, ?, ?, ?, ?);',
+        ['new', 'New image', imagePath, 1, 1, '{}']);
+    replacement.dispose();
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    StateController.findOrNull(tag: 'image_favorites_page')?.refresh();
+    await tester.pump();
+    expect(find.text('New image'), findsOneWidget);
   });
 
   test('existing key lookup preserves identity and handles missing rows',

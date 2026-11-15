@@ -183,6 +183,15 @@ class ImageFavoriteManager {
     return rows.single['count'] as int;
   }
 
+  /// Return the current highest rowid so keyset refreshes can detect rowid
+  /// reuse after the table's newest rows have been removed.
+  static int? latestRowId() {
+    final rows = _db.select('''
+      select max(rowid) as latest_rowid from image_favorites;
+    ''');
+    return rows.single['latest_rowid'] as int?;
+  }
+
   static ImageFavorite _fromRow(Row row) => ImageFavorite(
         row["id"],
         row["cover"],
