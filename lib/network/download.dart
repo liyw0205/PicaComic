@@ -549,8 +549,8 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   ///储存当前的下载队列信息, 每完成一张图片的下载调用一次
-  Future<void> _saveInfo() async {
-    notifyListeners();
+  Future<void> _saveInfo({bool notify = true}) async {
+    if (notify) notifyListeners();
     final generation = _nextQueueGeneration();
     final data = <String, dynamic>{
       'version': _downloadQueueVersion,
@@ -876,7 +876,7 @@ class DownloadManager with _DownloadDb implements Listenable {
     // at its original position and leave the manager paused so the caller can
     // fix storage and retry without resurrecting a stale snapshot on restart.
     try {
-      await _saveInfo();
+      await _saveInfo(notify: false);
     } catch (_) {
       if (removed && !downloading.any((queued) => identical(queued, item))) {
         final items = downloading.toList();
