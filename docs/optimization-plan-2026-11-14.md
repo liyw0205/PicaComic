@@ -472,3 +472,17 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 2. 用双客户端真实 WebDAV 重放同秒并发、时钟偏移、离线恢复、上传中断、ETag 和无 ETag 服务；记录最终 revision 图、冲突提示和旧客户端共存行为。
 3. 为 A1/A2/A11/A16/A18 建立独立进程、低速存储和中断恢复 runner；重点确认导入失败不假成功、下载任务不丢失、目录迁移可重放。
 4. 补齐 A7/A10-A14 的设备、凭据安全存储和来源 fixture 验收，再以连续稳定的 master CI 为条件升至 `4.2.47+4247` 并创建 annotated `v4.2.47`；tag 只指向已通过 CI 的版本提交。
+
+## 11. 2026-11-15 后续缺口修复
+
+在版本字段升级到 `4.2.47+4247`（`2412a7ae`）后，又完成三项独立修复并推送到 `205deebc`：
+
+| 功能组 | 提交 | 修复内容 | 回归边界 |
+| --- | --- | --- | --- |
+| A11 下载队列 | `c7f07331` | 删除 `directory` 为空或缺失的旧任务时同步清理数据库孤儿行，重复删除保持幂等 | `test/download_persistence_test.dart` |
+| A13 图片收藏 | `2539dfed` | 历史/收藏合并实际插入图片收藏后合并触发页面刷新；重复合并不产生无效刷新 | `test/image_favorites_pagination_test.dart` |
+| A18 目录维护 | `205deebc` | 迁移计划、提交和 journal 恢复删除来源前校验完整文件集合、大小与 SHA-256；扫描后新增文件时保留来源和 journal | `test/directory_maintenance_test.dart` |
+
+合并后的 `dart analyze`、目标 `flutter analyze`、`dart format`、analyzer baseline、异步边界扫描和 `git diff --check` 均通过。新增 Flutter 测试已尝试执行，但本机 Termux 的 Flutter SDK/kernel 不匹配，报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此不能宣称本地测试通过；应由标准 runner 重新执行。
+
+版本提交后的 GitHub Actions push 事件未生成对应 run，workflow dispatch 返回 `Actions has been disabled for this repository`，尽管仓库权限接口仍报告 enabled。故 `v4.2.47` 的 tag 只能在当前远端平台恢复后再以标准 CI 结果作为发布门禁；在此之前保留代码和版本提交，不用未验证的 Release 结果覆盖历史。
