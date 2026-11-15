@@ -123,7 +123,9 @@ class CommentsPageLogic extends StateController {
     } catch (_) {
       // Keep the current page visible; a later scroll can retry the request.
     } finally {
-      _nextPageInFlight = false;
+      if (generation == _generation && identical(comments, target)) {
+        _nextPageInFlight = false;
+      }
     }
   }
 }
@@ -401,7 +403,9 @@ class ReplyPageLogic extends StateController {
     } catch (_) {
       // Keep the current page visible; a later scroll can retry the request.
     } finally {
-      _nextPageInFlight = false;
+      if (generation == _generation && identical(comments, target)) {
+        _nextPageInFlight = false;
+      }
     }
   }
 }
