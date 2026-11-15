@@ -57,6 +57,25 @@ void main() {
         hasLength(1000));
   });
 
+  test('waits for queued writes before switching destinations', () async {
+    final nextDirectory = await Directory.systemTemp.createTemp('pica-log-');
+    addTearDown(() async {
+      if (nextDirectory.existsSync()) {
+        await nextDirectory.delete(recursive: true);
+      }
+    });
+
+    LogManager.addLog(LogLevel.info, 'Lifecycle', 'before switch');
+    await LogManager.configureForDataPath(nextDirectory.path, isIOS: false);
+    LogManager.addLog(LogLevel.info, 'Lifecycle', 'after switch');
+    await LogManager.flush();
+
+    expect(await logFile.readAsString(), contains('before switch'));
+    final nextLogFile = File('${nextDirectory.path}/log.txt');
+    expect(await nextLogFile.readAsString(), contains('after switch'));
+    expect(await nextLogFile.readAsString(), isNot(contains('before switch')));
+  });
+
   test('rotates by size and retains the active file', () async {
     LogManager.maxLogFileBytes = 64;
     LogManager.addLog(LogLevel.info, 'Network', 'first event ' * 8);

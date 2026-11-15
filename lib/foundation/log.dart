@@ -34,6 +34,17 @@ class LogManager {
     return File('$dataPath${Platform.pathSeparator}log.txt');
   }
 
+  /// Waits for writes targeting the current file before switching destinations.
+  ///
+  /// Startup retries and background isolates can configure logging more than
+  /// once. Keeping the barrier here prevents a queued write from racing the
+  /// destination change and makes the boundary safe to await explicitly.
+  static Future<void> configureForDataPath(String dataPath,
+      {required bool isIOS}) async {
+    await flush();
+    logFile = logFileForDataPath(dataPath, isIOS: isIOS);
+  }
+
   static List<Log> get logs => _logs;
 
   static const maxLogLength = 3000;

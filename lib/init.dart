@@ -160,9 +160,7 @@ Future<List<String>> _startupRestoreRoots() async {
 }
 
 Future<void> _initializeLogging() async {
-  // Finish a queue left by an earlier startup before switching destinations.
-  await LogManager.flush();
-  LogManager.logFile = LogManager.logFileForDataPath(
+  await LogManager.configureForDataPath(
     App.dataPath,
     isIOS: App.isIOS,
   );

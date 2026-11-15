@@ -18,26 +18,34 @@ void onStart() {
   // the plugin API.
   Workmanager().executeTask((taskName, inputData) async {
     await App.init();
-    appdata = Appdata();
-    await appdata.readData();
-    var notifications = Notifications();
-    await notifications.init();
-    if (picacg.data['token'] != "") {
-      var userInfo = await network.getProfile(false);
-      if (userInfo.error) {
-        return true;
-      }
-      if (userInfo.data.isPunched == false) {
-        var res = await network.punchIn();
-        if (res) {
-          await notifications.sendUnimportantNotification("自动打卡", "成功签到");
+    await LogManager.configureForDataPath(
+      App.dataPath,
+      isIOS: App.isIOS,
+    );
+    try {
+      appdata = Appdata();
+      await appdata.readData();
+      var notifications = Notifications();
+      await notifications.init();
+      if (picacg.data['token'] != "") {
+        var userInfo = await network.getProfile(false);
+        if (userInfo.error) {
           return true;
         }
-      } else {
-        return true;
+        if (userInfo.data.isPunched == false) {
+          var res = await network.punchIn();
+          if (res) {
+            await notifications.sendUnimportantNotification("自动打卡", "成功签到");
+            return true;
+          }
+        } else {
+          return true;
+        }
       }
+      return true;
+    } finally {
+      await LogManager.flush();
     }
-    return true;
   });
 }
 
