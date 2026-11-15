@@ -100,6 +100,46 @@ void main() {
     expect(ImageFavoriteManager.exist(image.id, image.ep, image.page), isTrue);
   });
 
+  test(
+      'favorite rename waits for maintenance and propagates transaction errors',
+      () async {
+    const before = 'rename-before';
+    final folder = favorites.createFolder(before);
+    favorites.insertFolderSync(FolderSync(folder, 'source', '{}'));
+    favorites.updateOrder({folder: 1});
+
+    final db = sqlite3.open('${root.path}/local_favorite.db');
+    db.execute('''
+      create trigger reject_favorite_folder_rename
+      before update of folder_name on folder_order
+      when old.folder_name = '$before'
+      begin
+        select raise(abort, 'injected favorite rename failure');
+      end;
+    ''');
+    db.dispose();
+
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final maintenance = DataMaintenance.run<void>(() async {
+      entered.complete();
+      await release.future;
+    }, suppressSync: true);
+    await entered.future;
+
+    final rename = favorites.rename(before, 'rename-after');
+    expect(favorites.folderNames, contains(before));
+
+    release.complete();
+    await maintenance;
+    await expectLater(rename, throwsA(isA<SqliteException>()));
+
+    // The transaction rolls back the table and both metadata rows.
+    expect(favorites.folderNames, contains(before));
+    expect(favorites.folderNames, isNot(contains('rename-after')));
+    expect(favorites.folderSync.single.folderName, before);
+  });
+
   test('normal scope leaves synchronization enabled for user writes', () async {
     final image = favorite('normal');
     await DataMaintenance.run(() async {

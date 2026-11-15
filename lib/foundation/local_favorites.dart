@@ -1009,8 +1009,10 @@ class LocalFavoritesManager {
     saveData();
   }
 
-  void rename(String before, String after) {
-    if (_deferWrite(() => rename(before, after))) return;
+  Future<void> rename(String before, String after) async {
+    if (DataMaintenance.busy) {
+      return DataMaintenance.run<void>(() => rename(before, after));
+    }
     if (folderNames.contains(after)) {
       throw "Name already exists!";
     }
@@ -1036,7 +1038,7 @@ class LocalFavoritesManager {
           'update folder_order set folder_name = ? where folder_name = ?;',
           [after, before]);
     });
-    saveData();
+    await saveData();
   }
 
   Future<void> onReadEnd(String target, FavoriteType type) async {
