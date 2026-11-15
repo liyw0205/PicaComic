@@ -49,7 +49,10 @@ Future<void> setProxy(BuildContext context) {
 const _proxyProbeTimeout = Duration(seconds: 8);
 
 class ProxySettingDialog extends StatefulWidget {
-  const ProxySettingDialog({super.key});
+  const ProxySettingDialog({super.key, this.configLoader});
+
+  @visibleForTesting
+  final Future<AppProxyConfig?> Function()? configLoader;
 
   @override
   State<ProxySettingDialog> createState() => _ProxySettingDialogState();
@@ -170,6 +173,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
   Uri _proxyAvailableTarget() => _proxyQualityTargets().first.value;
 
   Future<AppProxyConfig?> _testConfig() {
+    if (widget.configLoader != null) return widget.configLoader!();
     if (!useNetworkProxy) return getSystemProxyConfig();
     return Future.value(_currentConfig());
   }
@@ -270,6 +274,7 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
 
   Future<void> _testAvailable() async {
     var config = await _testConfig();
+    if (!mounted) return;
     if (config == null) {
       _showInvalidTestProxy();
       return;
@@ -278,36 +283,40 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       testingAvailable = true;
       availableResult = null;
     });
+    String result;
     try {
       var connectMs = await _measureProxyConnect(config);
+      if (!mounted) return;
       if (connectMs == null) {
-        availableResult = "不可用".tl;
+        result = "不可用".tl;
       } else {
         var request =
             await _measureProxyRequest(config, _proxyAvailableTarget());
+        if (!mounted) return;
         if (request.ms == null) {
-          availableResult = "端口可连，请求失败".tl;
+          result = "端口可连，请求失败".tl;
           LogManager.addLog(
               LogLevel.warning,
               "Network",
               "Proxy TCP connect succeeded in ${connectMs}ms, "
                   "but HTTP probe failed: ${request.error ?? "unknown"}");
         } else {
-          availableResult = "${request.ms} ms";
+          result = "${request.ms} ms";
         }
       }
     } catch (e) {
-      availableResult = "不可用".tl;
+      result = "不可用".tl;
     }
-    if (mounted) {
-      setState(() {
-        testingAvailable = false;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      availableResult = result;
+      testingAvailable = false;
+    });
   }
 
   Future<void> _testQuality() async {
     var config = await _testConfig();
+    if (!mounted) return;
     if (config == null) {
       _showInvalidTestProxy();
       return;
@@ -316,26 +325,27 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
       testingQuality = true;
       qualityResult = null;
     });
+    String result;
     try {
       var samples = <int>[];
       var failed = <String>[];
       var failedDetails = <String>[];
       for (var target in _proxyQualityTargets()) {
-        var result = await _measureProxyRequest(config, target.value);
-        if (result.ms == null) {
+        var probe = await _measureProxyRequest(config, target.value);
+        if (!mounted) return;
+        if (probe.ms == null) {
           failed.add(target.key);
           failedDetails.add(
-              "${target.key} (${target.value.host}): ${result.error ?? "unknown"}");
+              "${target.key} (${target.value.host}): ${probe.error ?? "unknown"}");
           continue;
         }
-        samples.add(result.ms!);
+        samples.add(probe.ms!);
       }
       if (samples.isEmpty) {
-        qualityResult =
-            failed.isEmpty ? "不可用".tl : "${"不可用".tl}: ${failed.join(",")}";
+        result = failed.isEmpty ? "不可用".tl : "${"不可用".tl}: ${failed.join(",")}";
       } else {
         var avg = samples.reduce((a, b) => a + b) ~/ samples.length;
-        qualityResult =
+        result =
             failed.isEmpty ? "$avg ms" : "部分可用 $avg ms: ${failed.join(",")}";
       }
       if (failedDetails.isNotEmpty) {
@@ -343,13 +353,13 @@ class _ProxySettingDialogState extends State<ProxySettingDialog> {
             "Proxy quality request failed targets\n${failedDetails.join("\n")}");
       }
     } catch (e) {
-      qualityResult = "不可用".tl;
+      result = "不可用".tl;
     }
-    if (mounted) {
-      setState(() {
-        testingQuality = false;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      qualityResult = result;
+      testingQuality = false;
+    });
   }
 
   Future<void> _save() async {
@@ -1026,6 +1036,7 @@ void importDataSetting(BuildContext context) {
 
 Future<void> syncDataSettings(BuildContext context) async {
   final configs = await Webdav.configForSettings() ?? ["", "", "", ""];
+  if (!context.mounted) return;
   String url = configs[0];
   String username = configs[1];
   String pwd = configs[2];
