@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/pages/main_page.dart';
 import 'package:pica_comic/tools/translations.dart';
 
@@ -19,26 +23,35 @@ class AuthPage extends StatefulWidget {
 class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
   @override
   void initState() {
+    super.initState();
     AuthPage.lock = true;
     WidgetsBinding.instance.addObserver(this);
-    if(SchedulerBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-      auth();
+    if (SchedulerBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      unawaited(auth());
     }
-    super.initState();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if(state == AppLifecycleState.resumed && AuthPage.lock && mounted && !inProgress) {
-      auth();
+    if (state == AppLifecycleState.resumed &&
+        AuthPage.lock &&
+        mounted &&
+        !inProgress) {
+      unawaited(auth());
     }
     super.didChangeAppLifecycleState(state);
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: auth,
+      onTap: () => unawaited(auth()),
       child: Scaffold(
         body: PopScope(
           canPop: false,
@@ -71,21 +84,30 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
 
   bool inProgress = false;
 
-  void auth() async {
-    if(inProgress) {
+  Future<void> auth() async {
+    if (inProgress) {
       return;
     }
     inProgress = true;
-    var res =
-        await LocalAuthentication().authenticate(localizedReason: "需要身份验证".tl);
-    inProgress = false;
-    if (res) {
+    try {
+      final res = await LocalAuthentication()
+          .authenticate(localizedReason: "需要身份验证".tl);
+      if (!mounted || !res) {
+        return;
+      }
       AuthPage.lock = false;
       if (AuthPage.initial) {
         App.offAll(() => const MainPage());
       } else {
         App.globalBack();
       }
+    } catch (error, stack) {
+      Log.warning(
+        "Authentication",
+        "Local authentication failed: ${safeNetworkError(error)}\n$stack",
+      );
+    } finally {
+      inProgress = false;
     }
   }
 }
