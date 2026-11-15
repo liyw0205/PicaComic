@@ -31,6 +31,21 @@ void main() {
     expect(await recent.exists(), isTrue);
   });
 
+  test('startup cache cleanup uses the injected cache directory', () async {
+    final root = await Directory.systemTemp.createTemp('pica-cache-startup-');
+    addTearDown(() => root.delete(recursive: true));
+    final image = Directory('${root.path}/imageCache');
+    await image.create(recursive: true);
+    final old = File('${image.path}/old.bin');
+    await old.writeAsBytes(List<int>.filled(7, 1));
+    final now = DateTime.now();
+    await old.setLastModified(now.subtract(const Duration(days: 10)));
+
+    await startClearCache(cacheDirectoryProvider: () async => root);
+
+    expect(await old.exists(), isFalse);
+  });
+
   test('directory migration writes a resumable journal and verifies files',
       () async {
     final root = await Directory.systemTemp.createTemp('pica-dir-migration-');

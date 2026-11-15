@@ -6,7 +6,7 @@ import 'package:pica_comic/tools/directory_maintenance.dart';
 
 const _cacheRetention = Duration(days: 7);
 
-/// Cleans the two temporary image cache trees in bounded asynchronous batches.
+/// Cleans the two application image cache trees in bounded asynchronous batches.
 /// The report is useful to diagnostics and keeps capacity accounting in one
 /// place for callers that need to display maintenance results.
 Future<CacheCleanupReport> clearStaleCache(
@@ -43,10 +43,13 @@ Future<CacheCleanupReport> clearStaleCache(
 
 /// Startup entry point. Filesystem work is asynchronous and yields between
 /// batches, so a large temporary cache does not block the first frame.
-Future<void> startClearCache() async {
+Future<void> startClearCache({
+  Future<Directory> Function()? cacheDirectoryProvider,
+}) async {
   final timer = RuntimeMetrics.start('cache.cleanup');
   try {
-    final cachePath = await getTemporaryDirectory();
+    final cachePath =
+        await (cacheDirectoryProvider ?? getApplicationCacheDirectory)();
     final report = await clearStaleCache(cachePath.path);
     timer.finish(bytes: report.deletedBytes, success: report.failedFiles == 0);
   } catch (_) {
