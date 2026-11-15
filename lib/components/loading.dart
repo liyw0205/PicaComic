@@ -40,8 +40,8 @@ class NetworkError extends StatelessWidget {
           if (retry != null)
             if (cfe != null)
               FilledButton(
-                onPressed: () => passCloudflare(
-                    CloudflareException.fromString(message)!, retry!),
+                onPressed: () => unawaited(passCloudflare(
+                    CloudflareException.fromString(message)!, retry!)),
                 child: Text('继续'.tl),
               )
             else

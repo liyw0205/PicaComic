@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
@@ -68,7 +69,7 @@ class NhentaiNetwork {
     dio.interceptors.add(CloudflareInterceptor());
   }
 
-  void logout() async {
+  void logout() {
     logged = false;
     cookieJar!.deleteUri(Uri.parse(baseUrl));
   }
@@ -1337,12 +1338,23 @@ class _NhentaiAuthInterceptor extends Interceptor {
   }
 
   @override
-  void onError(DioException err, ErrorInterceptorHandler handler) async {
+  void onError(DioException err, ErrorInterceptorHandler handler) {
     if (!_shouldRefresh(err)) {
       handler.next(err);
       return;
     }
-    final refreshed = await network.refreshAuthTokens();
+    unawaited(_refreshAndRetry(err, handler));
+  }
+
+  Future<void> _refreshAndRetry(
+      DioException err, ErrorInterceptorHandler handler) async {
+    bool refreshed;
+    try {
+      refreshed = await network.refreshAuthTokens();
+    } catch (_) {
+      handler.next(err);
+      return;
+    }
     if (!refreshed) {
       handler.next(err);
       return;

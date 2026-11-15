@@ -301,16 +301,22 @@ Future<void> _showExtractNhCookieDialog(
   );
 }
 
-void nhLogin(void Function() onFinished) async {
+Future<void> nhLogin(void Function() onFinished) async {
+  var finished = false;
+  var completionInProgress = false;
   if (App.isDesktop && (await DesktopWebview.isAvailable())) {
     var webview = DesktopWebview(
       initialUrl: "${NhentaiNetwork().baseUrl}/login/?next=/",
       onTitleChange: (title, controller) async {
+        if (finished || completionInProgress) {
+          return;
+        }
         debugPrint(title);
         if (title == "nhentai.net") return;
         if (!title.contains("Login") &&
             !title.contains("Register") &&
             title.contains("nhentai")) {
+          completionInProgress = true;
           var ua = controller.userAgent;
           if (ua != null) {
             appdata.implicitData[3] = ua;
@@ -324,10 +330,14 @@ void nhLogin(void Function() onFinished) async {
             cookie.domain = ".nhentai.net";
             cookiesList.add(cookie);
           });
-          if (cookiesList.isEmpty) return;
+          if (cookiesList.isEmpty) {
+            completionInProgress = false;
+            return;
+          }
           NhentaiNetwork().logged = true;
           NhentaiNetwork().cookieJar!.saveFromResponse(
               Uri.parse(NhentaiNetwork().baseUrl), cookiesList);
+          finished = true;
           onFinished();
           controller.close();
         }

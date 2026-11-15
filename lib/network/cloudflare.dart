@@ -59,14 +59,14 @@ class CloudflareException implements DioException {
 class CloudflareInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    if(options.headers['cookie'].toString().contains('cf_clearance')) {
+    if (options.headers['cookie'].toString().contains('cf_clearance')) {
       options.headers['user-agent'] = appdata.implicitData[3];
     }
     handler.next(options);
   }
 
   @override
-  void onError(DioException err, ErrorInterceptorHandler handler) async {
+  void onError(DioException err, ErrorInterceptorHandler handler) {
     if (err.response?.statusCode == 403) {
       handler.next(_check(err.response!) ?? err);
     } else {
@@ -94,9 +94,20 @@ class CloudflareInterceptor extends Interceptor {
   }
 }
 
-void passCloudflare(CloudflareException e, void Function() onFinished) async {
+Future<void> passCloudflare(
+    CloudflareException e, void Function() onFinished) async {
   var url = e.url;
   var uri = Uri.parse(url);
+  var finished = false;
+  var completionInProgress = false;
+
+  void finishOnce() {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    onFinished();
+  }
 
   void saveCookies(Map<String, String> cookies) {
     var domain = uri.host;
@@ -119,21 +130,26 @@ void passCloudflare(CloudflareException e, void Function() onFinished) async {
     var webview = DesktopWebview(
       initialUrl: url,
       onTitleChange: (title, controller) async {
+        if (finished || completionInProgress) {
+          return;
+        }
         var res = await controller.evaluateJavascript(
             "document.head.innerHTML.includes('#challenge-success-text')");
         if (res == 'false') {
+          completionInProgress = true;
           var ua = controller.userAgent;
           if (ua != null) {
             appdata.implicitData[3] = ua;
             appdata.writeImplicitData();
           }
           var cookiesMap = await controller.getCookies(url);
-          if(cookiesMap['cf_clearance'] == null) {
+          if (cookiesMap['cf_clearance'] == null) {
+            completionInProgress = false;
             return;
           }
           saveCookies(cookiesMap);
           controller.close();
-          onFinished();
+          finishOnce();
         }
       },
     );
@@ -144,17 +160,22 @@ void passCloudflare(CloudflareException e, void Function() onFinished) async {
         initialUrl: url,
         singlePage: true,
         onTitleChange: (title, controller) async {
+          if (finished || completionInProgress) {
+            return;
+          }
           var res = await controller.platform.evaluateJavascript(
               source:
                   "document.head.innerHTML.includes('#challenge-success-text')");
           if (res == false) {
+            completionInProgress = true;
             var ua = await controller.getUA();
             if (ua != null) {
               appdata.implicitData[3] = ua;
               appdata.writeImplicitData();
             }
             var cookiesMap = await controller.getCookies(url) ?? {};
-            if(cookiesMap['cf_clearance'] == null) {
+            if (cookiesMap['cf_clearance'] == null) {
+              completionInProgress = false;
               return;
             }
             saveCookies(cookiesMap);
@@ -172,7 +193,7 @@ void passCloudflare(CloudflareException e, void Function() onFinished) async {
         },
       ),
     );
-    onFinished();
+    finishOnce();
   } else {
     showToast(message: "当前设备不支持".tl);
   }
