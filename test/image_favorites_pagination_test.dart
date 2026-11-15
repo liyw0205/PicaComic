@@ -71,6 +71,50 @@ void main() {
         'image-2');
   });
 
+  test('title searches keep short-term semantics and use trigram FTS',
+      () async {
+    insertRows([
+      ('image-0', 'A title for search'),
+      ('image-1', 'Another title'),
+      ('image-2', 'No match'),
+    ]);
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    expect(
+        ImageFavoriteManager.getPage(keyword: 'title')
+            .items
+            .map((item) => item.id),
+        ['image-1', 'image-0']);
+    // Two-character terms are deliberately kept on the old contains path;
+    // the trigram tokenizer only guarantees matches for three code points.
+    expect(ImageFavoriteManager.count(keyword: 'le'), 2);
+
+    final fixture = sqlite3.open(path, mode: OpenMode.readOnly);
+    try {
+      final plan = fixture.select('''
+        explain query plan
+        select i.rowid, i.*
+        from image_favorites i
+        join image_favorites_title_fts f on f.rowid = i.rowid
+        where f.image_favorites_title_fts match ?
+        order by i.rowid desc limit ?;
+      ''', ['"title"', 60]).map((row) => row['detail'] as String).join(' ');
+      expect(plan, contains('VIRTUAL TABLE INDEX'));
+      expect(plan, isNot(contains('SCAN image_favorites')));
+    } finally {
+      fixture.dispose();
+    }
+
+    // Triggers keep the auxiliary index in sync for writes made after init.
+    insertRows([('image-late', 'Late title')]);
+    expect(ImageFavoriteManager.getPage(keyword: 'late').items.single.id,
+        'image-late');
+    final db = sqlite3.open(path);
+    db.execute('delete from image_favorites where id = ?;', ['image-late']);
+    db.dispose();
+    expect(ImageFavoriteManager.count(keyword: 'late'), 0);
+  });
+
   test('incremental head refresh reaches every new row in bounded batches',
       () async {
     insertRows([

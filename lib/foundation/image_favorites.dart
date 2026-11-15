@@ -47,6 +47,8 @@ class ImageFavoriteManager {
   static bool _uiRefreshQueued = false;
   static bool _refreshMePagePending = false;
   static bool _refreshImagePagePending = false;
+  static const _titleSearchTable = 'image_favorites_title_fts';
+  static bool _titleSearchFtsAvailable = false;
 
   static void _scheduleUiRefresh(
       {bool mePage = false, bool imagePage = false}) {
@@ -87,13 +89,83 @@ class ImageFavoriteManager {
         "other TEXT NOT NULL,"
         "PRIMARY KEY (id, ep, page)"
         ");");
-    // Keep title searches bounded by a cheap indexed prefix/order lookup. The
-    // contains-style filter below still preserves the old search semantics.
-    db.execute("""
-      create index if not exists image_favorites_title
-      on image_favorites(title collate nocase);
-    """);
+    _titleSearchFtsAvailable = _initTitleSearchFts(db);
   }
+
+  /// Add a trigram search index without making it part of the sync format.
+  ///
+  /// Older databases only contain [image_favorites]. The external-content
+  /// table is rebuilt once when first introduced and kept current by local
+  /// triggers. A savepoint makes unsupported FTS builds or damaged metadata
+  /// harmless: the regular parameterized `instr(lower(title), ?)` query stays
+  /// available and startup can continue.
+  static bool _initTitleSearchFts(Database db) {
+    const savepoint = 'pica_image_favorites_fts_init';
+    try {
+      db.execute('savepoint $savepoint;');
+      final existed = db.select('''
+        select 1 from sqlite_master
+        where type = 'table' and name = ?;
+      ''', [_titleSearchTable]).isNotEmpty;
+      db.execute('''
+        create virtual table if not exists $_titleSearchTable using fts5(
+          title,
+          content='image_favorites',
+          content_rowid='rowid',
+          tokenize='trigram'
+        );
+      ''');
+      db.execute('''
+        create trigger if not exists image_favorites_title_fts_ai
+        after insert on image_favorites
+        begin
+          insert into $_titleSearchTable(rowid, title)
+          values (new.rowid, new.title);
+        end;
+      ''');
+      db.execute('''
+        create trigger if not exists image_favorites_title_fts_ad
+        after delete on image_favorites
+        begin
+          insert into $_titleSearchTable($_titleSearchTable, rowid, title)
+          values ('delete', old.rowid, old.title);
+        end;
+      ''');
+      db.execute('''
+        create trigger if not exists image_favorites_title_fts_au
+        after update of title on image_favorites
+        begin
+          insert into $_titleSearchTable($_titleSearchTable, rowid, title)
+          values ('delete', old.rowid, old.title);
+          insert into $_titleSearchTable(rowid, title)
+          values (new.rowid, new.title);
+        end;
+      ''');
+      if (!existed) {
+        db.execute('''
+          insert into $_titleSearchTable($_titleSearchTable)
+          values ('rebuild');
+        ''');
+      }
+      db.execute('release $savepoint;');
+      return true;
+    } catch (_) {
+      try {
+        db.execute('rollback to $savepoint;');
+        db.execute('release $savepoint;');
+      } catch (_) {
+        // The outer database transaction remains responsible for its own
+        // rollback if the connection rejected the savepoint itself.
+      }
+      return false;
+    }
+  }
+
+  static bool _canUseTitleSearchFts(String keyword) =>
+      _titleSearchFtsAvailable && keyword.runes.length >= 3;
+
+  static String _titleSearchQuery(String keyword) =>
+      '"${keyword.replaceAll('"', '""')}"';
 
   static Future<void> add(ImageFavorite favorite) {
     if (DataMaintenance.busy) {
@@ -138,7 +210,15 @@ class ImageFavoriteManager {
     final conditions = <String>[];
     final parameters = <Object?>[];
     final normalizedKeyword = keyword.trim().toLowerCase();
-    if (normalizedKeyword.isNotEmpty) {
+    final useTitleSearchFts = _canUseTitleSearchFts(normalizedKeyword);
+    if (useTitleSearchFts) {
+      conditions.add('f.$_titleSearchTable match ?');
+      parameters.add(_titleSearchQuery(normalizedKeyword));
+      // FTS narrows the candidate set; retain the old contains predicate so
+      // tokenization differences cannot change visible search semantics.
+      conditions.add('instr(lower(i.title), ?) > 0');
+      parameters.add(normalizedKeyword);
+    } else if (normalizedKeyword.isNotEmpty) {
       conditions.add('instr(lower(title), ?) > 0');
       parameters.add(normalizedKeyword);
     }
@@ -153,13 +233,27 @@ class ImageFavoriteManager {
       parameters.add(newerThanOrEqualRowId);
     }
     parameters.add(limit + 1);
-    final rows = _db.select('''
-      select rowid as image_favorite_rowid, *
-      from image_favorites
-      ${conditions.isEmpty ? '' : 'where ${conditions.join(' and ')}'}
-      order by rowid desc
-      limit ?;
-    ''', parameters);
+    late ResultSet rows;
+    try {
+      rows = _db.select('''
+        select i.rowid as image_favorite_rowid, i.*
+        from image_favorites i
+        ${useTitleSearchFts ? 'join $_titleSearchTable f on f.rowid = i.rowid' : ''}
+        ${conditions.isEmpty ? '' : 'where ${conditions.join(' and ')}'}
+        order by i.rowid desc
+        limit ?;
+      ''', parameters);
+    } catch (_) {
+      if (!useTitleSearchFts) rethrow;
+      // A stale or damaged auxiliary index must not make search unusable.
+      _titleSearchFtsAvailable = false;
+      return getPage(
+        limit: limit,
+        afterRowId: afterRowId,
+        newerThanOrEqualRowId: newerThanOrEqualRowId,
+        keyword: normalizedKeyword,
+      );
+    }
     final hasMore = rows.length > limit;
     final visible = rows.take(limit).toList();
     return ImageFavoritePage(
@@ -174,12 +268,31 @@ class ImageFavoriteManager {
   /// Count all favorites, or only favorites matching a title search.
   static int count({String keyword = ''}) {
     final normalizedKeyword = keyword.trim().toLowerCase();
-    final rows = normalizedKeyword.isEmpty
-        ? _db.select('select count(*) as count from image_favorites;')
-        : _db.select('''
-            select count(*) as count from image_favorites
-            where instr(lower(title), ?) > 0;
-          ''', [normalizedKeyword]);
+    final useTitleSearchFts = _canUseTitleSearchFts(normalizedKeyword);
+    late ResultSet rows;
+    try {
+      rows = normalizedKeyword.isEmpty
+          ? _db.select('select count(*) as count from image_favorites;')
+          : useTitleSearchFts
+              ? _db.select('''
+                  select count(*) as count
+                  from image_favorites i
+                  join $_titleSearchTable f on f.rowid = i.rowid
+                  where f.$_titleSearchTable match ?
+                    and instr(lower(i.title), ?) > 0;
+                ''', [
+                  _titleSearchQuery(normalizedKeyword),
+                  normalizedKeyword,
+                ])
+              : _db.select('''
+                  select count(*) as count from image_favorites
+                  where instr(lower(title), ?) > 0;
+                ''', [normalizedKeyword]);
+    } catch (_) {
+      if (!useTitleSearchFts) rethrow;
+      _titleSearchFtsAvailable = false;
+      return count(keyword: normalizedKeyword);
+    }
     return rows.single['count'] as int;
   }
 
