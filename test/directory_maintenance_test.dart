@@ -138,4 +138,47 @@ void main() {
     expect(await journal.exists(), isTrue);
     expect(await extra.exists(), isTrue);
   });
+
+  test('committed recovery retains source when source has extra files',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('pica-dir-source-extra-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    await source.create(recursive: true);
+    await destination.create(recursive: true);
+    const contents = 'payload';
+    await File('${source.path}/comic.bin').writeAsString(contents);
+    final extra = File('${source.path}/new-download.bin');
+    await extra.writeAsString('created after the migration plan');
+    await File('${destination.path}/comic.bin').writeAsString(contents);
+    final digest = sha256.convert(utf8.encode(contents)).toString();
+    final journal = File('${destination.path}.migration.json');
+    await journal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'committed',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': '${destination.path}.migration-recovery.tmp',
+      'deleteSource': true,
+      'totalBytes': contents.length,
+      'files': [
+        {
+          'path': 'comic.bin',
+          'size': contents.length,
+          'sha256': digest,
+          'done': true,
+        },
+      ],
+    }));
+
+    await expectLater(
+      migrateDirectory(source, destination),
+      throwsA(isA<StateError>()),
+    );
+    expect(await source.exists(), isTrue);
+    expect(await extra.exists(), isTrue);
+    expect(await journal.exists(), isTrue);
+  });
 }

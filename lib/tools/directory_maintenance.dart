@@ -335,7 +335,7 @@ Future<DirectoryMigrationReport> migrateDirectory(
               'Committed migration destination failed verification');
         }
         await _finishMigration(journal, source, destination,
-            deleteSource: state['deleteSource'] != false);
+            entries: entries, deleteSource: state['deleteSource'] != false);
         timer.finish(bytes: state['totalBytes'] as int);
         return DirectoryMigrationReport(
           sourcePath: sourcePath,
@@ -375,7 +375,7 @@ Future<DirectoryMigrationReport> migrateDirectory(
       state['phase'] = 'committed';
       await _writeMigrationJournal(journal, state);
       await _finishMigration(journal, source, destination,
-          deleteSource: state['deleteSource'] != false);
+          entries: entries, deleteSource: state['deleteSource'] != false);
       final totalBytes = state['totalBytes'] as int;
       timer.finish(bytes: totalBytes);
       return DirectoryMigrationReport(
@@ -395,6 +395,15 @@ Future<DirectoryMigrationReport> migrateDirectory(
       if (existing.fileCount != 0 && !resumed) {
         throw StateError('Destination directory is not empty');
       }
+    }
+
+    // Do not replace an existing destination or delete the source if a writer
+    // added, removed, or changed a file after the migration plan was created.
+    // The download manager normally pauses writers, but this boundary also
+    // protects against another process or a delayed worker callback.
+    if (state['deleteSource'] != false &&
+        !await _sourceMatches(source, entries, requireDigest: false)) {
+      throw StateError('Source changed during migration');
     }
 
     await staging.create(recursive: true);
@@ -449,7 +458,7 @@ Future<DirectoryMigrationReport> migrateDirectory(
     state['files'] = entries.map((item) => item.toJson()).toList();
     await _writeMigrationJournal(journal, state);
     await _finishMigration(journal, source, destination,
-        deleteSource: state['deleteSource'] != false);
+        entries: entries, deleteSource: state['deleteSource'] != false);
     timer.finish(bytes: copiedBytes);
     return DirectoryMigrationReport(
       sourcePath: sourcePath,
@@ -495,9 +504,13 @@ Future<void> _finishMigration(
   File journal,
   Directory source,
   Directory destination, {
+  required List<_MigrationEntry> entries,
   required bool deleteSource,
 }) async {
   if (deleteSource && await source.exists()) {
+    if (!await _sourceMatches(source, entries)) {
+      throw StateError('Source changed before migration cleanup');
+    }
     await source.delete(recursive: true);
   }
   if (await journal.exists()) await journal.delete();
@@ -506,21 +519,39 @@ Future<void> _finishMigration(
 Future<bool> _destinationMatches(
   Directory destination,
   List<_MigrationEntry> entries,
-) async {
+) =>
+    _directoryMatches(destination, entries, requireDigest: true);
+
+Future<bool> _sourceMatches(Directory source, List<_MigrationEntry> entries,
+        {bool requireDigest = true}) =>
+    _directoryMatches(source, entries, requireDigest: requireDigest);
+
+Future<bool> _directoryMatches(
+  Directory directory,
+  List<_MigrationEntry> entries, {
+  required bool requireDigest,
+}) async {
   final expectedPaths = <String>{};
   for (final entry in entries) {
     if (!expectedPaths.add(entry.relativePath)) return false;
-    final file = File(_joinRelative(destination.path, entry.relativePath));
-    if (!await _matchesDigest(file, entry.size, entry.sha256)) return false;
+    final file = File(_joinRelative(directory.path, entry.relativePath));
+    if (!await file.exists()) return false;
+    final stat = await file.stat();
+    if (stat.size != entry.size) return false;
+    if (entry.sha256 == null) {
+      if (requireDigest) return false;
+    } else if (await _digestFile(file) != entry.sha256) {
+      return false;
+    }
   }
 
   // A committed journal is the last point at which it is safe to delete the
   // source. Detect files added after the rename instead of treating a partial
   // match as a successful recovery and losing the original directory.
-  final destinationPath = _absolutePath(destination.path);
+  final destinationPath = _absolutePath(directory.path);
   final actualPaths = <String>{};
   await for (final entity
-      in destination.list(recursive: true, followLinks: false)) {
+      in directory.list(recursive: true, followLinks: false)) {
     if (entity is Link) return false;
     if (entity is! File) continue;
     final absolute = _absolutePath(entity.path);
