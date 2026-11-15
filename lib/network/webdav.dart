@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io' as io;
@@ -113,32 +114,47 @@ class Webdav {
       _queuedConfig = config;
       return current;
     }
-    final task = _runUploadLoop(config);
+    // Keep one stable Future for every coalesced caller. The previous
+    // completion callback cleared [_uploadTask] before launching a request
+    // that arrived in the completion microtask, so that caller observed the
+    // previous result instead of the late request's result.
+    final completer = Completer<bool>();
+    final task = completer.future;
     _uploadTask = task;
-    task.then<void>((_) {
-      if (identical(_uploadTask, task)) {
-        _uploadTask = null;
-        _startLateUploadIfNeeded();
-      }
-    }, onError: (_, __) {
-      if (identical(_uploadTask, task)) {
-        _uploadTask = null;
-        _startLateUploadIfNeeded();
-      }
-    });
-    return task;
-  }
 
-  static void _startLateUploadIfNeeded() {
-    if (!_uploadAgain) {
-      return;
-    }
-    final config = _queuedConfig;
-    _uploadAgain = false;
-    _queuedConfig = null;
-    // A caller can arrive in the microtask gap between the final coalescing
-    // check and completion of the task. Do not lose that requested upload.
-    uploadData(config);
+    late void Function(bool) complete;
+    late void Function(Object, StackTrace) completeError;
+
+    completeError = (Object error, StackTrace stack) {
+      if (_uploadAgain) {
+        final nextConfig = _queuedConfig;
+        _uploadAgain = false;
+        _queuedConfig = null;
+        _runUploadLoop(nextConfig).then<void>(complete, onError: completeError);
+        return;
+      }
+      if (identical(_uploadTask, task)) {
+        _uploadTask = null;
+        completer.completeError(error, stack);
+      }
+    };
+
+    complete = (bool result) {
+      if (_uploadAgain) {
+        final nextConfig = _queuedConfig;
+        _uploadAgain = false;
+        _queuedConfig = null;
+        _runUploadLoop(nextConfig).then<void>(complete, onError: completeError);
+        return;
+      }
+      if (identical(_uploadTask, task)) {
+        _uploadTask = null;
+        completer.complete(result);
+      }
+    };
+
+    _runUploadLoop(config).then<void>(complete, onError: completeError);
+    return task;
   }
 
   static Future<bool> _runUploadLoop(String? config) async {
