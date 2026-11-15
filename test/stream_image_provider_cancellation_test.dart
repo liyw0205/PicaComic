@@ -21,6 +21,7 @@ void main() {
     );
     final cancellation = ImageLoadCancellation();
     final chunks = StreamController<ImageChunkEvent>();
+    final chunkSubscription = chunks.stream.listen((_) {});
     final load = provider.loadWithCancellation(chunks, cancellation);
 
     try {
@@ -35,6 +36,7 @@ void main() {
       expect(sourceCancelled, isTrue);
     } finally {
       await chunks.close();
+      await chunkSubscription.cancel();
       await source.close();
     }
   });
