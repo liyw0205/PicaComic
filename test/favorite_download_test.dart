@@ -366,6 +366,40 @@ void main() {
     }
   });
 
+  test('duplicate cancellation waits for the in-flight stop and save',
+      () async {
+    final stopStarted = Completer<void>();
+    final stopGate = Completer<void>();
+    final first = _TestDownloadingItem('first')
+      ..onStopStarted = stopStarted
+      ..stopGate = stopGate;
+    final next = _TestDownloadingItem('next');
+    manager.downloading
+      ..add(first)
+      ..add(next);
+    manager.isDownloading = true;
+
+    final firstCancellation = manager.cancel('first');
+    var duplicateCompleted = false;
+    try {
+      await stopStarted.future;
+      final duplicateCancellation = manager.cancel('first').then((_) {
+        duplicateCompleted = true;
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(duplicateCompleted, isFalse);
+
+      stopGate.complete();
+      await firstCancellation;
+      await duplicateCancellation;
+      expect(duplicateCompleted, isTrue);
+      expect(manager.downloading.first, same(next));
+    } finally {
+      if (!stopGate.isCompleted) stopGate.complete();
+      await firstCancellation;
+    }
+  });
+
   test('pause cancels an in-flight cover request', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final requestStarted = Completer<HttpResponse>();

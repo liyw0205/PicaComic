@@ -52,6 +52,12 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   final Set<DownloadingItem> _stopping = HashSet<DownloadingItem>.identity();
 
+  // Cancellation is observable by callers. Keep the operation future by
+  // task identity so repeated requests wait for the same stop and snapshot
+  // commit instead of returning while the first request is still in flight.
+  final Map<DownloadingItem, Future<void>> _cancellationOperations =
+      HashMap<DownloadingItem, Future<void>>.identity();
+
   bool _startRequestedDuringStop = false;
 
   bool _pauseRequestedDuringStop = false;
@@ -138,7 +144,9 @@ class DownloadManager with _DownloadDb implements Listenable {
     // Stop network writes before copying the directory. Persist the paused
     // progress so the destination can be resumed after a restart without
     // relying on an in-memory queue.
+    await _waitForPendingCancellations();
     if (isDownloading) await pause();
+    await _waitForPendingCancellations();
     await _saveInfo();
     await _queueWriteTail;
     if (transform) {
@@ -459,6 +467,12 @@ class DownloadManager with _DownloadDb implements Listenable {
         // Dispose still needs to release any partially initialized resources.
       }
     }
+    try {
+      await _waitForPendingCancellations();
+    } catch (e, s) {
+      LogManager.addLog(LogLevel.error, 'Download',
+          'Failed to finish pending download cancellation during dispose\n${safeNetworkError(e)}\n$s');
+    }
     _runInit = false;
     isDownloading = false;
     for (final item in downloading.toList()) {
@@ -734,7 +748,54 @@ class DownloadManager with _DownloadDb implements Listenable {
           orElse: () => null,
         );
     if (item == null) return;
-    if (_stopping.contains(item)) return;
+    final pending = _cancellationOperations[item];
+    if (pending != null) {
+      await pending;
+      return;
+    }
+
+    // Register before invoking the async body. A stop implementation may
+    // synchronously trigger another cancellation callback.
+    final completer = Completer<void>();
+    final operation = completer.future;
+    _cancellationOperations[item] = operation;
+    unawaited(_cancelItem(item).then<void>(
+      (_) {
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (Object error, StackTrace stack) {
+        if (!completer.isCompleted) completer.completeError(error, stack);
+      },
+    ));
+    try {
+      await operation;
+    } finally {
+      if (identical(_cancellationOperations[item], operation)) {
+        _cancellationOperations.remove(item);
+      }
+    }
+  }
+
+  Future<void> _waitForPendingCancellations() async {
+    Object? firstError;
+    StackTrace? firstStack;
+    while (_cancellationOperations.isNotEmpty) {
+      final pending = List<Future<void>>.of(_cancellationOperations.values);
+      for (final operation in pending) {
+        try {
+          await operation;
+        } catch (error, stack) {
+          firstError ??= error;
+          firstStack ??= stack;
+        }
+      }
+    }
+    if (firstError != null) {
+      Error.throwWithStackTrace(firstError, firstStack!);
+    }
+  }
+
+  Future<void> _cancelItem(DownloadingItem item) async {
     final wasFirst = identical(downloading.firstOrNull, item);
     final wasDownloading = isDownloading;
 
