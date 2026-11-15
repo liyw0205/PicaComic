@@ -162,6 +162,19 @@ class _SharedSyncTransport implements SyncTransport {
   }
 }
 
+Future<T> _withHttpServer<T>(FutureOr<void> Function(HttpRequest) handler,
+    Future<T> Function(String baseUrl) action) async {
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final requests = server.listen(handler);
+  final baseUrl = 'http://${server.address.address}:${server.port}';
+  try {
+    return await action(baseUrl);
+  } finally {
+    await requests.cancel();
+    await server.close(force: true);
+  }
+}
+
 void main() {
   late Directory root;
 
@@ -491,29 +504,47 @@ void main() {
 
   test('unsupported pointer methods fall back to graph-based detection',
       () async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final requests = server.listen((request) async {
+    await _withHttpServer((request) async {
       request.response.statusCode = request.method == 'GET'
           ? HttpStatus.methodNotAllowed
           : HttpStatus.notImplemented;
       await request.response.close();
+    }, (baseUrl) async {
+      final transport = WebdavSyncTransport([baseUrl, '', '', '/pica']);
+      try {
+        final pointer = await transport.pointer();
+        expect(pointer.known, isTrue);
+        expect(pointer.etag, isNull);
+        expect(await transport.compareAndSetPointer(pointer, '{}'), isTrue);
+      } finally {
+        transport.close();
+      }
     });
-    final transport = WebdavSyncTransport([
-      'http://${server.address.address}:${server.port}',
-      '',
-      '',
-      '/pica',
-    ]);
-    try {
-      final pointer = await transport.pointer();
-      expect(pointer.known, isTrue);
-      expect(pointer.etag, isNull);
-      expect(await transport.compareAndSetPointer(pointer, '{}'), isTrue);
-    } finally {
-      transport.close();
-      await requests.cancel();
-      await server.close(force: true);
-    }
+  });
+
+  test('pointer CAS distinguishes conditional 409 from path conflict',
+      () async {
+    await _withHttpServer((request) async {
+      expect(request.method, 'PUT');
+      final ifMatch = request.headers.value('if-match');
+      if (ifMatch != null) expect(ifMatch, '"stale"');
+      request.response.statusCode = HttpStatus.conflict;
+      await request.response.close();
+    }, (baseUrl) async {
+      final transport = WebdavSyncTransport([baseUrl, '', '', '/pica']);
+      try {
+        expect(
+            await transport.compareAndSetPointer(
+                const SyncPointer('"stale"'), '{}'),
+            isFalse);
+        await expectLater(
+          transport.compareAndSetPointer(const SyncPointer(null), '{}'),
+          throwsA(isA<StateError>()),
+        );
+      } finally {
+        transport.close();
+      }
+    });
   });
 
   test('revision graph rejects an orphan parent', () {

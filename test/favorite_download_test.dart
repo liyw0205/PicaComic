@@ -157,16 +157,18 @@ void main() {
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 
+  FavoriteItem createFavoriteItem() => FavoriteItem(
+        target: 'fixture',
+        name: 'fixture',
+        coverPath: '',
+        author: '',
+        type: FavoriteType.picacg,
+        tags: const [],
+      );
+
   FavoriteDownloading createFavorite(Future<DownloadingItem> Function() load,
       {String? directory = 'fixture', Future<void> Function()? updateInfo}) {
-    final favorite = FavoriteItem(
-      target: 'fixture',
-      name: 'fixture',
-      coverPath: '',
-      author: '',
-      type: FavoriteType.picacg,
-      tags: const [],
-    );
+    final favorite = createFavoriteItem();
     final item = FavoriteDownloading(
       favorite,
       () {},
@@ -205,14 +207,7 @@ void main() {
   test('repeated favorite enqueue is deduplicated by durable task id',
       () async {
     manager.isDownloading = true;
-    final favorite = FavoriteItem(
-      target: 'fixture',
-      name: 'fixture',
-      coverPath: '',
-      author: '',
-      type: FavoriteType.picacg,
-      tags: const [],
-    );
+    final favorite = createFavoriteItem();
 
     manager.addFavoriteDownload(favorite);
     manager.addFavoriteDownload(favorite);
@@ -584,14 +579,7 @@ void main() {
     await manager.init();
 
     final persisted = Completer<void>();
-    final first = FavoriteItem(
-      target: 'fixture',
-      name: 'fixture',
-      coverPath: '',
-      author: '',
-      type: FavoriteType.picacg,
-      tags: const [],
-    );
+    final first = createFavoriteItem();
     manager.isDownloading = true;
     manager.addFavoriteDownload(first);
     final logic = _TestDownloadingItem('fixture')

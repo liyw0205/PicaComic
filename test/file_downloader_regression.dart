@@ -26,8 +26,11 @@ void _check(bool condition, String message) {
 }
 
 Future<void> verifyFileDownload(String scenario) async {
+  // The downloader uses 16 MiB blocks. One byte over that boundary creates
+  // two blocks, which is enough to prove parallel scheduling without moving
+  // 32 MiB of fixture data for every CI run.
   final bytes =
-      Uint8List(scenario == 'parallel ranges' ? 32 * 1024 * 1024 + 1 : 8);
+      Uint8List(scenario == 'parallel ranges' ? 16 * 1024 * 1024 + 1 : 8);
   for (int i = 0; i < bytes.length; i++) {
     bytes[i] = (i % 251) + 1;
   }

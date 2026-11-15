@@ -142,6 +142,7 @@ void main() {
         requestOptions:
             RequestOptions(path: 'https://example.org/image?token=private'),
         statusCode: 403,
+        data: 'private response body',
       ),
     );
 

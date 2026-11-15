@@ -46,6 +46,25 @@ void main() {
     expect(await old.exists(), isFalse);
   });
 
+  test('cache cleanup rejects a symbolic-link root', () async {
+    final root = await Directory.systemTemp.createTemp('pica-cache-link-');
+    addTearDown(() => root.delete(recursive: true));
+    final external = Directory('${root.path}/external');
+    final link = Directory('${root.path}/cache');
+    await external.create(recursive: true);
+    final old = File('${external.path}/old.bin');
+    await old.writeAsBytes(List<int>.filled(9, 1));
+    final now = DateTime.now();
+    await old.setLastModified(now.subtract(const Duration(days: 10)));
+    await Link(link.path).create(external.path);
+
+    await expectLater(
+      cleanupDirectory(link, olderThan: now),
+      throwsA(isA<StateError>()),
+    );
+    expect(await old.exists(), isTrue);
+  });
+
   test('legacy cache cleanup is gated by its one-time index marker', () async {
     final root = await Directory.systemTemp.createTemp('pica-cache-legacy-');
     addTearDown(() => root.delete(recursive: true));

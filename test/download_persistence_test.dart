@@ -63,6 +63,28 @@ void main() {
         },
       };
 
+  void createDownloadDatabase(Directory root, Iterable<List<Object?>> rows) {
+    final db = sqlite3.open('${root.path}/download.db');
+    db.execute('''
+      create table download (
+        id text primary key,
+        title text,
+        subtitle text,
+        time int,
+        directory text,
+        size int,
+        json text
+      )
+    ''');
+    for (final row in rows) {
+      db.execute(
+        'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+        row,
+      );
+    }
+    db.dispose();
+  }
+
   test('legacy queue snapshots are upgraded with a committed marker', () async {
     await getQueueFile().writeAsString(jsonEncode({'downloading': []}));
 
@@ -111,27 +133,8 @@ void main() {
     await getQueueFile().writeAsString('{"version":1');
     await getQueueFile('.bak')
         .writeAsString(jsonEncode(committedQueue(<Object?>[])));
-    await getQueueFile('.tmp').writeAsString(jsonEncode(committedQueue([
-      {
-        'type': 7,
-        'id': 'fixture',
-        '_downloadedNum': 0,
-        '_downloadingEp': 0,
-        'index': 0,
-        'links': null,
-        'directory': 'fixture',
-        'finishedTasks': <String>[],
-        'comic': {
-          'name': 'fixture',
-          'author': '',
-          'type': 0,
-          'tags': <String>[],
-          'target': 'fixture',
-          'coverPath': '',
-          'time': '2026-01-01 00:00:00',
-        },
-      }
-    ])));
+    await getQueueFile('.tmp')
+        .writeAsString(jsonEncode(committedQueue([fixtureTask('fixture')])));
 
     await manager.init();
 
@@ -314,6 +317,37 @@ void main() {
     expect(snapshot['downloading'], isEmpty);
   });
 
+  test('failing listeners cannot prevent a queue snapshot commit', () async {
+    manager.downloading.add(
+      downloadingItemFromMap(
+          fixtureTask('listener-safe'), () {}, () {}, () async {}),
+    );
+
+    var healthyListenerCalled = false;
+    void failingListener() {
+      manager.removeListener(failingListener);
+      throw StateError('stale download page listener');
+    }
+
+    void healthyListener() => healthyListenerCalled = true;
+
+    manager
+      ..addListener(failingListener)
+      ..addListener(healthyListener);
+
+    try {
+      await manager.persistQueueForTesting();
+    } finally {
+      manager.removeListener(healthyListener);
+    }
+
+    expect(healthyListenerCalled, isTrue);
+    final snapshot =
+        jsonDecode(await getQueueFile().readAsString()) as Map<String, dynamic>;
+    expect(snapshot['state'], 'committed');
+    expect((snapshot['downloading'] as List).single['id'], 'listener-safe');
+  });
+
   test('disposing the manager persists the cleared queue snapshot', () async {
     await getQueueFile().writeAsString(
       jsonEncode(committedQueue([fixtureTask('disposed')], 4)),
@@ -334,23 +368,9 @@ void main() {
   });
 
   test('deleting an already deleted comic is idempotent', () async {
-    final db = sqlite3.open('${directory.path}/download.db');
-    db.execute('''
-      create table download (
-        id text primary key,
-        title text,
-        subtitle text,
-        time int,
-        directory text,
-        size int,
-        json text
-      )
-    ''');
-    db.execute(
-      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+    createDownloadDatabase(directory, [
       ['repeat-delete', 'title', '', 1, 'repeat-delete', 0, '{}'],
-    );
-    db.dispose();
+    ]);
     await Directory('${directory.path}/repeat-delete').create();
 
     await manager.init();
@@ -365,23 +385,9 @@ void main() {
 
   test('deleting a record without a directory removes the orphaned row',
       () async {
-    final db = sqlite3.open('${directory.path}/download.db');
-    db.execute('''
-      create table download (
-        id text primary key,
-        title text,
-        subtitle text,
-        time int,
-        directory text,
-        size int,
-        json text
-      )
-    ''');
-    db.execute(
-      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+    createDownloadDatabase(directory, [
       ['orphaned-directory', 'title', '', 1, null, 0, '{}'],
-    );
-    db.dispose();
+    ]);
 
     await manager.init();
     expect(manager.total, 1);
@@ -398,34 +404,18 @@ void main() {
     final secondDirectory =
         await Directory.systemTemp.createTemp('pica-download-persistence-');
 
-    void createDatabase(Directory root, String storedDirectory) {
-      final db = sqlite3.open('${root.path}/download.db');
-      db.execute('''
-        create table download (
-          id text primary key,
-          title text,
-          subtitle text,
-          time int,
-          directory text,
-          size int,
-          json text
-        )
-      ''');
-      db.execute(
-        'insert into download values (?, ?, ?, ?, ?, ?, ?)',
-        [id, 'title', '', 1, storedDirectory, 0, '{}'],
-      );
-      db.dispose();
-    }
-
     try {
-      createDatabase(directory, 'first-root');
+      createDownloadDatabase(directory, [
+        [id, 'title', '', 1, 'first-root', 0, '{}'],
+      ]);
       await manager.init();
       expect(manager.getDirectory(id), 'first-root');
 
       await manager.dispose();
       appdata.settings[22] = secondDirectory.path;
-      createDatabase(secondDirectory, 'second-root');
+      createDownloadDatabase(secondDirectory, [
+        [id, 'title', '', 1, 'second-root', 0, '{}'],
+      ]);
       await manager.init();
 
       expect(manager.getDirectory(id), 'second-root');
@@ -438,23 +428,9 @@ void main() {
   });
 
   test('unsafe database directories are rejected before deletion', () async {
-    final db = sqlite3.open('${directory.path}/download.db');
-    db.execute('''
-      create table download (
-        id text primary key,
-        title text,
-        subtitle text,
-        time int,
-        directory text,
-        size int,
-        json text
-      )
-    ''');
-    db.execute(
-      'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+    createDownloadDatabase(directory, [
       ['unsafe-directory', 'title', '', 1, 'owned/path', 0, '{}'],
-    );
-    db.dispose();
+    ]);
 
     // Sanitizing `owned/path` would resolve to `owned path` and could delete
     // an unrelated directory. The malformed row must remain retryable.
@@ -474,49 +450,33 @@ void main() {
   });
 
   test('download sorting accepts only mapped columns and directions', () async {
-    final db = sqlite3.open('${directory.path}/download.db');
-    db.execute('''
-      create table download (
-        id text primary key,
-        title text,
-        subtitle text,
-        time int,
-        directory text,
-        size int,
-        json text
-      )
-    ''');
-    for (final row in <(String, String, int)>[
-      ('source-b', 'Beta', 20),
-      ('source-a', 'Alpha', 10),
-    ]) {
-      final id = row.$1;
-      db.execute(
-        'insert into download values (?, ?, ?, ?, ?, ?, ?)',
+    createDownloadDatabase(directory, [
+      for (final row in <(String, String, int)>[
+        ('source-b', 'Beta', 20),
+        ('source-a', 'Alpha', 10),
+      ])
         [
-          id,
+          row.$1,
           row.$2,
           'author',
           row.$3,
-          id,
+          row.$1,
           row.$3,
           jsonEncode({
             'comicSize': row.$3.toDouble(),
             'downloadedEps': <int>[],
             'chapters': <String, String>{},
-            'id': id,
+            'id': row.$1,
             'name': row.$2,
             'subTitle': 'author',
             'tags': <String>[],
             'sourceKey': 'fixture',
             'sourceName': 'Fixture',
             'cover': '',
-            'comicId': id,
+            'comicId': row.$1,
           }),
         ],
-      );
-    }
-    db.dispose();
+    ]);
 
     await manager.init();
 

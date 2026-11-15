@@ -117,7 +117,13 @@ class WebdavSyncTransport implements SyncTransport {
       };
     });
     final statusCode = response.statusCode;
-    if (statusCode == 412) return false;
+    // Although RFC 4918 uses 412 for a failed precondition, a number of
+    // WebDAV servers report a conditional PUT conflict as 409.  Only treat
+    // 409 as a CAS rejection when this request actually carried a condition;
+    // without an ETag it can be an unrelated path/collection conflict.
+    if (statusCode == 412 || (statusCode == 409 && previous.etag != null)) {
+      return false;
+    }
     if (statusCode == 405 || statusCode == 501) return true;
     if (statusCode == null || statusCode < 200 || statusCode >= 300) {
       throw StateError('Sync pointer HTTP ${statusCode ?? "unknown"}');

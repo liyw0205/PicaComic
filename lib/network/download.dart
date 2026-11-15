@@ -110,8 +110,19 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   void notifyListeners() {
-    for (var listener in _listeners) {
-      listener();
+    // A stale page listener must not abort the queue snapshot that triggered
+    // this notification. Iterate over a copy so a listener may unregister
+    // itself while handling the update without corrupting the traversal.
+    for (final listener in List<VoidCallback>.of(_listeners)) {
+      try {
+        listener();
+      } catch (e, s) {
+        LogManager.addLog(
+          LogLevel.warning,
+          'Download',
+          'Download listener failed: ${safeNetworkError(e)}\n$s',
+        );
+      }
     }
   }
 

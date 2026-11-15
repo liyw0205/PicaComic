@@ -35,6 +35,7 @@ Future<DirectoryStats> inspectDirectory(
   int batchSize = 64,
 }) async {
   _checkBatchSize(batchSize);
+  await _ensureDirectoryRoot(root);
   if (!await root.exists()) {
     return const DirectoryStats(fileCount: 0, directoryCount: 0, totalBytes: 0);
   }
@@ -117,6 +118,7 @@ Future<CacheCleanupReport> cleanupDirectory(
   if (maxBytes != null && maxBytes < 0) {
     throw ArgumentError.value(maxBytes, 'maxBytes');
   }
+  await _ensureDirectoryRoot(root);
   if (!await root.exists()) {
     return const CacheCleanupReport(
       scannedFiles: 0,
@@ -316,6 +318,8 @@ Future<DirectoryMigrationReport> migrateDirectory(
   if (sourcePath == destinationPath || _isWithin(destinationPath, sourcePath)) {
     throw ArgumentError('Destination must not be inside the source directory');
   }
+  await _ensureDirectoryRoot(source);
+  await _ensureDirectoryRoot(destination);
   final journal = journalFile ?? File('$destinationPath.migration.json');
   final timer = RuntimeMetrics.start('directory.migration');
   try {
@@ -717,6 +721,8 @@ Future<DirectoryMigrationPlan> planDirectoryMigration(
   if (!await source.exists()) {
     throw FileSystemException('Source directory does not exist', source.path);
   }
+  await _ensureDirectoryRoot(source);
+  await _ensureDirectoryRoot(destination);
   final sourcePath = _absolutePath(source.path);
   final destinationPath = _absolutePath(destination.path);
   if (sourcePath == destinationPath || _isWithin(destinationPath, sourcePath)) {
@@ -753,6 +759,15 @@ bool _isSafeStagingPath(String staging, String destination) {
 Future<bool> _isSymbolicLink(String path) async =>
     await FileSystemEntity.type(path, followLinks: false) ==
     FileSystemEntityType.link;
+
+Future<void> _ensureDirectoryRoot(Directory directory) async {
+  // A root symlink could redirect maintenance to an unrelated tree. Parent
+  // aliases are allowed because system paths such as macOS /var may be
+  // symlinks; recursive traversal validates entries below this boundary.
+  if (await _isSymbolicLink(_absolutePath(directory.path))) {
+    throw StateError('Directory root must not be a symbolic link');
+  }
+}
 
 bool _isSafeRelativePath(String path) {
   if (path.isEmpty ||

@@ -236,6 +236,15 @@ P1 为下一轮优先完成，P2 为数据流程稳定后推进，P3 为随业�
 
 ## 4. 实施顺序与交付拆分
 
+### 本轮测试流程优化（2026-11-16）
+
+- 将未被 `flutter test` 自动发现、且与 `network_logging_test.dart` 重复的旧回归入口合并后删除；主测试补齐 Dio 响应体脱敏断言，行为覆盖不减少。
+- 下载并发回归仍跨越 16 MiB 分块阈值，但 fixture 从 32 MiB+1 降为 16 MiB+1，保留两块并发调度验证，减少 CI 内存和写盘成本。
+- 新增 `tool/run_flutter_tests.sh` 作为唯一 Flutter 测试入口，默认使用 2 个并发测试进程并启用 `--fail-fast`；可通过 `FLUTTER_TEST_CONCURRENCY` 调整。Android tag workflow 仍执行全量 `flutter test` 集合，普通 `master` push 不触发该 workflow。
+- 同领域 fixture 已合并到测试文件内部的 helper（下载 SQLite schema、队列任务、收藏项、WebDAV HTTP server 生命周期），不合并具有不同全局状态或持久化隔离语义的 `setUp`。
+
+优化后的验证边界：并发只改变测试调度，不改变断言集合；若出现全局状态串扰，先将 `FLUTTER_TEST_CONCURRENCY=1` 作为回退基线，再定位具体 suite。
+
 | 批次 | 顺序与范围 | 交付条件 |
 | --- | --- | --- |
 | 0. 验证闸门 | 已确认 `sync_transport.dart` nullable `statusCode` 兼容性；迁移、启动、阅读器、缩略图、数据库和 analyzer baseline 专项回归已有上一轮记录 | 上一轮 48 项专项 Flutter 测试通过，native curl 6 项通过；本轮新增测试需在标准 runner 重跑，全量 runner 另有 147 项历史记录，平台产物仍单独验收 |
