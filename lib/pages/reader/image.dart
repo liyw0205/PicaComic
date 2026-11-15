@@ -3,31 +3,30 @@ part of pica_reader;
 class ComicImage extends StatefulWidget {
   /// Modified from flutter Image
   ComicImage({
-        required ImageProvider image,
-        super.key,
-        double scale = 1.0,
-        this.semanticLabel,
-        this.excludeFromSemantics = false,
-        this.width,
-        this.height,
-        this.color,
-        this.opacity,
-        this.colorBlendMode,
-        this.fit,
-        this.alignment = Alignment.center,
-        this.repeat = ImageRepeat.noRepeat,
-        this.centerSlice,
-        this.matchTextDirection = false,
-        this.gaplessPlayback = false,
-        this.filterQuality = FilterQuality.medium,
-        this.isAntiAlias = false,
-        Map<String, String>? headers,
-        int? cacheWidth,
-        int? cacheHeight,
-      }
-  ): image = ResizeImage.resizeIfNeeded(cacheWidth, cacheHeight, image),
-  assert(cacheWidth == null || cacheWidth > 0),
-  assert(cacheHeight == null || cacheHeight > 0);
+    required ImageProvider image,
+    super.key,
+    double scale = 1.0,
+    this.semanticLabel,
+    this.excludeFromSemantics = false,
+    this.width,
+    this.height,
+    this.color,
+    this.opacity,
+    this.colorBlendMode,
+    this.fit,
+    this.alignment = Alignment.center,
+    this.repeat = ImageRepeat.noRepeat,
+    this.centerSlice,
+    this.matchTextDirection = false,
+    this.gaplessPlayback = false,
+    this.filterQuality = FilterQuality.medium,
+    this.isAntiAlias = false,
+    Map<String, String>? headers,
+    int? cacheWidth,
+    int? cacheHeight,
+  })  : image = ResizeImage.resizeIfNeeded(cacheWidth, cacheHeight, image),
+        assert(cacheWidth == null || cacheWidth > 0),
+        assert(cacheHeight == null || cacheHeight > 0);
 
   final ImageProvider image;
 
@@ -138,8 +137,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   }
 
   void _updateInvertColors() {
-    _invertColors = MediaQuery.maybeInvertColorsOf(context)
-        ?? SemanticsBinding.instance.accessibilityFeatures.invertColors;
+    _invertColors = MediaQuery.maybeInvertColorsOf(context) ??
+        SemanticsBinding.instance.accessibilityFeatures.invertColors;
   }
 
   void _resolveImage() {
@@ -148,21 +147,24 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       imageProvider: widget.image,
     );
     final ImageStream newStream =
-    provider.resolve(createLocalImageConfiguration(
+        provider.resolve(createLocalImageConfiguration(
       context,
-      size: widget.width != null && widget.height != null ? Size(widget.width!, widget.height!) : null,
+      size: widget.width != null && widget.height != null
+          ? Size(widget.width!, widget.height!)
+          : null,
     ));
     _updateSourceStream(newStream);
   }
 
   ImageStreamListener? _imageStreamListener;
   ImageStreamListener _getListener({bool recreateListener = false}) {
-    if(_imageStreamListener == null || recreateListener) {
+    if (_imageStreamListener == null || recreateListener) {
       _lastException = null;
       _imageStreamListener = ImageStreamListener(
         _handleImageFrame,
         onChunk: _handleImageChunk,
         onError: (Object error, StackTrace? stackTrace) {
+          if (!mounted) return;
           setState(() {
             _lastException = error;
           });
@@ -173,6 +175,10 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   }
 
   void _handleImageFrame(ImageInfo imageInfo, bool synchronousCall) {
+    if (!mounted) {
+      imageInfo.dispose();
+      return;
+    }
     setState(() {
       _replaceImage(info: imageInfo);
       _loadingProgress = null;
@@ -183,6 +189,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   }
 
   void _handleImageChunk(ImageChunkEvent event) {
+    if (!mounted) return;
     setState(() {
       _loadingProgress = event;
       _lastException = null;
@@ -191,7 +198,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
   void _replaceImage({required ImageInfo? info}) {
     final ImageInfo? oldImageInfo = _imageInfo;
-    SchedulerBinding.instance.addPostFrameCallback((_) => oldImageInfo?.dispose());
+    SchedulerBinding.instance
+        .addPostFrameCallback((_) => oldImageInfo?.dispose());
     _imageInfo = info;
   }
 
@@ -208,7 +216,9 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     }
 
     if (!widget.gaplessPlayback) {
-      setState(() { _replaceImage(info: null); });
+      setState(() {
+        _replaceImage(info: null);
+      });
     }
 
     setState(() {
@@ -247,7 +257,9 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       return;
     }
 
-    if (keepStreamAlive && _completerHandle == null && _imageStream?.completer != null) {
+    if (keepStreamAlive &&
+        _completerHandle == null &&
+        _imageStream?.completer != null) {
       _completerHandle = _imageStream!.completer!.keepAlive();
     }
 
@@ -268,14 +280,19 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
               children: [
                 Expanded(
                   child: Center(
-                    child: Text(_lastException.toString(), maxLines: 3,),
+                    child: Text(
+                      _lastException.toString(),
+                      maxLines: 3,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4,),
+                const SizedBox(
+                  height: 4,
+                ),
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: Listener(
-                    onPointerDown: (details){
+                    onPointerDown: (details) {
                       TapController.ignoreNextTap = true;
                       _resolveImage();
                     },
@@ -283,12 +300,17 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
                       width: 84,
                       height: 36,
                       child: Center(
-                        child: Text("Retry", style: TextStyle(color: Colors.blue),),
+                        child: Text(
+                          "Retry",
+                          style: TextStyle(color: Colors.blue),
+                        ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 16,),
+                const SizedBox(
+                  height: 16,
+                ),
               ],
             ),
           ),
@@ -296,26 +318,24 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       );
     }
 
-    var width = widget.width??MediaQuery.of(context).size.width;
+    var width = widget.width ?? MediaQuery.of(context).size.width;
     double? height;
 
     Size? cacheSize = _cache[widget.image.hashCode];
-    if(cacheSize != null){
+    if (cacheSize != null) {
       height = cacheSize.height * (width / cacheSize.width);
       height = height.ceilToDouble();
     }
 
     var brightness = Theme.of(context).brightness;
-    if(appdata.appSettings.useDarkBackground) {
+    if (appdata.appSettings.useDarkBackground) {
       brightness = Brightness.dark;
     }
 
-    if(_imageInfo != null){
+    if (_imageInfo != null) {
       // Record the height and the width of the image
-      _cache[widget.image.hashCode] = Size(
-          _imageInfo!.image.width.toDouble(),
-          _imageInfo!.image.height.toDouble()
-      );
+      _cache[widget.image.hashCode] = Size(_imageInfo!.image.width.toDouble(),
+          _imageInfo!.image.height.toDouble());
       // build image
       Widget result = RawImage(
         // Do not clone the image, because RawImage is a stateless wrapper.
@@ -360,7 +380,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       // build progress
       return SizedBox(
         width: width,
-        height: height??300,
+        height: height ?? 300,
         child: Center(
           child: SizedBox(
             width: 24,
@@ -371,10 +391,11 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
                   : Colors.black12,
               strokeWidth: 3,
               value: (_loadingProgress != null &&
-                  _loadingProgress!.expectedTotalBytes!=null &&
-                  _loadingProgress!.expectedTotalBytes! != 0)
-                  ?_loadingProgress!.cumulativeBytesLoaded / _loadingProgress!.expectedTotalBytes!
-                  :0,
+                      _loadingProgress!.expectedTotalBytes != null &&
+                      _loadingProgress!.expectedTotalBytes! != 0)
+                  ? _loadingProgress!.cumulativeBytesLoaded /
+                      _loadingProgress!.expectedTotalBytes!
+                  : 0,
             ),
           ),
         ),
@@ -387,8 +408,10 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     super.debugFillProperties(description);
     description.add(DiagnosticsProperty<ImageStream>('stream', _imageStream));
     description.add(DiagnosticsProperty<ImageInfo>('pixels', _imageInfo));
-    description.add(DiagnosticsProperty<ImageChunkEvent>('loadingProgress', _loadingProgress));
+    description.add(DiagnosticsProperty<ImageChunkEvent>(
+        'loadingProgress', _loadingProgress));
     description.add(DiagnosticsProperty<int>('frameNumber', _frameNumber));
-    description.add(DiagnosticsProperty<bool>('wasSynchronouslyLoaded', _wasSynchronouslyLoaded));
+    description.add(DiagnosticsProperty<bool>(
+        'wasSynchronouslyLoaded', _wasSynchronouslyLoaded));
   }
 }

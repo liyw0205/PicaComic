@@ -6,6 +6,7 @@ import 'package:image/image.dart' as image;
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
+import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 import 'package:pica_comic/pages/reader/reader_image_controller.dart';
 
 class _ImmediateImageProvider
@@ -25,6 +26,37 @@ class _ImmediateImageProvider
   @override
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents) async =>
       bytes;
+}
+
+class _LateErrorCompleter extends ImageStreamCompleter {
+  ImageStreamListener? listener;
+
+  @override
+  void addListener(ImageStreamListener value) {
+    listener = value;
+  }
+
+  @override
+  void removeListener(ImageStreamListener value) {}
+
+  void emitError() {
+    listener?.onError
+        ?.call(StateError('late image failure'), StackTrace.current);
+  }
+}
+
+class _LateErrorImageProvider extends ImageProvider<_LateErrorImageProvider> {
+  final completer = _LateErrorCompleter();
+
+  @override
+  Future<_LateErrorImageProvider> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+      _LateErrorImageProvider key, ImageDecoderCallback decode) {
+    return completer;
+  }
 }
 
 void main() {
@@ -77,6 +109,19 @@ void main() {
     await secondSubscription.cancel();
     await first.close();
     await second.close();
+  });
+
+  testWidgets('late image error after widget disposal is ignored',
+      (tester) async {
+    final provider = _LateErrorImageProvider();
+    await tester.pumpWidget(MaterialApp(home: ComicImage(image: provider)));
+    expect(provider.completer.listener, isNotNull);
+
+    await tester.pumpWidget(const SizedBox());
+    provider.completer.emitError();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('jump and exit release obsolete preloads without automatic retry',
