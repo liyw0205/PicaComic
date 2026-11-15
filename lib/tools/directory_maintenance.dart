@@ -355,6 +355,10 @@ Future<DirectoryMigrationReport> migrateDirectory(
       if (!_isSafeStagingPath(staging.path, destinationPath)) {
         throw const FormatException('Invalid directory migration staging path');
       }
+      if (await _isSymbolicLink(staging.path)) {
+        throw const FormatException(
+            'Directory migration staging must not be a symbolic link');
+      }
       if (state['phase'] == 'committed' && await destination.exists()) {
         if (!await _destinationMatches(destination, entries)) {
           throw StateError(
@@ -433,6 +437,9 @@ Future<DirectoryMigrationReport> migrateDirectory(
     }
 
     await staging.create(recursive: true);
+    if (await _isSymbolicLink(staging.path)) {
+      throw StateError('Directory migration staging became a symbolic link');
+    }
     var copiedFiles = entries.where((entry) => entry.done).length;
     var copiedBytes = entries
         .where((entry) => entry.done)
@@ -480,6 +487,9 @@ Future<DirectoryMigrationReport> migrateDirectory(
       await destination.delete(recursive: true);
     }
     await staging.rename(destination.path);
+    if (!await _destinationMatches(destination, entries)) {
+      throw StateError('Migrated destination failed verification');
+    }
     state['phase'] = 'committed';
     state['files'] = entries.map((item) => item.toJson()).toList();
     await _writeMigrationJournal(journal, state);
@@ -559,6 +569,7 @@ Future<bool> _directoryMatches(
   List<_MigrationEntry> entries, {
   required bool requireDigest,
 }) async {
+  if (await _isSymbolicLink(directory.path)) return false;
   final expectedPaths = <String>{};
   for (final entry in entries) {
     if (!expectedPaths.add(entry.relativePath)) return false;
@@ -731,6 +742,10 @@ bool _isSafeStagingPath(String staging, String destination) {
   return stagingFile.parent.path == destinationFile.parent.path &&
       stagingFile.path.startsWith('${destinationFile.path}.migration-');
 }
+
+Future<bool> _isSymbolicLink(String path) async =>
+    await FileSystemEntity.type(path, followLinks: false) ==
+    FileSystemEntityType.link;
 
 bool _isSafeRelativePath(String path) {
   if (path.isEmpty ||

@@ -264,4 +264,45 @@ void main() {
     expect(await File('${source.path}/comic.bin').readAsString(), contents);
     expect(await journal.exists(), isTrue);
   });
+
+  test('journal staging symlink is rejected before copying', () async {
+    final root = await Directory.systemTemp.createTemp('pica-dir-link-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    final external = Directory('${root.path}/external');
+    await source.create(recursive: true);
+    await external.create(recursive: true);
+    const contents = 'payload';
+    await File('${source.path}/comic.bin').writeAsString(contents);
+    final stagingPath = '${destination.path}.migration-attacker.tmp';
+    await Link(stagingPath).create(external.path);
+    final journal = File('${destination.path}.migration.json');
+    await journal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'copying',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': stagingPath,
+      'deleteSource': true,
+      'totalBytes': contents.length,
+      'files': [
+        {
+          'path': 'comic.bin',
+          'size': contents.length,
+          'sha256': null,
+          'done': false,
+        },
+      ],
+    }));
+
+    await expectLater(
+      migrateDirectory(source, destination),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await source.exists(), isTrue);
+    expect(await File('${external.path}/comic.bin').exists(), isFalse);
+    expect(await Link(stagingPath).exists(), isTrue);
+    expect(await journal.exists(), isTrue);
+  });
 }
