@@ -316,10 +316,6 @@ Future<DirectoryMigrationReport> migrateDirectory(
   if (sourcePath == destinationPath || _isWithin(destinationPath, sourcePath)) {
     throw ArgumentError('Destination must not be inside the source directory');
   }
-  if (!await source.exists()) {
-    throw FileSystemException('Source directory does not exist', source.path);
-  }
-
   final journal = journalFile ?? File('$destinationPath.migration.json');
   final timer = RuntimeMetrics.start('directory.migration');
   try {
@@ -378,6 +374,10 @@ Future<DirectoryMigrationReport> migrateDirectory(
         );
       }
     } else {
+      if (!await source.exists()) {
+        throw FileSystemException(
+            'Source directory does not exist', source.path);
+      }
       final plan = await _planMigration(source, destination);
       entries = plan.entries;
       staging = Directory(
@@ -417,6 +417,13 @@ Future<DirectoryMigrationReport> migrateDirectory(
         copiedBytes: totalBytes,
         resumed: true,
       );
+    }
+
+    // A committed journal may be the only artifact left after the source was
+    // deleted and the process stopped before journal cleanup. In every other
+    // phase the source is still required to validate or resume the copy.
+    if (!await source.exists()) {
+      throw FileSystemException('Source directory does not exist', source.path);
     }
 
     if (await destination.exists()) {

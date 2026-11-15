@@ -182,6 +182,44 @@ void main() {
     expect(await extra.exists(), isTrue);
   });
 
+  test('committed journal is cleaned after source deletion before replay',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('pica-dir-source-deleted-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    await destination.create(recursive: true);
+    const contents = 'payload';
+    await File('${destination.path}/comic.bin').writeAsString(contents);
+    final digest = sha256.convert(utf8.encode(contents)).toString();
+    final journal = File('${destination.path}.migration.json');
+    await journal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'committed',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': '${destination.path}.migration-recovery.tmp',
+      'deleteSource': true,
+      'totalBytes': contents.length,
+      'files': [
+        {
+          'path': 'comic.bin',
+          'size': contents.length,
+          'sha256': digest,
+          'done': true,
+        },
+      ],
+    }));
+
+    await migrateDirectory(source, destination);
+
+    expect(await source.exists(), isFalse);
+    expect(await journal.exists(), isFalse);
+    expect(
+        await File('${destination.path}/comic.bin').readAsString(), contents);
+  });
+
   test('committed recovery retains source when source has extra files',
       () async {
     final root =
