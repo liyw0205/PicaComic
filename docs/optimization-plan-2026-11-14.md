@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-15。历史发布基线：`bc485265`，当前正式发布版本：`4.2.46+4246`（tag `v4.2.46`）；master 已推进到 `7ed8a7d7`，版本字段为 `4.2.47+4247`。annotated tag `v4.2.47` 已固定指向 `82793767`，但该 tag 尚未获得 GitHub Actions/Release 门禁，不视为正式发布；tag 不移动、不重写，后续修复随下一版本收纳。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291` 和 `v4.2.46` workflow `43652289981` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
+日期：2026-11-15。历史发布基线：`bc485265`，当前正式发布版本：`4.2.46+4246`（tag `v4.2.46`）；master 已推进到 `ac303b12`，版本字段为 `4.2.47+4247`。annotated tag `v4.2.47` 已固定指向 `82793767`，但该 tag 尚未获得 GitHub Actions/Release 门禁，不视为正式发布；tag 不移动、不重写，后续修复随下一版本收纳。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291` 和 `v4.2.46` workflow `43652289981` 均已通过并发布 APK；Flutter/Android 行为回归仍以标准 CI 为最终门禁。
 
 ## 1. 结论与评估边界
 
@@ -515,3 +515,17 @@ A2 本轮覆盖 `importDataResult`、`Appdata.readDataFromJson/writeData/updateS
 2. master push 只用于验证和 debug artifact；正式发布必须由版本字段、annotated tag 和 tag commit 三者一致触发 Android workflow。tag 创建前先确认 master CI、Flutter regression、各 ABI、metadata、签名和 native curl 全部通过。
 3. `v4.2.47` 已固定到 `82793767`，且当前 Actions 返回 `Actions has been disabled for this repository`，不得移动、重写或宣称已发布。恢复后先验证当前 master，再以 `4.2.48+4248`（包含 tag 之后修复）创建新 tag。
 4. tag workflow 失败时保留失败历史和对应提交，修复用新提交/新版本递增；禁止通过强推 tag 或覆盖 Release 规避门禁。每次发布结束记录 workflow ID、APK SHA-256、证书摘要和 Release 状态。
+
+## 13. 2026-11-15 A1/A17/A19 收口
+
+### A1 恢复根边界审计
+
+A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canonicalize journal 中的外部根，并要求它们与启动时从严格校验的 settings、备份 settings、SharedPreferences 和默认下载目录得到的 `trustedAllowedRoots` 完全匹配；事务实例还保存不可变信任根，运行中修改 journal 不能扩大授权。现有 `test/data_restore_transaction_test.dart` 已覆盖篡改外部根、当前配置不匹配和符号链接替换。剩余是标准 Flutter runner、独立进程重启和真实设备验收，不把静态审计当作完成证明。
+
+### A17 PDF 图片资源上界
+
+提交 `1d397987` 将 PDF 页面图片改为延迟文件 provider：页面树只保留路径和尺寸，`Document.save()` 逐页读取并交给 `PdfImage`，避免长篇/大图把每页原始 bytes 同时保留到导出结束。提交 `045f81c7` 修正 EXIF 旋转图片的编码尺寸与显示尺寸边界，并在 `test/pdf_export_test.dart` 增加 orientation=6 JPEG 回归。取消、失败和原子替换语义保持不变；标准 runner 仍需执行 PDF 用例以及 500/2,000 页、超大图的 RSS/PSS 和取消延迟测量。
+
+### A19 预租约取消诊断
+
+提交 `38f10056` 修复来源限流队列和最小间隔等待在拿到 lease 前取消时的资源/指标边界：不再对不存在的 lease 解引用，取消请求会计入 `failures/cancelled`，但不会增加连续瞬态失败或打开熔断。新增队列取消和 pacing 取消 fixture；目标 `dart analyze`、`dart format`、analyzer baseline 和 `git diff --check` 通过，Flutter 定向测试仍受本机 Kernel SDK mismatch 阻塞。
