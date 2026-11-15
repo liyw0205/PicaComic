@@ -64,7 +64,7 @@ class Webdav {
 
   /// Sync current data to webdav server. Return true if success.
   static Future<bool> uploadData([String? config]) {
-    if (DataMaintenance.syncSuppressed || DataMaintenance.busy) {
+    if (DataMaintenance.syncSuppressed) {
       return Future<bool>.value(true);
     }
     // Avoid enqueueing a no-op maintenance task when sync has never been
@@ -72,6 +72,12 @@ class Webdav {
     // it, so even an empty upload must not hold the database queue.
     if (config == null && _parseConfig(appdata.settings[45]) == null) {
       return Future<bool>.value(true);
+    }
+    // A caller outside the active maintenance scope must wait its turn. A
+    // successful no-op here would make one-shot uploads look committed while
+    // the current download/merge operation silently discarded them.
+    if (DataMaintenance.busy) {
+      return DataMaintenance.run(() => uploadData(config));
     }
     final current = _uploadTask;
     if (current != null) {

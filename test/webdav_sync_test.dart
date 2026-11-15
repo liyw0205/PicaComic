@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -356,6 +357,37 @@ void main() {
       expect(remote.archives, hasLength(2));
       expect(remote.casResults, [true, true]);
     } finally {
+      appdata.settings[46] = previousVersion;
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('upload requested while maintenance is busy waits for its turn',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    final remote = _SharedSyncRemote(etags: false);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+      final maintenance = DataMaintenance.run(() async {
+        entered.complete();
+        await release.future;
+      }, suppressSync: true);
+      await entered.future;
+
+      final upload = Webdav.uploadData('https://dav.example;;;busy-upload');
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.archives, isEmpty);
+
+      release.complete();
+      expect(await upload, isTrue);
+      await maintenance;
+      expect(remote.archives, hasLength(1));
+    } finally {
+      if (!release.isCompleted) release.complete();
+      await DataMaintenance.waitForIdle();
       appdata.settings[46] = previousVersion;
       Webdav.transportFactory = previousFactory;
     }
