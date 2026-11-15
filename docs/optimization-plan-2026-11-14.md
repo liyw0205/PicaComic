@@ -486,3 +486,13 @@ A17 已复用 `AtomicFile`、`DataMaintenance` 和 `RuntimeMetrics`；A18 已复
 合并后的 `dart analyze`、目标 `flutter analyze`、`dart format`、analyzer baseline、异步边界扫描和 `git diff --check` 均通过。新增 Flutter 测试已尝试执行，但本机 Termux 的 Flutter SDK/kernel 不匹配，报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`，因此不能宣称本地测试通过；应由标准 runner 重新执行。
 
 版本提交后的 GitHub Actions push 事件未生成对应 run，workflow dispatch 返回 `Actions has been disabled for this repository`，尽管仓库权限接口仍报告 enabled。故 `v4.2.47` 的 tag 只能在当前远端平台恢复后再以标准 CI 结果作为发布门禁；在此之前保留代码和版本提交，不用未验证的 Release 结果覆盖历史。
+
+随后继续完成三项独立修复：
+
+| 功能组 | 提交 | 修复内容 |
+| --- | --- | --- |
+| A18 缓存清理 | `19633f07` | 启动清理默认使用 `getApplicationCacheDirectory()`，与 `App.cachePath` 和图片缓存实际位置一致；保留目录 provider 注入测试 |
+| A12 运行诊断 | `48375723` | 日志导出追加脱敏 `Diagnostics` JSON，包含日志写入失败状态和有界 `RuntimeMetrics` 摘要，不序列化错误文本/堆栈 |
+| A10 凭据边界 | `3e7f8713` | 安全存储读取失败时 `configForSettings()` 返回空结果，阻断设置页把半配置转换为匿名 WebDAV one-shot 请求；显式匿名配置仍保留 |
+
+这些提交均已推送至 `origin/master`，目标分析、格式和差异检查通过；对应 Flutter 测试仍需标准 runner 执行。annotated tag `v4.2.47` 已推送并固定到 `82793767`，但当前 GitHub Actions 未为版本提交或 tag 创建 run，GitHub Release 也尚不存在，因此不能宣称 APK 已发布。恢复 Actions 后应先对当前 master 重新跑完整 workflow，再决定是否以 `4.2.48+4248` 收纳 tag 之后的修复，避免移动既有 tag。
