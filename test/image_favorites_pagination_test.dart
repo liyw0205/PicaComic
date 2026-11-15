@@ -185,4 +185,46 @@ void main() {
     expect(meUpdates, 1);
     expect(imagePageRefreshes, 1);
   });
+
+  test('history image merge refreshes an open image favorites page once',
+      () async {
+    final sourcePath = '${directory.path}/history-source.db';
+    final source = HistoryManager.create();
+    await source.init(databasePath: sourcePath, importLegacy: false);
+    source.close();
+    final sourceDb = sqlite3.open(sourcePath);
+    sourceDb.execute(
+        "insert into image_favorites values('merged-image','Merged','',1,1,'{}');");
+    sourceDb.dispose();
+
+    final destination = HistoryManager();
+    await destination.init(databasePath: path, importLegacy: false);
+    var meUpdates = 0;
+    var imagePageRefreshes = 0;
+    final mePage = StateController.putSimpleController(
+      () => meUpdates++,
+      'me_page',
+    );
+    final imagePage = StateController.putSimpleController(
+      () {},
+      'image_favorites_page',
+      refresh: () => imagePageRefreshes++,
+    );
+    addTearDown(mePage.dispose);
+    addTearDown(imagePage.dispose);
+
+    await destination.mergeFrom(sourcePath);
+    await Future<void>.delayed(Duration.zero);
+    final destinationDb = sqlite3.open(path);
+    expect(destinationDb.select('select id from image_favorites;').single['id'],
+        'merged-image');
+    destinationDb.dispose();
+    expect(meUpdates, 1);
+    expect(imagePageRefreshes, 1);
+
+    await destination.mergeFrom(sourcePath);
+    await Future<void>.delayed(Duration.zero);
+    expect(meUpdates, 1);
+    expect(imagePageRefreshes, 1);
+  });
 }

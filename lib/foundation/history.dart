@@ -275,6 +275,7 @@ class HistoryManager {
                   return favorite;
                 }).toList()
               : <ImageFavorite>[];
+          var imageFavoritesChanged = false;
           _transaction(() {
             for (final history in histories) {
               _insertHistory(history, updateTime: false);
@@ -291,8 +292,16 @@ class HistoryManager {
                 image.page,
                 jsonEncode(image.otherInfo)
               ]);
+              imageFavoritesChanged = imageFavoritesChanged ||
+                  ((_db.select('select changes() as count').single['count']
+                          as int) >
+                      0);
             }
           });
+          if (imageFavoritesChanged) {
+            ImageFavoriteManager._scheduleUiRefresh(
+                mePage: true, imagePage: true);
+          }
         } finally {
           source.dispose();
           _cachedHistory.clear();
