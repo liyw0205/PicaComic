@@ -318,6 +318,7 @@ void main() {
   });
 
   test('failing listeners cannot prevent a queue snapshot commit', () async {
+    await manager.init();
     manager.downloading.add(
       downloadingItemFromMap(
           fixtureTask('listener-safe'), () {}, () {}, () async {}),
