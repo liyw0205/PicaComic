@@ -87,15 +87,15 @@ class ScrollManager {
   }
 }
 
-class _TapDownPointer{
+class _TapDownPointer {
   int id;
   Offset offset;
 
-  double getDistance(){
+  double getDistance() {
     return offset.dx * offset.dx + offset.dy * offset.dy;
   }
 
-  _TapDownPointer(this.id): offset = const Offset(0, 0);
+  _TapDownPointer(this.id) : offset = const Offset(0, 0);
 }
 
 class TapController {
@@ -113,17 +113,17 @@ class TapController {
 
   static int fingers = 0;
 
-  static void onTapCancel(PointerCancelEvent event){
+  static void onTapCancel(PointerCancelEvent event) {
     fingers--;
   }
 
   static void onTapDown(PointerDownEvent event) {
-    if(event.buttons == kSecondaryMouseButton){
+    if (event.buttons == kSecondaryMouseButton) {
       handleSecondaryTapUp(event);
       return;
     }
     fingers++;
-    if(ignoreNextTap){
+    if (ignoreNextTap) {
       ignoreNextTap = false;
       return;
     }
@@ -133,12 +133,13 @@ class TapController {
       return;
     }
 
-    if(appdata.settings[55] == "1") {
+    if (appdata.settings[55] == "1") {
       _tapDownPointer = _TapDownPointer(event.pointer);
       Future.delayed(const Duration(milliseconds: 300), () {
         if (event.pointer == _tapDownPointer?.id &&
             !logic.isDisposed &&
-            identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+            identical(
+                StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
           onTapUpReplacement = (detail) => _handleLongPressEnd(logic, detail);
           _handleLongPressStart(logic, event.position);
         }
@@ -184,33 +185,32 @@ class TapController {
   static void Function(PointerUpEvent detail)? _doubleClickRecognizer;
   static ComicReadingPageLogic? _doubleClickLogic;
 
-  static void handleSecondaryTapUp(PointerDownEvent detail){
+  static void handleSecondaryTapUp(PointerDownEvent detail) {
     var logic = StateController.find<ComicReadingPageLogic>();
     showMenu(
-      context: App.globalContext!,
-      position: RelativeRect.fromLTRB(
-        detail.position.dx, detail.position.dy, detail.position.dx, detail.position.dy),
-      items: [
-        PopupMenuItem(
-          child: Text("设置".tl),
-          onTap: () => showSettings(App.globalContext!),
-        ),
-        if(App.isWindows)
+        context: App.globalContext!,
+        position: RelativeRect.fromLTRB(detail.position.dx, detail.position.dy,
+            detail.position.dx, detail.position.dy),
+        items: [
           PopupMenuItem(
-            onTap: logic.fullscreen,
-            child: Text("全屏".tl),
+            child: Text("设置".tl),
+            onTap: () => showSettings(App.globalContext!),
           ),
-        PopupMenuItem(
-          child: Text("退出".tl),
-          onTap: () => App.globalBack(),
-        ),
-        if(logic.data.hasEp)
+          if (App.isWindows)
+            PopupMenuItem(
+              onTap: logic.fullscreen,
+              child: Text("全屏".tl),
+            ),
           PopupMenuItem(
-            onTap: logic.openEpsView,
-            child: Text("章节".tl),
+            child: Text("退出".tl),
+            onTap: () => App.globalBack(),
           ),
-      ]
-    );
+          if (logic.data.hasEp)
+            PopupMenuItem(
+              onTap: logic.openEpsView,
+              child: Text("章节".tl),
+            ),
+        ]);
   }
 
   static void onTapUp(PointerUpEvent detail) {
@@ -219,7 +219,7 @@ class TapController {
 
   static Future<void> _onTapUp(PointerUpEvent detail) async {
     fingers--;
-    if(onTapUpReplacement != null){
+    if (onTapUpReplacement != null) {
       onTapUpReplacement!(detail);
       onTapUpReplacement = null;
       return;
@@ -284,16 +284,15 @@ class TapController {
     _handleClick(detail, logic, App.globalContext!);
   }
 
-  static void onPointerMove(PointerMoveEvent event){
+  static void onPointerMove(PointerMoveEvent event) {
     final logic = StateController.find<ComicReadingPageLogic>();
-    if(event.pointer == _tapDownPointer?.id){
+    if (event.pointer == _tapDownPointer?.id) {
       _tapDownPointer!.offset += event.delta;
-      if(_tapDownPointer!.getDistance() > 1){
+      if (_tapDownPointer!.getDistance() > 1) {
         _tapDownPointer = null;
       }
     }
-    if (appdata.settings[9] == "4" &&
-        logic.scrollManager!.fingers != 2) {
+    if (appdata.settings[9] == "4" && logic.scrollManager!.fingers != 2) {
       logic.scrollManager!.addOffset(event.delta);
     }
   }
@@ -304,12 +303,13 @@ class TapController {
     bool flag2 = false;
     final range = int.parse(appdata.settings[40]) / 100;
     if (appdata.settings[0] == "1" && !logic.tools) {
-      void updatePageWithSetting(bool next){
-        if(appdata.settings[70] == "1"){
+      void updatePageWithSetting(bool next) {
+        if (appdata.settings[70] == "1") {
           next = !next;
         }
         next ? logic.jumpToNextPage() : logic.jumpToLastPage();
       }
+
       switch (appdata.settings[9]) {
         case "1":
         case "5":
@@ -357,7 +357,7 @@ class TapController {
         StateController.findOrNull<WindowFrameController>()?.resetTheme();
       } else {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-        if(appdata.settings[81] == "1") {
+        if (appdata.settings[81] == "1") {
           StateController.findOrNull<WindowFrameController>()?.setDarkTheme();
         }
       }
@@ -372,45 +372,54 @@ class TapController {
     }
     var controller = logic.photoViewController;
     double target;
-    if (controller.scale == null || controller.getInitialScale?.call() == null) {
+    if (controller.scale == null ||
+        controller.getInitialScale?.call() == null) {
       return;
     }
-    if(!logic.readingMethod.useComicImage){
+    if (!logic.readingMethod.useComicImage) {
       controller.onDoubleClick?.call();
       return;
     }
-    if(controller.scale != controller.getInitialScale?.call()){
+    if (controller.scale != controller.getInitialScale?.call()) {
       target = controller.getInitialScale!.call()!;
     } else {
       target = controller.getInitialScale!.call()! * 1.75;
     }
     var size = MediaQuery.of(App.globalContext!).size;
-    controller.animateScale?.call(target, Offset(size.width/2 - position.dx, size.height/2 - position.dy));
+    controller.animateScale?.call(target,
+        Offset(size.width / 2 - position.dx, size.height / 2 - position.dy));
   }
 
-  static void _handleLongPressStart(ComicReadingPageLogic logic, Offset position){
+  static void _handleLongPressStart(
+      ComicReadingPageLogic logic, Offset position) {
     if (logic.isDisposed ||
-        !identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+        !identical(
+            StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
       return;
     }
     var controller = logic.photoViewController;
-    if(controller.scale != controller.getInitialScale?.call() || controller.scale == null
-        || controller.getInitialScale?.call() == null){
+    if (controller.scale != controller.getInitialScale?.call() ||
+        controller.scale == null ||
+        controller.getInitialScale?.call() == null) {
       return;
     }
     final target = controller.getInitialScale!.call()! * 1.75;
     var size = MediaQuery.of(App.globalContext!).size;
-    controller.animateScale?.call(target, Offset(size.width/2 - position.dx, size.height/2 - position.dy));
+    controller.animateScale?.call(target,
+        Offset(size.width / 2 - position.dx, size.height / 2 - position.dy));
     controller.updateState?.call(null);
   }
 
-  static void _handleLongPressEnd(ComicReadingPageLogic logic, PointerUpEvent event){
+  static void _handleLongPressEnd(
+      ComicReadingPageLogic logic, PointerUpEvent event) {
     if (logic.isDisposed ||
-        !identical(StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
+        !identical(
+            StateController.findOrNull<ComicReadingPageLogic>(), logic)) {
       return;
     }
     var controller = logic.photoViewController;
-    if(controller.scale == controller.getInitialScale?.call() || controller.scale == null){
+    if (controller.scale == controller.getInitialScale?.call() ||
+        controller.scale == null) {
       return;
     }
     final target = controller.getInitialScale?.call();
