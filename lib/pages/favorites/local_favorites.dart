@@ -349,6 +349,8 @@ class LocalFavoriteTile extends ComicTile {
 
   static Map<String, File> cache = {};
 
+  static final Map<String, Future<void>> _readTasks = {};
+
   @override
   String? get badge =>
       DownloadManager().isExists(comic.toDownloadId()) ? "已下载".tl : null;
@@ -622,22 +624,39 @@ class LocalFavoriteTile extends ComicTile {
             ));
   }
 
-  Future<void> readComic() async {
-    if (DownloadManager().isExists(comic.toDownloadId())) {
-      var download =
-          await DownloadManager().getComicOrNull(comic.toDownloadId());
-      if (download != null) {
-        unawaited(download.read());
-        return;
+  Future<void> readComic() {
+    final key = '${comic.type.key}:${comic.target}';
+    final existing = _readTasks[key];
+    if (existing != null) return existing;
+
+    final operation = _readComic();
+    late final Future<void> tracked;
+    tracked = operation.whenComplete(() {
+      if (identical(_readTasks[key], tracked)) {
+        _readTasks.remove(key);
       }
-    }
+    });
+    _readTasks[key] = tracked;
+    return tracked;
+  }
+
+  Future<void> _readComic() async {
     bool cancel = false;
-    var controller = showLoadingDialog(
-      App.globalContext!,
-      onCancel: () => cancel = true,
-      barrierDismissible: false,
-    );
+    LoadingDialogController? controller;
     try {
+      if (DownloadManager().isExists(comic.toDownloadId())) {
+        var download =
+            await DownloadManager().getComicOrNull(comic.toDownloadId());
+        if (download != null) {
+          await download.read();
+          return;
+        }
+      }
+      controller = showLoadingDialog(
+        App.globalContext!,
+        onCancel: () => cancel = true,
+        barrierDismissible: false,
+      );
       switch (comic.type.comicType) {
         case ComicType.picacg:
           {
@@ -799,7 +818,7 @@ class LocalFavoriteTile extends ComicTile {
         showToast(message: safeNetworkError(error));
       }
     } finally {
-      controller.close();
+      controller?.close();
     }
   }
 
