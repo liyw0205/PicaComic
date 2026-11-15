@@ -274,6 +274,29 @@ void main() {
     manager.close();
   });
 
+  test('favorite folder ordering uses a composite ordering index', () async {
+    final path = '${directory.path}/favorite-order-index.db';
+    final manager = LocalFavoritesManager.create();
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('indexed');
+    await DataMaintenance.waitForIdle();
+    final fixture = sqlite3.open(path, mode: OpenMode.readOnly);
+    try {
+      final plan = fixture.select('''
+            explain query plan
+            select * from "$folder"
+            order by display_order, target, type
+            limit 60;
+          ''').map((row) => row['detail'] as String).join(' ');
+      expect(
+          plan, contains('pica_favorites_indexed_display_order_target_type'));
+      expect(plan, isNot(contains('TEMP B-TREE')));
+    } finally {
+      fixture.dispose();
+      manager.close();
+    }
+  });
+
   test('a failed schema migration rolls back every table', () async {
     final path = '${directory.path}/migration.db';
     final db = sqlite3.open(path);

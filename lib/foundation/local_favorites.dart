@@ -417,6 +417,16 @@ class LocalFavoritesManager {
           _db.execute('DROP TABLE ${_identifier(tempName)};');
         }
       }
+      for (final table in tables) {
+        // Folder pages always use this stable ordering. Keeping the index per
+        // folder avoids a full table sort as collections grow.
+        final indexName =
+            _identifier('pica_favorites_${table}_display_order_target_type');
+        _db.execute('''
+          create index if not exists $indexName
+          on ${_identifier(table)}(display_order, target, type);
+        ''');
+      }
       if ((_db.select('PRAGMA user_version;').single[0] as int) < 1) {
         _db.execute('PRAGMA user_version = 1;');
       }
