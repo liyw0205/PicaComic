@@ -1,4 +1,4 @@
-import 'dart:async' show Future, StreamController;
+import 'dart:async' show Future, StreamController, StreamIterator;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../image_manager.dart';
@@ -21,31 +21,53 @@ class StreamImageProvider extends BaseImageProvider<StreamImageProvider> {
 
   @override
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents) async {
+    return _loadFromStream(chunkEvents, null);
+  }
+
+  @override
+  Future<Uint8List> loadWithCancellation(
+    StreamController<ImageChunkEvent> chunkEvents,
+    ImageLoadCancellation cancellation,
+  ) =>
+      _loadFromStream(chunkEvents, cancellation);
+
+  Future<Uint8List> _loadFromStream(
+    StreamController<ImageChunkEvent> chunkEvents,
+    ImageLoadCancellation? cancellation,
+  ) async {
     chunkEvents.add(const ImageChunkEvent(
         cumulativeBytesLoaded: 0, expectedTotalBytes: 100));
     DownloadProgress? finishProgress;
 
     final stream = taskScope?.bind(streamBuilder) ?? streamBuilder();
-    await for (var progress in stream) {
-      if (progress.currentBytes == progress.expectedBytes) {
-        finishProgress = progress;
+    final iterator = StreamIterator(stream);
+    cancellation?.register(iterator.cancel);
+    try {
+      while (await iterator.moveNext()) {
+        final progress = iterator.current;
+        if (progress.currentBytes == progress.expectedBytes) {
+          finishProgress = progress;
+        }
+        chunkEvents.add(ImageChunkEvent(
+            cumulativeBytesLoaded: progress.currentBytes,
+            expectedTotalBytes: progress.expectedBytes));
       }
-      chunkEvents.add(ImageChunkEvent(
-          cumulativeBytesLoaded: progress.currentBytes,
-          expectedTotalBytes: progress.expectedBytes));
-    }
-    if (taskScope?.isCancelled ?? false) {
-      throw const ImageTaskCancelledException();
-    }
-    if (finishProgress == null) {
-      throw StateError('Image stream ended without a completed image');
-    }
-    if (finishProgress.data != null) {
-      return finishProgress.data!;
-    }
+      if (cancellation?.isCancelled ??
+          false || taskScope?.isCancelled == true) {
+        throw const ImageTaskCancelledException();
+      }
+      if (finishProgress == null) {
+        throw StateError('Image stream ended without a completed image');
+      }
+      if (finishProgress.data != null) {
+        return finishProgress.data!;
+      }
 
-    var file = finishProgress.getFile();
-    return await file.readAsBytes();
+      var file = finishProgress.getFile();
+      return await file.readAsBytes();
+    } finally {
+      await iterator.cancel();
+    }
   }
 
   @override
