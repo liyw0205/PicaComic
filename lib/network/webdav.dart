@@ -425,6 +425,7 @@ class Webdav {
     SyncTransport? transport;
     io.Directory? work;
     final previousVersion = appdata.settings[46];
+    var settingsCommitted = false;
     try {
       configs = await _config(config);
       if (configs == null) return true;
@@ -519,6 +520,7 @@ class Webdav {
           heads: heads);
 
       await appdata.updateSettings(false);
+      settingsCommitted = true;
       state['heads'] = [id];
       await _saveState(configs, state);
       // Retain every branch. Legacy clients lack ancestry; deleting their
@@ -530,6 +532,19 @@ class Webdav {
       return true;
     } catch (e, s) {
       appdata.settings[46] = previousVersion;
+      if (settingsCommitted) {
+        try {
+          // The remote revision is immutable and may already be published,
+          // but a local state write failure must not leave settings claiming
+          // that revision is current after this operation reports failure.
+          await appdata.updateSettings(false);
+        } catch (rollbackError, rollbackStack) {
+          Log.error(
+              'Sync',
+              'Failed to persist WebDAV settings rollback.\n'
+                  '${safeNetworkError(rollbackError)}\n$rollbackStack');
+        }
+      }
       lastResult = const SyncResult(SyncStatus.failed);
       Log.error('Sync', 'Failed to upload data.\n${safeNetworkError(e)}\n$s');
       return false;

@@ -91,6 +91,7 @@ class _SharedSyncRemote {
   int _etagVersion = 0;
   int _pointerReads = 0;
   bool returnStalePointerOnSecondRead = false;
+  void Function()? beforeCompareAndSet;
 
   List<String> get names => <String>[...archives.keys, ...metadata.keys];
 
@@ -104,6 +105,7 @@ class _SharedSyncRemote {
   }
 
   bool compareAndSet(SyncPointer previous, String value) {
+    beforeCompareAndSet?.call();
     final expected = _etag == null ? '*' : '"$_etag"';
     final accepted = !etags || previous.etag == expected;
     casResults.add(accepted);
@@ -413,6 +415,39 @@ void main() {
     } finally {
       appdata.settings[46] = previousVersion;
       Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('state write failure rolls back the persisted settings revision',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    const config = 'https://dav.example;;;state-write-failure';
+    final values = config.split(';');
+    final stateKey = sha256
+        .convert(utf8.encode('${values[0]};${values[1]};${values[3]}'))
+        .toString();
+    final statePath = '${root.path}/sync-$stateKey.json';
+    final remote = _SharedSyncRemote(etags: false);
+    remote.beforeCompareAndSet = () {
+      final state = File(statePath);
+      if (state.existsSync()) state.deleteSync();
+      Directory(statePath).createSync();
+    };
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+
+      expect(await Webdav.uploadData(config), isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
+      final persisted =
+          jsonDecode(await File('${root.path}/settings').readAsString())
+              as List<dynamic>;
+      expect(persisted[46], previousVersion);
+      expect(remote.archives, hasLength(1));
+    } finally {
+      Webdav.transportFactory = previousFactory;
+      appdata.settings[46] = previousVersion;
+      await appdata.updateSettings(false);
     }
   });
 
