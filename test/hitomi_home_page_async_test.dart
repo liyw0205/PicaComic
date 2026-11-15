@@ -78,6 +78,7 @@ void main() {
 
   test('pagination coalesces duplicate tail requests', () async {
     final list = _list([1], total: 2);
+    list.toLoad = 1;
     final nextPage = Completer<Res<bool>>();
     var nextCalls = 0;
     final logic = HitomiHomePageLogic(
@@ -85,6 +86,7 @@ void main() {
       loadNextPage: (current) {
         nextCalls++;
         current.comicIds.add(2);
+        current.toLoad = 2;
         return nextPage.future;
       },
       loadComicInfoBrief: (id) async => Res(_brief(int.parse(id))),
@@ -101,6 +103,9 @@ void main() {
       'https://hitomi.la/galleries/1.html',
       'https://hitomi.la/galleries/2.html',
     ]);
+
+    await logic.loadNextPage('fixture');
+    expect(nextCalls, 1);
   });
 
   test('disposed request cannot publish its result', () async {

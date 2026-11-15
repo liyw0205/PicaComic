@@ -70,7 +70,8 @@ class HitomiHomePageLogic extends StateController {
     if (isDisposed ||
         _requestInFlight ||
         _nextPageInFlight ||
-        current == null) {
+        current == null ||
+        current.toLoad >= current.total) {
       return;
     }
     final generation = _generation;
