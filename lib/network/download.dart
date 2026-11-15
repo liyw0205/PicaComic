@@ -470,6 +470,18 @@ class DownloadManager with _DownloadDb implements Listenable {
       }
     }
     downloading.clear();
+    // [stop] removes in-progress task files, so an older non-empty snapshot
+    // would resurrect tasks whose recorded progress no longer exists. Commit
+    // the cleared queue before closing the database; imports that replace the
+    // directory have already copied the source snapshot and remain resumable.
+    if (path != null) {
+      try {
+        await _saveInfo();
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.error, 'IO',
+            'Failed to persist disposed download queue\n${safeNetworkError(e)}\n$s');
+      }
+    }
     await _queueWriteTail;
     _db?.dispose();
     _db = null;

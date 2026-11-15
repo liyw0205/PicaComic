@@ -314,6 +314,25 @@ void main() {
     expect(snapshot['downloading'], isEmpty);
   });
 
+  test('disposing the manager persists the cleared queue snapshot', () async {
+    await getQueueFile().writeAsString(
+      jsonEncode(committedQueue([fixtureTask('disposed')], 4)),
+    );
+
+    await manager.init();
+    expect(manager.downloading.single.id, 'disposed');
+
+    await manager.dispose();
+
+    final snapshot =
+        jsonDecode(await getQueueFile().readAsString()) as Map<String, dynamic>;
+    expect(snapshot['state'], 'committed');
+    expect(snapshot['downloading'], isEmpty);
+
+    await manager.init();
+    expect(manager.downloading, isEmpty);
+  });
+
   test('deleting an already deleted comic is idempotent', () async {
     final db = sqlite3.open('${directory.path}/download.db');
     db.execute('''
