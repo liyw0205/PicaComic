@@ -1,13 +1,15 @@
-import 'package:pica_comic/comic_source/built_in/ehentai.dart';
+import 'dart:async';
 import 'package:pica_comic/foundation/app.dart';
 import 'dart:ui' as ui;
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/image_loader/cached_image.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
@@ -19,6 +21,7 @@ import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/network/eh_network/get_gallery_id.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/components/components.dart';
+import 'package:pica_comic/comic_source/built_in/ehentai.dart';
 
 class EhGalleryPage extends BaseComicPage<Gallery> {
   EhGalleryPage(EhGalleryBrief brief, {super.key})
@@ -103,7 +106,8 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
   @override
   Future<bool> loadFavorite(Gallery data) async {
     return data.favorite ||
-        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem())).isNotEmpty;
+        (await LocalFavoritesManager().findWithModel(toLocalFavoriteItem()))
+            .isNotEmpty;
   }
 
   @override
@@ -124,9 +128,29 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
   bool get enableTranslationToCN => App.locale.languageCode == "zh";
 
   @override
-  void onThumbnailTapped(int index) async {
-    await History.findOrCreate(data!);
-    App.globalTo(() => ComicReadingPage.ehentai(data!, initialPage: index + 1));
+  void onThumbnailTapped(int index) {
+    unawaited(_openThumbnail(index));
+  }
+
+  Future<void> _openThumbnail(int index) async {
+    final logic = _pageLogic;
+    final gallery = logic?.data;
+    if (!_isCurrent(logic, gallery) || index < 0) return;
+    try {
+      await History.findOrCreate(gallery!);
+      if (!_isCurrent(logic, gallery) || App.globalContext?.mounted != true) {
+        return;
+      }
+      await App.globalTo(
+          () => ComicReadingPage.ehentai(gallery, initialPage: index + 1));
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open EH gallery thumbnail: "
+            "${safeNetworkError(error)}\n$stack",
+      );
+    }
   }
 
   @override
@@ -170,8 +194,7 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
           int.tryParse(data!.auth!["thumbnailKey"]!.nums) ?? 1);
     } else {
       return ThumbnailsData(
-          List.generate(
-              min(data!.pageSize, int.tryParse(data!.maxPage) ?? 1),
+          List.generate(min(data!.pageSize, int.tryParse(data!.maxPage) ?? 1),
               (_) => data!.auth!["thumbnailKey"]!.split(" ")[0]),
           (page) => EhNetwork().getThumbnails(data!, page),
           int.tryParse(data!.auth!["thumbnailKey"]!.split(" ")[1]) ?? 1);
@@ -196,8 +219,11 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
     }
     return ColoredBox(
       color: context.colorScheme.surfaceContainerHighest,
-      child:
-          EhThumbnailLoader(image: CachedImageProvider(imageUrl), pageSize:data!.pageSize, width: data!.width, index: index),
+      child: EhThumbnailLoader(
+          image: CachedImageProvider(imageUrl),
+          pageSize: data!.pageSize,
+          width: data!.width,
+          index: index),
     );
   }
 
@@ -495,15 +521,44 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
   }
 
   @override
-  void read(History? history) async {
-    history = await History.createIfNull(history, data!);
-    App.globalTo(
-      () => ComicReadingPage.ehentai(
-        data!,
-        initialPage: history!.page,
-      ),
-    );
+  void read(History? history) {
+    unawaited(_read(history));
   }
+
+  Future<void> _read(History? history) async {
+    final logic = _pageLogic;
+    final gallery = logic?.data;
+    if (!_isCurrent(logic, gallery)) return;
+    try {
+      final currentHistory = await History.createIfNull(history, gallery!);
+      if (!_isCurrent(logic, gallery) || App.globalContext?.mounted != true) {
+        return;
+      }
+      await App.globalTo(
+        () => ComicReadingPage.ehentai(
+          gallery,
+          initialPage: currentHistory.page,
+        ),
+      );
+    } catch (error, stack) {
+      LogManager.addLog(
+        LogLevel.error,
+        "UI",
+        "Failed to open EH gallery reader: ${safeNetworkError(error)}\n$stack",
+      );
+    }
+  }
+
+  ComicPageLogic<Gallery>? get _pageLogic =>
+      StateController.findOrNull<ComicPageLogic<Gallery>>(tag: tag);
+
+  bool _isCurrent(ComicPageLogic<Gallery>? logic, Gallery? gallery) =>
+      logic != null &&
+      !logic.isDisposed &&
+      gallery != null &&
+      identical(logic.data, gallery) &&
+      identical(
+          StateController.findOrNull<ComicPageLogic<Gallery>>(tag: tag), logic);
 
   @override
   ActionFunc? get openComments => () =>
@@ -528,7 +583,11 @@ class CommentLogic extends StateController {
 
 class EhThumbnailLoader extends StatefulWidget {
   const EhThumbnailLoader(
-      {required this.image, required this.width, required this.pageSize, required this.index, super.key});
+      {required this.image,
+      required this.width,
+      required this.pageSize,
+      required this.index,
+      super.key});
 
   final ImageProvider image;
 
@@ -547,10 +606,32 @@ class _EhThumbnailLoaderState extends State<EhThumbnailLoader> {
 
   bool failed = false;
 
+  int _generation = 0;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageListener;
+
   @override
   void initState() {
     super.initState();
-    _loadImage();
+    unawaited(_loadImage());
+  }
+
+  @override
+  void didUpdateWidget(covariant EhThumbnailLoader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) {
+      _removeImageListener();
+      image = null;
+      failed = false;
+      unawaited(_loadImage());
+    }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _removeImageListener();
+    super.dispose();
   }
 
   @override
@@ -565,7 +646,8 @@ class _EhThumbnailLoaderState extends State<EhThumbnailLoader> {
       return const SizedBox();
     } else {
       return CustomPaint(
-        painter: _EhThumbnailPainter(widget.index, widget.pageSize, widget.width, image!),
+        painter: _EhThumbnailPainter(
+            widget.index, widget.pageSize, widget.width, image!),
         child: const SizedBox(
           width: double.infinity,
           height: double.infinity,
@@ -574,22 +656,73 @@ class _EhThumbnailLoaderState extends State<EhThumbnailLoader> {
     }
   }
 
-  void _loadImage() async {
-    final imageStream = widget.image.resolve(ImageConfiguration.empty);
-
-    var listener = ImageStreamListener((imageInfo, _) {
-      if (mounted) {
+  Future<void> _loadImage() async {
+    final generation = ++_generation;
+    try {
+      final imageStream = widget.image.resolve(ImageConfiguration.empty);
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener((imageInfo, _) {
+        if (!_isCurrent(generation, imageStream, listener)) return;
+        _removeImageListener(imageStream, listener);
+        if (!mounted) return;
         setState(() {
           image = imageInfo.image;
         });
-      }
-    }, onError: (error, stack) {
-      setState(() {
-        failed = true;
+      }, onError: (error, stack) {
+        if (!_isCurrent(generation, imageStream, listener)) return;
+        _removeImageListener(imageStream, listener);
+        if (mounted) {
+          setState(() {
+            failed = true;
+          });
+        }
+        LogManager.addLog(
+          LogLevel.error,
+          "Network",
+          "Failed to load EH thumbnail: ${safeNetworkError(error)}\n$stack",
+        );
       });
-    });
+      if (!mounted || generation != _generation) return;
+      _imageStream = imageStream;
+      _imageListener = listener;
+      imageStream.addListener(listener);
+    } catch (error, stack) {
+      if (!mounted || generation != _generation) return;
+      failed = true;
+      LogManager.addLog(
+        LogLevel.error,
+        "Network",
+        "Failed to resolve EH thumbnail: ${safeNetworkError(error)}\n$stack",
+      );
+      setState(() {});
+    }
+  }
 
-    imageStream.addListener(listener);
+  bool _isCurrent(
+    int generation,
+    ImageStream stream,
+    ImageStreamListener listener,
+  ) =>
+      mounted &&
+      generation == _generation &&
+      identical(_imageStream, stream) &&
+      identical(_imageListener, listener);
+
+  void _removeImageListener([
+    ImageStream? stream,
+    ImageStreamListener? listener,
+  ]) {
+    final currentStream = _imageStream;
+    final currentListener = _imageListener;
+    if (currentStream == null || currentListener == null) return;
+    if (stream != null &&
+        (!identical(stream, currentStream) ||
+            (listener != null && !identical(listener, currentListener)))) {
+      return;
+    }
+    currentStream.removeListener(currentListener);
+    _imageStream = null;
+    _imageListener = null;
   }
 }
 
