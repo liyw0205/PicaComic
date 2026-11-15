@@ -609,3 +609,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A16 设置类型收窄 | `f235c0e1` | 设置网络操作使用显式 `Res` 类型，保持异步结果契约清晰 | 目标分析和 analyzer baseline 通过 |
 
 本机专项 Flutter 测试仍因 Termux Flutter 编译器与 SDK/kernel 不匹配失败（`Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`），不能替代标准 runner；真实 WebDAV 双客户端、设备生命周期和中断恢复仍需发布前验收。普通 `master` push 不触发 Android workflow，只有 `v*` tag push 才触发，版本 tag 未移动或重写。
+
+## 22. 2026-11-16 来源页面异步边界继续收口
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A16 HTManga 详情页 | `34ecf23e`, `6c8849dc` | 阅读/缩略图历史写入改为可等待内部任务；详情请求和图片加载增加互斥、generation、dispose 与异常保护；导航后补充 mounted 检查 | 目标分析、格式、差异检查和异步扫描通过 |
+| A16 Hitomi 首页/详情 | `7555cd29`, `2a7f38f7`, `d61fbc36`, `2ce905c4` | 首页首屏/分页请求互斥并丢弃旧响应；分页到达末尾不重复请求，brief 解析失败回滚游标和 ID；详情历史与导航异常记录并校验当前 controller | `test/hitomi_home_page_async_test.dart`；目标分析、格式、差异检查通过 |
+| A16 nhentai 评论/详情 | `5f688827` | 评论页改为可注入 loader，首屏请求互斥、retry/dispose generation 和异常状态可恢复；详情阅读/缩略图入口等待历史并校验页面仍有效 | `test/nhentai_comments_page_async_test.dart`；目标分析、格式、差异检查通过 |
+| A16 EH 评论/画廊/登录 | `2ce905c4`, `d1a9b855`, `f89f1394` | 评论请求和投票动作统一异常安全；画廊历史、缩略图加载和导航增加生命周期保护；移动/桌面 WebView 登录防重复回调，Cookie 抓取/校验/清理和 UA 持久化均可等待 | 目标分析、格式、差异检查通过；登录目标文件 `void_async=0` |
+| A16 PicACG/JM/通用详情 | `2ce905c4`, `3b45fbc1` | 推荐页 loader 注入、请求互斥和坏响应校验；阅读/章节入口改为 Future 内部任务并检查历史提交、controller 和 context；下载状态读取异常可记录并恢复 | `test/picacg_collections_async_test.dart`、目标分析、格式和差异检查通过 |
+| A16 列表页选择器 | `1141bb2c` | 页码对话框增加重复触发锁、generation、dispose/context 守卫和异常处理，入口显式 `unawaited` | 目标分析、格式、差异检查和异步扫描通过 |
+
+本轮全仓异步边界扫描为 `void_async=2`（基线 64）、`future_void_async=235`、同步 I/O 命中 49；剩余两个 `void async` 属于插件/固定回调边界，保留并在方案中持续跟踪。新增 Flutter 专项测试在本机仍受 Termux Kernel SDK mismatch（`9811646114` vs `d684a576a6`）阻塞，不能替代标准 runner；普通 `master` push 不触发 Android workflow，版本 tag 未移动或重写。
