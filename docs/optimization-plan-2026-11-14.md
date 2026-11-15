@@ -1,6 +1,6 @@
 # PicaComic 当前项目优化方案
 
-日期：2026-11-16。历史发布基线：`bc485265`，当前正式发布版本：`4.2.50+4250`（tag `v4.2.50`）；版本提交 `1db21743` 已通过 tag workflow `43772878266` 的 Flutter/native curl/Android 门禁并发布 4 个 APK、`SHA256SUMS` 和 `apk-metadata.json`。annotated tag `v4.2.47` 仍固定指向 `82793767`，保留为未发布历史；tag 不移动、不重写。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291`、`v4.2.46` workflow `43652289981`、`v4.2.49` workflow `43763170198` 和 `v4.2.50` workflow `43772878266` 均已通过并发布 APK；后续 Flutter/Android 行为回归以 tag workflow 为最终发布门禁。
+日期：2026-11-16。历史发布基线：`bc485265`，当前正式发布版本：`4.2.51+4251`（tag `v4.2.51`）；版本提交 `353b1a5c` 已通过 tag workflow `43775549354` 的 Flutter/native curl/Android 门禁并发布 4 个 APK、`SHA256SUMS` 和 `apk-metadata.json`。annotated tag `v4.2.47` 仍固定指向 `82793767`，保留为未发布历史；tag 不移动、不重写。上一轮已发布 A5、A7 和 A15；`v4.2.40` 已交付 A1、A2、A11 和 A16。本轮已补齐 A1 启动恢复授权边界、A2 导入结果契约、A6 上传同步祖先校验、A10 凭据安全边界、A11 下载删除幂等、A12 活动指标标签规范化、A13 图片收藏重复删除幂等、A14 自定义源落盘前体积门禁和更新路径归一化、A16 LoadingDialog 关闭竞态、A17 隔离导出指标、A18 迁移目标完整性校验和 A19 来源限流器重配置。`v4.2.41` 的 tag workflow 因导入测试 fixture 的 UTF-8 字节长度问题失败，已由 `d12a8339` 修正；该 tag 保留为失败历史，不移动或重写。`v4.2.39` 的首次 tag workflow 暴露了恢复重试 fixture 的 journal 覆盖问题，已在 `88133da3` 修正；`v4.2.42`、`v4.2.43` release workflow 均已通过；`v4.2.44` workflow `43646783070` 因来源限流器测试时序失败而保留为失败历史，测试修复提交为 `594e72c7`；`v4.2.45` workflow `43647311291`、`v4.2.46` workflow `43652289981`、`v4.2.49` workflow `43763170198`、`v4.2.50` workflow `43772878266` 和 `v4.2.51` workflow `43775549354` 均已通过并发布 APK；后续 Flutter/Android 行为回归以 tag workflow 为最终发布门禁。
 
 ## 1. 结论与评估边界
 
@@ -711,3 +711,14 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 本轮将重复测试收敛到统一入口：合并重复 fixture，删除未被 `flutter test` 自动发现且与现有网络日志回归重复的旧入口；下载并发 fixture 从 `32 MiB + 1` 降为跨越分块阈值的 `16 MiB + 1`，保留两块并发调度断言并减少 CI 内存、写盘和执行时间。新增 `tool/run_flutter_tests.sh` 统一执行全量 Flutter 测试，默认 `FLUTTER_TEST_CONCURRENCY=1` 并启用 `--fail-fast`；并发仅作为显式实验参数，避免 `DownloadManager`、`appdata.settings` 和网络 override 等进程级 singleton 在 suite 间互相污染。
 
 本轮测试流程优化提交为 `2ea92f10`、`a3c19d39`、`1db21743`。标准 tag workflow `43772878266` 已通过 Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名检查和 Release publish，发布 `v4.2.50` 的 4 个 APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仅推送分支，不触发 Android workflow；`v*` tag 创建或更新均可触发发布，workflow 只接受仍指向本次构建 SHA 的结果。Termux 本地 Flutter 测试仍受 `Unexpected Kernel SDK Version 9811646114`（期望 `d684a576a6`）阻塞，不能替代标准 CI；analyzer baseline、异步边界、格式化和 `git diff --check` 已通过。
+
+## 31. 2026-11-16 A1/A18/A19 收口与 v4.2.51 发布
+
+本轮按方案继续推进三项可复现边界：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A1/A18 恢复可信根 | `3467480b` | 恢复路径检查先解析最近存在的祖先，拒绝 `dataPath` 内符号链接下的缺失目标；`replace`/`applied` 阶段的外部根缺失不再使用 lexical fallback，只有已核对的 `committed` journal 允许清理已删除外部根 | `test/data_restore_transaction_test.dart` 覆盖数据目录符号链接、提交前外部根删除和已提交清理；目标 `dart analyze`、baseline、异步边界、格式和差异检查通过 |
+| A19 来源网络策略 | `0d384045` | 流式响应完整读取后才记录成功；响应体超限或读取异常计入失败并释放 lease，后续请求不会被错误占用的并发额度阻塞 | `test/source_network_policy_test.dart` 覆盖流式超限、失败计数和后续 lease；目标分析、baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `353b1a5c` 将版本递增到 `4.2.51+4251`，annotated tag `v4.2.51` 指向该提交。标准 workflow `43775549354` 的 build 用时约 9m27s、publish 约 16s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功，发布 4 个 APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow；tag 创建或更新才触发发布。Termux 本地 Flutter 测试继续受 Kernel SDK mismatch 阻塞，不能替代上述标准 CI。
