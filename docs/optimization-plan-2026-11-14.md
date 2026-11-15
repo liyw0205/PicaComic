@@ -539,3 +539,14 @@ A1 本轮没有新增代码提交。`recoverPendingDataRestore` 会重新 canoni
 | A2/A6 WebDAV 上传边界 | `89d82a70` | 维护任务忙时 one-shot upload 排队等待维护 scope 释放，避免返回假成功并丢弃上传；增加忙碌状态回归 | `test/webdav_sync_test.dart` |
 
 `.github/workflows/android.yml` 的 `push` 触发已收窄为 `v*` tag；普通 `master` 提交推送不再启动 Android workflow。`pull_request` 和 `workflow_dispatch` 仍保留，分别用于合并前验证和人工显式运行；正式发布只由版本字段、annotated tag 与 tag commit 一致的 tag workflow 门禁完成。此次修改不移动、不重写 `v4.2.47` 或 `v4.2.48`。
+
+## 15. 2026-11-15 按方案继续开发
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A11 下载队列 | `22209575` | `DownloadManager.dispose()` 清空进行中任务后持久化空的 committed 快照，避免导入、重启或目录替换时旧任务复活 | `test/download_persistence_test.dart`；目标分析、格式和差异检查通过 |
+| A12 运行诊断 | `baed6f0c` | 日志目标切换等待旧写入队列；Workmanager 后台 isolate 配置应用私有日志文件，并在任务结束时 flush | `test/log_manager_test.dart`；目标分析、格式和差异检查通过 |
+| A16 阅读器异步边界 | `769f1a2a` | `ComicReadingPage.loadInfo` 暴露 `Future<void>`，构建入口显式 `unawaited`，generation 失效时旧章节响应不覆盖当前状态 | `test/reader_preload_test.dart`；异步扫描 `void_async=56`（基线 64） |
+| A5 收藏查询性能 | `3349e9a8` | 为每个收藏夹建立 `(display_order, target, type)` 复合索引，降低大列表稳定排序的临时 B-tree 和全表排序成本 | `test/database_correctness_test.dart` 的 `EXPLAIN QUERY PLAN` 回归；目标分析、格式和差异检查通过 |
+
+上述新增 Flutter 用例已尝试在本机执行，但 Termux Flutter 编译器仍报 `Unexpected Kernel SDK Version 9811646114 (expected d684a576a6)`；这只能作为环境阻塞记录，不能替代标准 runner。下一步仍按方案执行 A1/A2/A6/A18 的独立进程、真实双客户端 WebDAV、设备性能和中断恢复验收。
