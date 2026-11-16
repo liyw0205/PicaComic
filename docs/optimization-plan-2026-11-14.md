@@ -825,6 +825,19 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
 
+## 41. 2026-11-16 历史搜索去重与 v4.2.61 发布
+
+本轮将页面层重复查询继续收敛到统一的输入节流路径，并控制回归成本：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A13 历史搜索 | `2862bd69` | 输入增加 180ms debounce；搜索模式下不再执行不展示的 `count()`；debounce 期间阻止旧关键词分页，切换搜索、清空和销毁统一取消定时器，保留原有小写关键词语义 | 目标 `dart analyze`、analyzer baseline、异步边界、格式和差异检查通过；不新增网络图片 widget suite，避免重复启动和外部请求拖慢测试 |
+| 测试流程 | `764125bb` | 排查 tag runner 卡测后移除高成本网络绑定 widget 回归，保留现有历史数据库 fixture；最终 tag runner 只执行一次完整串行 Flutter 门禁，避免为页面输入边界重复启动独立 runner | 标准 tag workflow `43806494156`：Flutter regression 1m21s、native curl、版本/tag 校验全部通过 |
+
+版本提交 `38d257c0` 将版本递增到 `4.2.61+4261`；为修复测试 fixture 卡测，`v4.2.61` 最终移动到 `764125bb`，workflow `43801646138`、`43803217956`、`43804225706` 均按并发策略取消，最终 workflow `43806494156` 成功。最终 build 约 9m30s、publish 约 17s；Release 已上传 `PicaComic-4.2.61.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
 ## 39. 2026-11-16 图片收藏搜索去重与 v4.2.59 发布
 
 本轮继续处理页面层重复查询，先收敛图片收藏搜索，不改动历史页和数据库查询语义：
