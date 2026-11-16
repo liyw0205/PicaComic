@@ -548,6 +548,9 @@ void main() {
     final item = _TestDownloadingItem('cover-cancel')
       ..directory = 'cover-cancel'
       ..runBaseStart = true
+      ..linksForTesting = {
+        0: ['https://example.test/page.jpg']
+      }
       ..coverForTesting =
           'http://${server.address.address}:${server.port}/cover.jpg'
       ..onCoverRequestStarted = coverStarted;
