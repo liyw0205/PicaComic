@@ -114,4 +114,26 @@ void main() {
 
     expect(error, isA<StateError>());
   });
+
+  test('download progress reserves completion for a separate event', () {
+    final exactLength =
+        DownloadProgress.inProgress(128, 128, 'image', '/tmp/image');
+    expect(exactLength.finished, isFalse);
+    expect(exactLength.expectedBytes, 129);
+
+    final overrun =
+        DownloadProgress.inProgress(129, 128, 'image', '/tmp/image');
+    expect(overrun.finished, isFalse);
+
+    final unknownLength =
+        DownloadProgress.inProgress(128, null, 'image', '/tmp/image');
+    expect(unknownLength.finished, isFalse);
+
+    const completed = DownloadProgress(128, 128, 'image', '/tmp/image');
+    expect(completed.finished, isTrue);
+
+    const validated = DownloadProgress(
+        128, 128, 'image', '/tmp/image', null, null, 'image', true);
+    expect(validated.imageValidated, isTrue);
+  });
 }
