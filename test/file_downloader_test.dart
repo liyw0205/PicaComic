@@ -8,6 +8,34 @@ import 'package:pica_comic/network/download_progress.dart';
 
 import 'file_downloader_regression.dart';
 
+class _LinksFixtureDownloadingItem extends DownloadingItem {
+  _LinksFixtureDownloadingItem(this._responses)
+      : super(null, null, null, 'links-fixture', type: DownloadType.other);
+
+  final List<Map<int, List<String>>> _responses;
+  int fetchCount = 0;
+
+  @override
+  Future<Map<int, List<String>>> getLinks() async {
+    return _responses[fetchCount++];
+  }
+
+  @override
+  Stream<DownloadProgress> downloadImage(String link) => const Stream.empty();
+
+  @override
+  String get cover => '';
+
+  @override
+  String get title => 'links fixture';
+
+  @override
+  Map<String, dynamic> toMap() => const {};
+
+  @override
+  Future<DownloadedItem> toDownloadedItem() => throw UnimplementedError();
+}
+
 void main() {
   for (final scenario in fileDownloadCases) {
     test(scenario, () async {
@@ -143,5 +171,41 @@ void main() {
     const validated = DownloadProgress(
         128, 128, 'image', '/tmp/image', null, null, 'image', true);
     expect(validated.imageValidated, isTrue);
+  });
+
+  test('empty page links cannot be accepted as a completed download', () async {
+    final item = _LinksFixtureDownloadingItem([
+      <int, List<String>>{},
+      <int, List<String>>{
+        0: ['page']
+      },
+    ]);
+
+    await expectLater(
+      item.ensureDownloadLinksForTesting(),
+      throwsA(isA<FormatException>()),
+    );
+    expect(item.links, isNull);
+
+    await item.ensureDownloadLinksForTesting();
+    expect(item.fetchCount, 2);
+    expect(item.links, <int, List<String>>{
+      0: ['page']
+    });
+  });
+
+  test('a chapter with no pages is not a valid download snapshot', () async {
+    final item = _LinksFixtureDownloadingItem([
+      <int, List<String>>{
+        0: ['page'],
+        1: <String>[]
+      },
+    ]);
+
+    await expectLater(
+      item.ensureDownloadLinksForTesting(),
+      throwsA(isA<FormatException>()),
+    );
+    expect(item.links, isNull);
   });
 }

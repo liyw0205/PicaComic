@@ -262,7 +262,7 @@ abstract class DownloadingItem with _TransferSpeedMixin {
           "下载中".tl, "${downloadManager.downloading.length} Tasks");
 
       // get image links and cover
-      links ??= await getLinks();
+      await _ensureDownloadLinks();
       if (_runtimeKey != currentKey) return;
       final coverCancelToken = CancelToken();
       _coverCancelToken = coverCancelToken;
@@ -345,6 +345,42 @@ abstract class DownloadingItem with _TransferSpeedMixin {
       }
     }
   }
+
+  /// A successful cover request is not evidence that the page list loaded.
+  /// Keep an empty or malformed link snapshot out of the completion path:
+  /// otherwise the loop below has no image task to wait for and the comic is
+  /// committed with only its cover.
+  Future<void> _ensureDownloadLinks() async {
+    if (_hasDownloadableLinks(links)) return;
+
+    // A persisted empty/invalid list is stale evidence. Clear progress tied
+    // to it before asking the source for a fresh page list.
+    if (links != null) {
+      links = null;
+      _downloading.clear();
+      _downloadedNum = 0;
+      _downloadingEp = 0;
+      index = 0;
+    }
+
+    final fetched = await getLinks();
+    if (!_hasDownloadableLinks(fetched)) {
+      throw const FormatException('No downloadable image links returned');
+    }
+    links = fetched;
+  }
+
+  bool _hasDownloadableLinks(Map<int, List<String>>? candidate) {
+    if (candidate == null || candidate.isEmpty) return false;
+    for (final entry in candidate.entries) {
+      if (entry.key < 0 || entry.value.isEmpty) return false;
+      if (entry.value.any((link) => link.trim().isEmpty)) return false;
+    }
+    return true;
+  }
+
+  @visibleForTesting
+  Future<void> ensureDownloadLinksForTesting() => _ensureDownloadLinks();
 
   @visibleForTesting
   Future<void> waitForFinishCleanup() => _stopAllTasks();
