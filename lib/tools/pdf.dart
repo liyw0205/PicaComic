@@ -62,6 +62,36 @@ class PdfExportProgress {
   double get fraction => totalPages == 0 ? 1 : completedPages / totalPages;
 }
 
+/// Conservative input limits for the bundled PDF encoder.
+///
+/// The encoder retains generated image objects until [Document.save] returns,
+/// so rejecting an unreasonable encoded file or pixel count is preferable to
+/// allowing one malformed page to exhaust the process.
+const int defaultPdfImageBytesLimit = 128 * 1024 * 1024;
+const int defaultPdfImagePixelsLimit = 100 * 1000 * 1000;
+
+class PdfExportImageTooLargeException implements Exception {
+  const PdfExportImageTooLargeException({
+    required this.path,
+    required this.bytes,
+    required this.maxBytes,
+    this.pixels,
+    required this.maxPixels,
+  });
+
+  final String path;
+  final int bytes;
+  final int maxBytes;
+  final int? pixels;
+  final int maxPixels;
+
+  @override
+  String toString() {
+    final dimensions = pixels == null ? '' : ', pixels=$pixels/$maxPixels';
+    return 'PDF image exceeds limits: $path ($bytes/$maxBytes bytes$dimensions)';
+  }
+}
+
 /// Creates a PDF from a downloaded comic.
 ///
 /// The existing arguments remain unchanged. Image bytes are read one page at
@@ -77,10 +107,13 @@ Future<void> createPdfFromComic({
   PdfExportCancellation? cancellation,
   void Function(PdfExportProgress progress)? onProgress,
   int batchSize = 8,
+  int maxImageBytes = defaultPdfImageBytesLimit,
+  int maxImagePixels = defaultPdfImagePixelsLimit,
 }) {
   if (batchSize <= 0) {
     throw ArgumentError.value(batchSize, 'batchSize', 'must be positive');
   }
+  _validateImageLimits(maxImageBytes, maxImagePixels);
   return DataMaintenance.run(
     () => _createPdfFromComic(
       title: title,
@@ -92,6 +125,8 @@ Future<void> createPdfFromComic({
       cancellation: cancellation,
       onProgress: onProgress,
       batchSize: batchSize,
+      maxImageBytes: maxImageBytes,
+      maxImagePixels: maxImagePixels,
     ),
     operationName: 'pdf.export',
   );
@@ -107,6 +142,8 @@ Future<void> _createPdfFromComic({
   required PdfExportCancellation? cancellation,
   required void Function(PdfExportProgress progress)? onProgress,
   required int batchSize,
+  required int maxImageBytes,
+  required int maxImagePixels,
 }) async {
   final timer = RuntimeMetrics.start('pdf.export');
   try {
@@ -132,7 +169,11 @@ Future<void> _createPdfFromComic({
     for (final page in pages) {
       cancellation?.throwIfCancelled();
       if (page.path != null && page.title != null) {
-        final image = await _loadDeferredImage(File(page.path!));
+        final image = await _loadDeferredImage(
+          File(page.path!),
+          maxImageBytes: maxImageBytes,
+          maxImagePixels: maxImagePixels,
+        );
         cancellation?.throwIfCancelled();
         pdf.addPage(
           Page(
@@ -162,7 +203,11 @@ Future<void> _createPdfFromComic({
           ),
         );
       } else {
-        final image = await _loadDeferredImage(File(page.path!));
+        final image = await _loadDeferredImage(
+          File(page.path!),
+          maxImageBytes: maxImageBytes,
+          maxImagePixels: maxImagePixels,
+        );
         cancellation?.throwIfCancelled();
         pdf.addPage(
           Page(
@@ -201,13 +246,43 @@ Future<void> _createPdfFromComic({
 /// provider backed by a path lets earlier pages release their source bytes
 /// after the PDF stream copies them. Dimensions are read up front because
 /// [Image] needs them during layout.
-Future<ImageProvider> _loadDeferredImage(File file) async {
+Future<ImageProvider> _loadDeferredImage(
+  File file, {
+  required int maxImageBytes,
+  required int maxImagePixels,
+}) async {
+  final fileLength = await file.length();
+  if (fileLength > maxImageBytes) {
+    throw PdfExportImageTooLargeException(
+      path: file.path,
+      bytes: fileLength,
+      maxBytes: maxImageBytes,
+      maxPixels: maxImagePixels,
+    );
+  }
   final bytes = await file.readAsBytes();
+  if (bytes.length > maxImageBytes) {
+    throw PdfExportImageTooLargeException(
+      path: file.path,
+      bytes: bytes.length,
+      maxBytes: maxImageBytes,
+      maxPixels: maxImagePixels,
+    );
+  }
   final decoded = MemoryImage(bytes);
   final width = decoded.width;
   final height = decoded.height;
   if (width == null || height == null) {
     throw StateError('Unable to determine image dimensions: ${file.path}');
+  }
+  if (height > 0 && width > maxImagePixels ~/ height) {
+    throw PdfExportImageTooLargeException(
+      path: file.path,
+      bytes: bytes.length,
+      maxBytes: maxImageBytes,
+      pixels: width * height,
+      maxPixels: maxImagePixels,
+    );
   }
   // ImageProvider exposes dimensions after applying orientation, while its
   // constructor expects the encoded image's unrotated dimensions.
@@ -356,10 +431,13 @@ Future<void> createPdfFromComicWithIsolate({
   PdfExportCancellation? cancellation,
   void Function(PdfExportProgress progress)? onProgress,
   int batchSize = 8,
+  int maxImageBytes = defaultPdfImageBytesLimit,
+  int maxImagePixels = defaultPdfImagePixelsLimit,
 }) {
   if (batchSize <= 0) {
     throw ArgumentError.value(batchSize, 'batchSize', 'must be positive');
   }
+  _validateImageLimits(maxImageBytes, maxImagePixels);
   final timer = RuntimeMetrics.start('pdf.export');
   final operation = DataMaintenance.run(
     () => _createPdfFromComicWithIsolate(
@@ -371,6 +449,8 @@ Future<void> createPdfFromComicWithIsolate({
       cancellation: cancellation,
       onProgress: onProgress,
       batchSize: batchSize,
+      maxImageBytes: maxImageBytes,
+      maxImagePixels: maxImagePixels,
     ),
     operationName: 'pdf.export',
   );
@@ -396,6 +476,8 @@ Future<void> _createPdfFromComicWithIsolate({
   required PdfExportCancellation? cancellation,
   required void Function(PdfExportProgress progress)? onProgress,
   required int batchSize,
+  required int maxImageBytes,
+  required int maxImagePixels,
 }) async {
   cancellation?.throwIfCancelled();
   final fontData = await _loadFont();
@@ -471,6 +553,8 @@ Future<void> _createPdfFromComicWithIsolate({
         'chapterIndexes':
             chapterIndexes == null ? null : List<int>.from(chapterIndexes),
         'batchSize': batchSize,
+        'maxImageBytes': maxImageBytes,
+        'maxImagePixels': maxImagePixels,
       },
       onError: errors.sendPort,
       onExit: exits.sendPort,
@@ -508,6 +592,8 @@ Future<void> _pdfWorkerEntry(Map<String, Object?> args) async {
       chapterIndexes: (args['chapterIndexes'] as List?)?.cast<int>(),
       cancellation: cancellation,
       batchSize: args['batchSize'] as int,
+      maxImageBytes: args['maxImageBytes'] as int,
+      maxImagePixels: args['maxImagePixels'] as int,
       onProgress: (progress) => events.send(<String, Object?>{
         'type': 'progress',
         'completed': progress.completedPages,
@@ -526,6 +612,17 @@ Future<void> _pdfWorkerEntry(Map<String, Object?> args) async {
   } finally {
     await commandSubscription.cancel();
     commands.close();
+  }
+}
+
+void _validateImageLimits(int maxImageBytes, int maxImagePixels) {
+  if (maxImageBytes <= 0) {
+    throw ArgumentError.value(
+        maxImageBytes, 'maxImageBytes', 'must be positive');
+  }
+  if (maxImagePixels <= 0) {
+    throw ArgumentError.value(
+        maxImagePixels, 'maxImagePixels', 'must be positive');
   }
 }
 

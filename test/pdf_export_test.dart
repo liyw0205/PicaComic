@@ -55,7 +55,58 @@ void main() {
       throwsA(isA<PdfExportCancelledException>()),
     );
     expect(await output.readAsString(), 'previous complete PDF');
+    final leftovers = await comic
+        .list()
+        .where((entry) => entry.path.contains('.tmp'))
+        .toList();
+    expect(leftovers, isEmpty);
     expect(RuntimeMetrics.snapshot()['pdf.export']?.cancelled, 1);
+  });
+
+  test('rejects an oversized page before decoding and preserves the target',
+      () async {
+    final comic = await createComic();
+    addTearDown(() => comic.delete(recursive: true));
+    final output = File('${comic.path}/result.pdf');
+    await output.writeAsString('previous complete PDF');
+    final oversized = File('${comic.path}/0.png');
+    await oversized.writeAsBytes(List<int>.filled(257, 0));
+
+    await expectLater(
+      createPdfFromComic(
+        title: 'large image test',
+        comicPath: comic.path,
+        savePath: output.path,
+        font: await loadFont(),
+        maxImageBytes: 256,
+      ),
+      throwsA(isA<PdfExportImageTooLargeException>()),
+    );
+    expect(await output.readAsString(), 'previous complete PDF');
+    final leftovers = await comic
+        .list()
+        .where((entry) => entry.path.contains('.tmp'))
+        .toList();
+    expect(leftovers, isEmpty);
+    expect(RuntimeMetrics.snapshot()['pdf.export']?.failure, 1);
+  });
+
+  test('rejects an oversized decoded image by pixel count', () async {
+    final comic = await createComic();
+    addTearDown(() => comic.delete(recursive: true));
+    final output = File('${comic.path}/result.pdf');
+
+    await expectLater(
+      createPdfFromComic(
+        title: 'pixel limit test',
+        comicPath: comic.path,
+        savePath: output.path,
+        font: await loadFont(),
+        maxImagePixels: 2,
+      ),
+      throwsA(isA<PdfExportImageTooLargeException>()),
+    );
+    expect(await output.exists(), isFalse);
   });
 
   test('successful export reports pages and installs a complete PDF', () async {
