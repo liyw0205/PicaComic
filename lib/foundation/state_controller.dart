@@ -24,8 +24,19 @@ abstract class StateController {
 
   static T putIfNotExists<T extends StateController>(T controller,
       {Object? tag, bool autoRemove = false}) {
-    return findOrNull<T>(tag: tag) ??
-        put(controller, tag: tag, autoRemove: autoRemove);
+    final existing = findOrNull<T>(tag: tag);
+    if (existing != null) {
+      // The caller has already constructed a controller, but it is not used
+      // when a matching registration exists. Release it unless the same
+      // instance is registered elsewhere and still has an owner.
+      if (!identical(existing, controller) &&
+          !_controllers
+              .any((element) => identical(element.controller, controller))) {
+        controller.dispose();
+      }
+      return existing;
+    }
+    return put(controller, tag: tag, autoRemove: autoRemove);
   }
 
   static T find<T extends StateController>({Object? tag}) {

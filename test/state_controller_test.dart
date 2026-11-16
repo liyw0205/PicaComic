@@ -74,6 +74,66 @@ void main() {
         isNull);
   });
 
+  test('putIfNotExists disposes an unused candidate', () {
+    final existing = StateController.put(
+      _TestController(),
+      tag: 'put-if-existing',
+    );
+    final candidate = _TestController();
+
+    expect(
+      StateController.putIfNotExists(candidate, tag: 'put-if-existing'),
+      same(existing),
+    );
+    expect(candidate.isDisposed, isTrue);
+    expect(existing.isDisposed, isFalse);
+    expect(
+      StateController.find<_TestController>(tag: 'put-if-existing'),
+      same(existing),
+    );
+
+    StateController.remove<_TestController>('put-if-existing');
+  });
+
+  test('putIfNotExists keeps an already registered candidate alive', () {
+    final candidate = StateController.put(
+      _TestController(),
+      tag: 'put-if-candidate',
+    );
+    final existing = StateController.put(
+      _TestController(),
+      tag: 'put-if-existing-2',
+    );
+
+    expect(
+      StateController.putIfNotExists(candidate, tag: 'put-if-existing-2'),
+      same(existing),
+    );
+    expect(candidate.isDisposed, isFalse);
+    expect(
+      StateController.find<_TestController>(tag: 'put-if-candidate'),
+      same(candidate),
+    );
+
+    StateController.remove<_TestController>('put-if-existing-2');
+    StateController.remove<_TestController>('put-if-candidate');
+  });
+
+  test('putIfNotExists does not dispose the matching instance itself', () {
+    final controller = StateController.put(
+      _TestController(),
+      tag: 'put-if-self',
+    );
+
+    expect(
+      StateController.putIfNotExists(controller, tag: 'put-if-self'),
+      same(controller),
+    );
+    expect(controller.isDisposed, isFalse);
+
+    StateController.remove<_TestController>('put-if-self');
+  });
+
   testWidgets('StateBuilder removes its updater when unmounted',
       (tester) async {
     late _TestController controller;
