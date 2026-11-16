@@ -954,3 +954,14 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `ea9db81e` | 将 `test/atomic_file_test.dart` 的 3 个原子替换用例并入 `test/directory_maintenance_test.dart`；保留测试名、断言和每个临时目录的清理注册，删除独立 suite 入口 | 自动发现的 Flutter suite 从 52 减少到 51，文本、二进制和失败回滚覆盖不减少；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
 
 版本提交 `db150acd` 将版本递增到 `4.2.70+4270`；`v4.2.70` 指向文档提交 `d5afdd85`。标准 tag workflow `43859345272` 的 build 用时 9m25s、publish 用时 19s；Flutter regression 通过 389 项，native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.70.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。本地定向 Flutter runner 仍受 Termux 缺少 `flutter/bin/cache/artifacts/engine/linux-arm64/impellerc` 限制，不能替代标准 tag workflow。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+
+## 51. 2026-11-16 下载测试入口合并与手工 CI 性能收敛
+
+本轮继续减少重复 Flutter suite 启动，并把性能基准限制在正式 tag 发布路径：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 下载测试流程 | `3d8b29b1` | 将 `test/download_image_task_test.dart` 的 4 个下载图片任务用例并入 `test/file_downloader_test.dart`，保留测试名、断言、临时目录和本地 HTTP server 隔离，删除独立 suite 入口 | 自动发现的 Flutter suite 从 51 减少到 50，断言覆盖不减少；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
+| CI 测试流程 | `3f4ad61b` | `FLUTTER_TEST_PERFORMANCE=1` 仅在 `v*` tag workflow 设置；手工 `workflow_dispatch` 默认关闭数据库性能基准，避免非发布验证重复耗时；tag 仍保留完整性能门禁 | workflow YAML、shell 语法和差异检查通过；普通 `master` push 仍不触发 Android workflow，tag 发布路径不变 |
+
+版本提交将版本递增到 `4.2.71+4271`；本轮完成后创建 annotated tag `v4.2.71`，tag 必须指向包含本记录的构建提交。标准 tag workflow 需继续验证 Flutter 回归、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release 资产；本地 Termux Flutter runner 仍可能受缺少 `impellerc` 限制，不能替代标准 tag workflow。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
