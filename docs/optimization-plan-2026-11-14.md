@@ -966,3 +966,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | CI 测试流程 | `3f4ad61b` | `FLUTTER_TEST_PERFORMANCE=1` 仅在 `v*` tag workflow 设置；手工 `workflow_dispatch` 默认关闭数据库性能基准，避免非发布验证重复耗时；tag 仍保留完整性能门禁 | workflow YAML、shell 语法和差异检查通过；普通 `master` push 仍不触发 Android workflow，tag 发布路径不变 |
 
 版本提交 `85b3aeba` 将版本递增到 `4.2.71+4271`；方案文档提交为 `561b37f8`，修复后 annotated tag `v4.2.71` 已移动到构建提交 `6c2557d6`。首次 workflow `43863672631` 因合并 suite 误启用 Flutter widget binding 失败；修复后标准 workflow `43864481343` build 用时约 12m59s、publish 用时 29s，Flutter regression 通过 389 项（含数据库性能基准），native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.71.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。本地 Termux Flutter runner 仍可能受缺少 `impellerc` 限制，不能替代标准 tag workflow。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+
+## 52. 2026-11-16 历史缓存测试入口继续合并
+
+本轮继续合并无共享全局状态的数据库边界测试，减少重复 Flutter suite 启动：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 历史缓存测试流程 | `bce8ab08` | 将唯一用例 `test/history_existence_cache_test.dart` 并入 `test/database_correctness_test.dart`；测试内使用独立临时目录、`HistoryManager.create()` 和显式 `try/finally` 清理，不复用数据库 suite 的全局 singleton | 自动发现的 Flutter suite 从 50 减少到 49，缺失/新增/删除/再次新增四个缓存状态断言保持不变；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
+
+版本提交将版本递增到 `4.2.72+4272`；本轮完成后创建 annotated tag `v4.2.72`，tag 必须指向包含本记录的构建提交。标准 tag workflow 继续保留完整 Flutter 性能基准、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release 资产门禁；手工 `workflow_dispatch` 仍跳过性能基准。提交作者统一为 `liyw0205 <2650115317@qq.com>`；本地 Termux Flutter runner 仍可能受缺少 `impellerc` 限制，不能替代标准 tag workflow；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
