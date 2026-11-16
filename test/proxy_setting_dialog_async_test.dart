@@ -63,7 +63,7 @@ void main() {
         )
         .onPressed!();
     await tester.pump(const Duration(milliseconds: 250));
-    await started.future;
+    expect(started.isCompleted, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     result.complete('migration failed');
@@ -107,7 +107,7 @@ void main() {
         )
         .onPressed!();
     await tester.pump(const Duration(milliseconds: 250));
-    await started.future;
+    expect(started.isCompleted, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     result.complete('ok');
