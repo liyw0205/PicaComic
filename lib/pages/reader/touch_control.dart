@@ -61,6 +61,14 @@ class ScrollManager {
 
   /// handle pointer move event
   void addOffset(Offset value) {
+    if (value.dy < 0 && logic.isAtChapterEnd) {
+      logic.jumpToNextChapter();
+      return;
+    }
+    if (value.dy > 0 && logic.isAtChapterStart) {
+      logic.jumpToLastChapter(jumpToLast: true);
+      return;
+    }
     if (logic.scrollController.offset ==
             logic.scrollController.position.maxScrollExtent &&
         logic.photoViewController.scale == 1 &&

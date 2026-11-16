@@ -214,6 +214,27 @@ void main() {
     }
   });
 
+  test('previous chapter transition records the end-page intent', () {
+    final oldMode = appdata.settings[9];
+    addTearDown(() => appdata.settings[9] = oldMode);
+    appdata.settings[9] = '1';
+    final data =
+        PicacgReadingData('Reader test', 'reader-test', ['one', 'two']);
+    final logic = ComicReadingPageLogic(2, data, 1, () {});
+    addTearDown(() {
+      logic.releaseImageTasks();
+      logic.pageController.dispose();
+    });
+
+    logic.jumpToLastChapter(jumpToLast: true);
+    expect(logic.order, 1);
+    expect(logic.jumpToLastPageOnChapterLoad, isTrue);
+
+    // A normal chapter selection must clear a stale request.
+    logic.jumpToLastChapter();
+    expect(logic.jumpToLastPageOnChapterLoad, isFalse);
+  });
+
   test('chapter loading exposes completion to lifecycle callers', () async {
     final result = Completer<Res<List<String>>>();
     final data = _ControlledReadingData(result.future);

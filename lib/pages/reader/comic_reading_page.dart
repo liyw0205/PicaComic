@@ -489,6 +489,19 @@ class ComicReadingPage extends StatelessWidget {
       }
       logic.isLoading = false;
       logic.update();
+      if (logic.jumpToLastPageOnChapterLoad) {
+        logic.jumpToLastPageOnChapterLoad = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (logic.isDisposed ||
+              loadGeneration != logic.loadGeneration ||
+              logic.urls.isEmpty) {
+            return;
+          }
+          // The page controller must be attached before jumping; the
+          // callback runs after the chapter's first frame is built.
+          logic.jumpToPage(logic.urls.length);
+        });
+      }
     } catch (e) {
       if (loadGeneration != logic.loadGeneration || logic.order != chapter) {
         return;

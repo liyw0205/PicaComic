@@ -182,7 +182,7 @@ extension ImageExt on ComicReadingPage {
               logic.jumpByDeviceType(1);
               return;
             }
-            logic.jumpToLastChapter();
+            logic.jumpToLastChapter(jumpToLast: true);
           } else if (i == logic.urls.length + 1) {
             if (!logic.data.hasEp) {
               logic.jumpByDeviceType(i - 1);
@@ -278,7 +278,7 @@ extension ImageExt on ComicReadingPage {
               logic.pageController.jumpByDeviceType(1);
               return;
             }
-            logic.jumpToLastChapter();
+            logic.jumpToLastChapter(jumpToLast: true);
           } else if (i == calcItemCount() - 1) {
             if (!logic.data.hasEp || logic.order == logic.data.eps?.length) {
               logic.pageController
@@ -337,12 +337,16 @@ extension ImageExt on ComicReadingPage {
               ? logic.jumpToNextPage()
               : logic.jumpToLastPage();
         } else {
-          if ((logic.scrollController.position.pixels ==
-                      logic.scrollController.position.minScrollExtent &&
-                  pointerSignal.scrollDelta.dy < 0) ||
-              (logic.scrollController.position.pixels ==
-                      logic.scrollController.position.maxScrollExtent &&
-                  pointerSignal.scrollDelta.dy > 0)) {
+          if (pointerSignal.scrollDelta.dy > 0 && logic.isAtChapterEnd) {
+            logic.jumpToNextChapter();
+            return;
+          }
+          if (pointerSignal.scrollDelta.dy < 0 && logic.isAtChapterStart) {
+            logic.jumpToLastChapter(jumpToLast: true);
+            return;
+          }
+          if ((logic.isAtScrollStart && pointerSignal.scrollDelta.dy < 0) ||
+              (logic.isAtScrollEnd && pointerSignal.scrollDelta.dy > 0)) {
             logic.photoViewController.updateMultiple(
                 position: logic.photoViewController.position -
                     Offset(0, pointerSignal.scrollDelta.dy));
@@ -361,6 +365,14 @@ extension ImageExt on ComicReadingPage {
           if (event.kind == PointerDeviceKind.trackpad &&
               logic.readingMethod == ReadingMethod.topToBottomContinuously) {
             if (event.scale == 1.0) {
+              if (event.panDelta.dy < 0 && logic.isAtChapterEnd) {
+                logic.jumpToNextChapter();
+                return;
+              }
+              if (event.panDelta.dy > 0 && logic.isAtChapterStart) {
+                logic.jumpToLastChapter(jumpToLast: true);
+                return;
+              }
               logic.scrollController.smoothTo(0 - event.panDelta.dy * 1.2);
             }
           }

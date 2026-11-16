@@ -102,6 +102,10 @@ class ComicReadingPageLogic extends StateController {
 
   bool haveUsedInitialPage = false;
 
+  /// Whether the previous-chapter transition should open at its last page.
+  /// This is consumed after the new chapter has been laid out.
+  bool jumpToLastPageOnChapterLoad = false;
+
   /// 双页模式下是否在第一页时显示单页
   bool get singlePageForFirstScreen => appdata.implicitData[1] == '1';
 
@@ -229,6 +233,7 @@ class ComicReadingPageLogic extends StateController {
 
   void reload() {
     resetPreloadState();
+    jumpToLastPageOnChapterLoad = false;
     index = 1;
     pageController = PageController(initialPage: 1);
     isLoading = true;
@@ -237,6 +242,7 @@ class ComicReadingPageLogic extends StateController {
 
   void change() {
     resetPreloadState();
+    jumpToLastPageOnChapterLoad = false;
     urls = [];
     errorMessage = null;
     isLoading = true;
@@ -246,7 +252,33 @@ class ComicReadingPageLogic extends StateController {
   ReadingMethod get readingMethod =>
       ReadingMethod.values[int.parse(appdata.settings[9]) - 1];
 
+  bool get isContinuousMode =>
+      readingMethod == ReadingMethod.topToBottomContinuously;
+
+  bool get isAtScrollStart =>
+      scrollController.hasClients &&
+      scrollController.position.pixels <=
+          scrollController.position.minScrollExtent + 2;
+
+  bool get isAtScrollEnd =>
+      scrollController.hasClients &&
+      scrollController.position.pixels >=
+          scrollController.position.maxScrollExtent - 2;
+
+  bool get isAtChapterEnd =>
+      isContinuousMode &&
+      data.hasEp &&
+      order < (data.eps?.length ?? 1) &&
+      isAtScrollEnd;
+
+  bool get isAtChapterStart =>
+      isContinuousMode && data.hasEp && order > 1 && isAtScrollStart;
+
   void jumpToNextPage() {
+    if (isAtChapterEnd) {
+      jumpToNextChapter();
+      return;
+    }
     if (readingMethod.index < 3) {
       pageController.jumpToPage(index + 1);
     } else if (readingMethod == ReadingMethod.topToBottomContinuously) {
@@ -257,6 +289,10 @@ class ComicReadingPageLogic extends StateController {
   }
 
   void jumpToLastPage() {
+    if (isAtChapterStart) {
+      jumpToLastChapter(jumpToLast: true);
+      return;
+    }
     if (readingMethod.index < 3) {
       pageController.jumpToPage(index - 1);
     } else if (readingMethod == ReadingMethod.topToBottomContinuously) {
@@ -297,6 +333,7 @@ class ComicReadingPageLogic extends StateController {
 
   void jumpToNextChapter() {
     var eps = data.eps;
+    jumpToLastPageOnChapterLoad = false;
     showFloatingButtonValue = 0;
     if (!data.hasEp || order == eps?.length) {
       if (readingMethod != ReadingMethod.topToBottomContinuously) {
@@ -324,6 +361,7 @@ class ComicReadingPageLogic extends StateController {
   }
 
   void jumpToChapter(int index) {
+    jumpToLastPageOnChapterLoad = false;
     order = index;
     resetPreloadState();
     urls = [];
@@ -335,7 +373,8 @@ class ComicReadingPageLogic extends StateController {
     update();
   }
 
-  void jumpToLastChapter() {
+  void jumpToLastChapter({bool jumpToLast = false}) {
+    jumpToLastPageOnChapterLoad = false;
     showFloatingButtonValue = 0;
     if (order == 1 || !data.hasEp) {
       if (readingMethod != ReadingMethod.topToBottomContinuously) {
@@ -356,6 +395,7 @@ class ComicReadingPageLogic extends StateController {
     pageController = PageController(initialPage: 1);
     index = 1;
     clearPhotoViewControllers();
+    jumpToLastPageOnChapterLoad = jumpToLast;
     update();
   }
 
@@ -405,6 +445,7 @@ class ComicReadingPageLogic extends StateController {
 
   void refresh_() {
     resetPreloadState();
+    jumpToLastPageOnChapterLoad = false;
     pageController = PageController(initialPage: 1);
     itemScrollController = ItemScrollController();
     itemScrollListener = ItemPositionsListener.create();
