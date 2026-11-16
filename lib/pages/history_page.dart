@@ -13,9 +13,7 @@ import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/components/components.dart';
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({Key? key, this.tileBuilder}) : super(key: key);
-
-  final Widget Function(BuildContext context, History history)? tileBuilder;
+  const HistoryPage({Key? key}) : super(key: key);
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -176,20 +174,19 @@ class _HistoryPageState extends State<HistoryPage> {
     return SliverGrid(
       delegate:
           SliverChildBuilderDelegate(childCount: comics_.length, (context, i) {
-        final history = comics_[i];
-        final tileBuilder = widget.tileBuilder;
-        if (tileBuilder != null) return tileBuilder(context, history);
         final comic = ComicItemBrief(
-          history.title,
-          history.subtitle,
+          comics_[i].title,
+          comics_[i].subtitle,
           0,
-          history.cover != "" ? history.cover : getJmCoverUrl(history.target),
-          history.target,
+          comics_[i].cover != ""
+              ? comics_[i].cover
+              : getJmCoverUrl(comics_[i].target),
+          comics_[i].target,
           [],
         );
         return NormalComicTile(
-          key: Key(history.target),
-          sourceKey: history.type.comicSource?.key,
+          key: Key(comics_[i].target),
+          sourceKey: comics_[i].type.comicSource?.key,
           onLongTap: () {
             showDialog(
                 context: context,
@@ -203,7 +200,7 @@ class _HistoryPageState extends State<HistoryPage> {
                           child: Text("取消".tl)),
                       TextButton(
                           onPressed: () {
-                            appdata.history.remove(history.target);
+                            appdata.history.remove(comics_[i].target);
                             setState(() {
                               isModified = true;
                               _reload();
@@ -215,22 +212,22 @@ class _HistoryPageState extends State<HistoryPage> {
                   );
                 });
           },
-          description_: timeToString(history.time),
+          description_: timeToString(comics_[i].time),
           coverPath: comic.path,
           name: comic.title,
           subTitle_: comic.author,
-          badgeName: history.type.name,
+          badgeName: comics_[i].type.name,
           headers: {
-            if (history.type == HistoryType.ehentai)
+            if (comics_[i].type == HistoryType.ehentai)
               "cookie": EhNetwork().cookiesStr,
-            if (history.type == HistoryType.ehentai ||
-                history.type == HistoryType.hitomi)
+            if (comics_[i].type == HistoryType.ehentai ||
+                comics_[i].type == HistoryType.hitomi)
               "User-Agent": webUA,
-            if (history.type == HistoryType.hitomi)
+            if (comics_[i].type == HistoryType.hitomi)
               "Referer": "https://hitomi.la/"
           },
           onTap: () {
-            toComicPageWithHistory(context, history);
+            toComicPageWithHistory(context, comics_[i]);
           },
         );
       }),
