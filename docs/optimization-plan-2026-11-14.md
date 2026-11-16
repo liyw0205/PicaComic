@@ -776,3 +776,14 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 版本提交 `8220e877` 将版本递增到 `4.2.55+4255`，annotated tag `v4.2.55` 指向该提交。workflow `43785315346` 最终 rerun 成功，build 用时约 9m15s、publish 用时约 27s；Flutter regression、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部通过。Release 资产为 `PicaComic-4.2.55.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。首次尝试因 artifact 上传服务长时间无响应取消，未产生发布结果；同一 SHA/tag 的 rerun 完成并发布资产。
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter runner 仍受 Kernel SDK mismatch 阻塞，不能替代标准 CI；用户原有未跟踪文件继续保留且未纳入提交。
+
+## 36. 2026-11-16 来源 pacing 重配置与测试路径继续收敛
+
+本轮把动态来源策略的 pacing 重配置边界并入现有 `test/source_network_policy_test.dart`，没有新增独立 Flutter suite：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A19 来源网络策略 | `048a7da1` | `SourceNetworkPolicy.configure()` 变更 `minInterval` 时同步更新下一次允许时间；增大间隔立即生效，缩短间隔保留已经承诺的旧间隔，不触碰活动 lease 和等待队列，避免动态预算绕过或重复延迟 | 单个来源策略 suite 合并覆盖升、降间隔重配置及取消/重新放行；目标 `dart analyze`、analyzer baseline、异步边界、格式和 `git diff --check` 通过 |
+| 测试流程 | `048a7da1` | 新边界直接扩展已有 pacing/队列 fixture，日常可用 `FLUTTER_TEST_FILES` 定向执行；tag workflow 仍只运行一次完整串行 Flutter 回归，不降低发布覆盖，也不为每个异常分支重复启动 runner | 标准 tag workflow `43789031234` 负责最终全量门禁；本机 Termux 定向 runner 仍受 `impellerc` 缺失阻塞 |
+
+版本提交 `83943454` 将版本递增到 `4.2.56+4256`，annotated tag `v4.2.56` 指向该提交。普通 `master` 提交已推送但不触发 Android workflow；仅创建或更新 `v*` tag 才触发发布，workflow 校验 tag、版本字段和本次构建 SHA 一致后发布。上述提交作者统一为 `liyw0205 <2650115317@qq.com>`。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
