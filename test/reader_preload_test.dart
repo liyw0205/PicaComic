@@ -231,7 +231,7 @@ void main() {
     expect(logic.jumpToLastPageOnChapterLoad, isTrue);
 
     // A normal chapter selection must clear a stale request.
-    logic.jumpToLastChapter();
+    logic.jumpToChapter(2);
     expect(logic.jumpToLastPageOnChapterLoad, isFalse);
   });
 
