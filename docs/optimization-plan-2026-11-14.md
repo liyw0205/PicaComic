@@ -850,7 +850,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
 
-## 42. 2026-11-16 回归入口合并与 v4.2.62 发布准备
+## 42. 2026-11-16 回归入口合并与 v4.2.62 发布收口
 
 本轮继续压缩测试维护和手工执行成本，把未被 `flutter test` 自动发现的旧回归入口并入现有标准 suite：
 
@@ -859,4 +859,4 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `7f782c99` | 删除 `download_progress_regression.dart`、`eh_archive_page_count_regression.dart`、`eh_archive_utils_regression.dart` 和 `eh_image_response_regression.dart`；下载进度断言并入 `test/download_image_task_test.dart`，归档路径、页数、图片字节和 EH 响应流断言并入 `test/eh_archive_symlink_test.dart`，不新增 runner | 同一 Flutter suite 统一发现和执行，避免维护未发现的 `main()` 入口；下载器、缓存和字节缓存既有 wrapper 保持不变，行为覆盖不减少 |
 | 测试门禁 | `7f782c99` | 保持 `tool/run_flutter_tests.sh` 的串行、fail-fast、定向筛选和 tag 性能开关；新增断言只增加到既有 suite，日常不重复启动进程 | 目标 `dart analyze`、analyzer baseline、异步边界、格式和 `git diff --check` 通过；本地 Flutter runner 仍受 Termux 缺少 `impellerc` 阻塞，待标准 tag workflow 完成最终回归 |
 
-版本提交 `7f782c99` 将版本递增到 `4.2.62+4262`。`master` 提交已推送但不触发 Android workflow；后续 annotated tag `v4.2.62` 将指向文档收口提交并触发一次完整 Flutter/native/Android 发布门禁。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+版本提交 `7f782c99` 将版本递增到 `4.2.62+4262`；文档收口提交为 `a7f2b4d0`，annotated tag `v4.2.62` 已指向该提交。标准 workflow `43811172395` build 用时约 9m35s、publish 用时 17s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功；Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
