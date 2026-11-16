@@ -424,6 +424,33 @@ void main() {
     expect(manager.downloading, isEmpty);
   });
 
+  test('failed dispose snapshot cannot resurrect stopped tasks', () async {
+    await getQueueFile().writeAsString(
+      jsonEncode(committedQueue([fixtureTask('dispose-failure')], 4)),
+    );
+
+    await manager.init();
+    expect(manager.downloading.single.id, 'dispose-failure');
+
+    // Force the atomic writer to fail before it can replace the old target.
+    await Directory(getQueueFile('.tmp').path).create();
+    await manager.dispose();
+
+    expect(manager.downloading, isEmpty);
+    expect(await getQueueFile().exists(), isFalse);
+    expect(
+      directory.listSync().whereType<FileSystemEntity>().where(
+          (entity) => entity.path.contains('newDownload.json.disposed.')),
+      isNotEmpty,
+    );
+
+    await manager.init();
+    expect(manager.downloading, isEmpty);
+    final snapshot =
+        jsonDecode(await getQueueFile().readAsString()) as Map<String, dynamic>;
+    expect(snapshot['downloading'], isEmpty);
+  });
+
   test('deleting an already deleted comic is idempotent', () async {
     createDownloadDatabase(directory, [
       ['repeat-delete', 'title', '', 1, 'repeat-delete', 0, '{}'],

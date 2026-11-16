@@ -527,6 +527,10 @@ class DownloadManager with _DownloadDb implements Listenable {
         } catch (e, s) {
           LogManager.addLog(LogLevel.error, 'IO',
               'Failed to persist disposed download queue\n${safeNetworkError(e)}\n$s');
+          // The stopped task files are no longer resumable. If the empty
+          // snapshot cannot be committed, quarantine every recovery
+          // candidate so startup cannot resurrect the stale queue.
+          await _quarantineDisposedQueueFiles();
         }
       }
       await _queueWriteTail;
@@ -534,6 +538,27 @@ class DownloadManager with _DownloadDb implements Listenable {
       _db = null;
       _DownloadDb.clearAllDirectoryCache();
     }, preserveEnqueues: false);
+  }
+
+  Future<void> _quarantineDisposedQueueFiles() async {
+    final root = path;
+    if (root == null) return;
+    final target = File('$root$pathSep$_downloadQueueFileName');
+    for (final candidate in <File>[
+      target,
+      File('${target.path}.tmp'),
+      File('${target.path}.bak'),
+    ]) {
+      try {
+        await _moveQueueFileAside(candidate, 'disposed');
+      } catch (e, s) {
+        LogManager.addLog(
+            LogLevel.error,
+            'IO',
+            'Failed to quarantine disposed download queue candidate '
+                '${candidate.path}\n${safeNetworkError(e)}\n$s');
+      }
+    }
   }
 
   ///初始化下载管理器
@@ -649,19 +674,34 @@ class DownloadManager with _DownloadDb implements Listenable {
   Future<void> _writeQueueSnapshot(File target, String encoded) async {
     final temporary = File('${target.path}.tmp');
     final backup = File('${target.path}.bak');
-    await temporary.writeAsString(encoded, flush: true);
-
-    // Keep the previous committed file until the replacement has completed;
-    // startup recovery can restore it if the process stops between renames.
-    if (await backup.exists()) await backup.delete();
-    if (await target.exists()) await target.rename(backup.path);
     try {
-      await temporary.rename(target.path);
-    } catch (_) {
-      if (!await target.exists() && await backup.exists()) {
-        await backup.rename(target.path);
+      await temporary.writeAsString(encoded, flush: true);
+
+      // Keep the previous committed file until the replacement has completed;
+      // startup recovery can restore it if the process stops between renames.
+      if (await backup.exists()) await backup.delete();
+      if (await target.exists()) await target.rename(backup.path);
+      try {
+        await temporary.rename(target.path);
+      } catch (_) {
+        if (!await target.exists() && await backup.exists()) {
+          await backup.rename(target.path);
+        }
+        rethrow;
       }
-      rethrow;
+    } catch (e, s) {
+      // A failed write is not a committed snapshot. Keep it for diagnostics,
+      // but prevent startup recovery from treating it as the newest commit.
+      try {
+        await _moveQueueFileAside(temporary, 'failed');
+      } catch (cleanupError, cleanupStack) {
+        LogManager.addLog(
+            LogLevel.warning,
+            'IO',
+            'Failed to quarantine download snapshot temporary file '
+                '${temporary.path}\n${safeNetworkError(cleanupError)}\n$cleanupStack');
+      }
+      Error.throwWithStackTrace(e, s);
     }
     // Cleanup is best-effort: a valid target is enough to recover on startup.
     if (await backup.exists()) {

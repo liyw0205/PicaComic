@@ -191,6 +191,34 @@ void main() {
     database.dispose();
   });
 
+  test('rollback resumes after target deletion before backup rename', () async {
+    final dataPath = '${root.path}/data';
+    final target = File('$dataPath/settings')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('old');
+    final replacement = File('${root.path}/settings.new')
+      ..writeAsStringSync('new');
+    final transaction = await DataRestoreTransaction.prepare(
+        dataPath, {target.path: replacement.path});
+    transaction.apply();
+
+    final state = jsonDecode(await transaction.journal.readAsString())
+        as Map<String, dynamic>;
+    final entry = Map<String, dynamic>.from(
+        (state['entries'] as List).single as Map<String, dynamic>);
+    final backup = File(entry['backup'] as String);
+    expect(await backup.readAsString(), 'old');
+    await target.delete();
+    entry['restored'] = true;
+    state['entries'] = [entry];
+    await transaction.journal.writeAsString(jsonEncode(state), flush: true);
+
+    await recoverPendingDataRestore(dataPath);
+
+    expect(await target.readAsString(), 'old');
+    expect(transaction.journal.existsSync(), isFalse);
+  });
+
   test('prepare copy failure retains journal and restores originals', () async {
     final dataPath = '${root.path}/data';
     final target = File('$dataPath/settings')..createSync(recursive: true);

@@ -584,10 +584,16 @@ Future<void> setDownloadFolder() async {
 
 class SetDownloadFolderDialog extends StatefulWidget {
   const SetDownloadFolderDialog(
-      {this.paths, this.haveManageFilesPermission = false, Key? key})
+      {this.paths,
+      this.haveManageFilesPermission = false,
+      this.updatePath,
+      Key? key})
       : super(key: key);
   final List<String>? paths;
   final bool haveManageFilesPermission;
+
+  @visibleForTesting
+  final Future<String> Function(String path, bool transform)? updatePath;
 
   @override
   State<SetDownloadFolderDialog> createState() =>
@@ -598,6 +604,61 @@ class _SetDownloadFolderDialogState extends State<SetDownloadFolderDialog> {
   final controller = TextEditingController();
   String current = appdata.settings[22];
   bool transform = true;
+  bool _saving = false;
+
+  Future<void> _submit(String newPath) async {
+    if (_saving) return;
+    if (appdata.settings[22] == newPath) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
+    final oldPath = appdata.settings[22];
+    final shouldTransform = transform;
+    setState(() {
+      _saving = true;
+    });
+    appdata.settings[22] = newPath;
+    try {
+      if (shouldTransform) {
+        showToast(message: "正在复制文件".tl);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      final res = await (widget.updatePath?.call(newPath, shouldTransform) ??
+          downloadManager.updatePath(newPath, transform: shouldTransform));
+      if (res != "ok") {
+        appdata.settings[22] = oldPath;
+        if (mounted) showToast(message: res);
+        return;
+      }
+
+      // The route may have been closed while the directory was migrating.
+      // Keep the successful setting change, but do not touch a dead context.
+      try {
+        await appdata.updateSettings();
+      } catch (error) {
+        // The directory migration already committed. Do not point the app
+        // back at the old root just because the optional sync write failed.
+        if (mounted) showToast(message: error.toString());
+        return;
+      }
+      if (!mounted) return;
+      hideAllMessages();
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      showToast(message: "更新成功".tl);
+    } catch (error) {
+      appdata.settings[22] = oldPath;
+      if (mounted) showToast(message: error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -652,34 +713,20 @@ class _SetDownloadFolderDialogState extends State<SetDownloadFolderDialog> {
                 ),
                 Center(
                   child: FilledButton(
-                    onPressed: () async {
-                      if (controller.text == appdata.settings[22]) return;
-                      var directory = Directory(controller.text);
-                      if (directory.existsSync() || controller.text == "") {
-                        var oldPath = appdata.settings[22];
-                        appdata.settings[22] = controller.text;
-                        if (transform) {
-                          showToast(message: "正在复制文件".tl);
-                          await Future.delayed(
-                              const Duration(milliseconds: 200));
-                        }
-                        var res = await downloadManager
-                            .updatePath(controller.text, transform: transform);
-                        if (res == "ok") {
-                          hideAllMessages();
-                          if (context.mounted) {
-                            context.pop();
-                          }
-                          showToast(message: "更新成功".tl);
-                          appdata.updateSettings();
-                        } else {
-                          appdata.settings[22] = oldPath;
-                          showToast(message: res);
-                        }
-                      } else {
-                        showToast(message: "目录不存在".tl);
-                      }
-                    },
+                    onPressed: _saving
+                        ? null
+                        : () {
+                            if (controller.text == appdata.settings[22]) {
+                              return;
+                            }
+                            var directory = Directory(controller.text);
+                            if (directory.existsSync() ||
+                                controller.text == "") {
+                              unawaited(_submit(controller.text));
+                            } else {
+                              showToast(message: "目录不存在".tl);
+                            }
+                          },
                     child: Text("提交".tl),
                   ),
                 ),
@@ -761,29 +808,8 @@ class _SetDownloadFolderDialogState extends State<SetDownloadFolderDialog> {
                   child: Center(
                     child: FilledButton(
                       child: Text("确认".tl),
-                      onPressed: () async {
-                        if (appdata.settings[22] != current) {
-                          var oldPath = appdata.settings[22];
-                          appdata.settings[22] = current;
-                          if (transform) {
-                            showToast(message: "正在复制文件".tl);
-                            await Future.delayed(
-                                const Duration(milliseconds: 200));
-                          }
-                          var res = await downloadManager.updatePath(current,
-                              transform: transform);
-                          if (res == "ok") {
-                            App.globalBack();
-                            showToast(message: "更新成功".tl);
-                            appdata.updateSettings();
-                          } else {
-                            appdata.settings[22] = oldPath;
-                            showToast(message: res);
-                          }
-                        } else {
-                          App.globalBack();
-                        }
-                      },
+                      onPressed:
+                          _saving ? null : () => unawaited(_submit(current)),
                     ),
                   ),
                 ),

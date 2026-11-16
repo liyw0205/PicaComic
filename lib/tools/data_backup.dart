@@ -1103,7 +1103,10 @@ class DataRestoreTransaction {
         final targetType = FileSystemEntity.typeSync(entry['target'] as String,
             followLinks: false);
         if (targetType != FileSystemEntityType.file &&
-            targetType != FileSystemEntityType.directory) {
+            targetType != FileSystemEntityType.directory &&
+            FileSystemEntity.typeSync(entry['backup'] as String,
+                    followLinks: false) ==
+                FileSystemEntityType.notFound) {
           throw StateError(
               'Cannot prove restored target exists; journal retained');
         }

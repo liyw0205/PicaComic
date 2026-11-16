@@ -468,6 +468,11 @@ void main() {
         jsonDecode(await File('${temp.path}/newDownload.json').readAsString())
             as Map;
     expect((persistedAfterFailure['downloading'] as List), hasLength(2));
+    expect(
+      temp.listSync().whereType<FileSystemEntity>().where(
+          (entity) => entity.path.contains('newDownload.json.tmp.failed.')),
+      isNotEmpty,
+    );
 
     await backupDirectory.delete(recursive: true);
     await manager.cancel(first.id);
