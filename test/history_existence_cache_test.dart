@@ -16,6 +16,7 @@ void main() {
   setUp(() async {
     directory = await Directory.systemTemp.createTemp('pica_history_cache_');
     manager = HistoryManager.create();
+    HistoryManager.cache = manager;
     await manager.init(
       databasePath: '${directory.path}/history.db',
       importLegacy: false,
@@ -23,7 +24,9 @@ void main() {
   });
 
   tearDown(() async {
+    await DataMaintenance.waitForIdle();
     manager.close();
+    if (identical(HistoryManager.cache, manager)) HistoryManager.cache = null;
     await directory.delete(recursive: true);
   });
 
