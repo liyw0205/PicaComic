@@ -874,6 +874,31 @@ class EhNetwork {
     return Res(urlsRes.data[index]);
   }
 
+  List<String> _orderReaderLinks(String galleryLink, List<String> links) {
+    final segments = Uri.tryParse(galleryLink)?.pathSegments;
+    if (segments == null) return links;
+    final galleryIndex = segments.indexOf('g');
+    if (galleryIndex < 0 || galleryIndex + 1 >= segments.length) return links;
+    final galleryId = segments[galleryIndex + 1];
+    if (!RegExp(r'^\d+$').hasMatch(galleryId)) return links;
+
+    final numberedLinks = <(int, String)>[];
+    final seenPages = <int>{};
+    for (final link in links) {
+      final path = Uri.tryParse(link)?.pathSegments;
+      final match = path == null || path.isEmpty
+          ? null
+          : RegExp(r'^(\d+)-(\d+)$').firstMatch(path.last);
+      final page = match == null || match.group(1) != galleryId
+          ? null
+          : int.tryParse(match.group(2)!);
+      if (page == null || page < 1 || !seenPages.add(page)) return links;
+      numberedLinks.add((page, link));
+    }
+    numberedLinks.sort((a, b) => a.$1.compareTo(b.$1));
+    return numberedLinks.map((entry) => entry.$2).toList();
+  }
+
   /// page starts from 1
   Future<Res<List<String>>> _getReaderLinks(String link, int page,
       {CancelToken? cancelToken}) async {
@@ -898,7 +923,7 @@ class EhNetwork {
       for (var link in links) {
         urls_.add(link.attributes["href"]!);
       }
-      return Res(urls_);
+      return Res(_orderReaderLinks(link, urls_));
     } catch (e, s) {
       if ((e is DioException && e.type == DioExceptionType.cancel) ||
           (cancelToken?.isCancelled ?? false)) {

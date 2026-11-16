@@ -49,6 +49,34 @@ class _WatchedNetwork extends EhNetwork {
   }
 }
 
+class _ReaderNetwork extends EhNetwork {
+  _ReaderNetwork(this.pages) : super.create();
+
+  final Map<int, String> pages;
+  final requests = <String>[];
+
+  @override
+  Future<Res<String>> request(String url,
+      {Map<String, String>? headers,
+      CacheExpiredTime expiredTime = CacheExpiredTime.short,
+      bool setNW = true,
+      CancelToken? cancelToken}) async {
+    requests.add(url);
+    final query = Uri.parse(url).queryParameters;
+    final page = int.tryParse(query['p'] ?? '') ?? 0;
+    final html = pages[page];
+    if (html == null) return const Res.error('Missing reader fixture');
+    return Res(html);
+  }
+}
+
+String _readerPageLinks(Iterable<String> links) => '''
+  <html><div id="gdt">${links.map((link) => '<a href="$link"><div></div></a>').join()}</div></html>
+''';
+
+String _readerPage(Iterable<int> imagePages) => _readerPageLinks(
+    imagePages.map((page) => 'https://e-hentai.org/s/key/123-$page'));
+
 const _listingImage =
     '<img src="data:image/gif;base64,AAAA" data-src="https://img.invalid/cover.jpg">';
 const _listingLink = 'https://e-hentai.org/g/123/token/';
@@ -614,6 +642,49 @@ void main() {
     } finally {
       SingleInstanceCookieJar.instance = previousCookieJar;
     }
+  });
+
+  test('EH reader resolves images by gallery page number, not DOM order',
+      () async {
+    final network = _ReaderNetwork({
+      0: _readerPage(List.generate(20, (index) => 20 - index)),
+      1: _readerPage(List.generate(20, (index) => 40 - index)),
+    });
+    for (final page in [1, 3, 20, 21, 25, 40]) {
+      final result = await network.getReaderLink(
+          'https://e-hentai.org/g/123/token/', page);
+      expect(result.success, isTrue, reason: 'page=$page');
+      expect(result.data, 'https://e-hentai.org/s/key/123-$page');
+    }
+    expect(network.requests.toSet(), {
+      'https://e-hentai.org/g/123/token/',
+      'https://e-hentai.org/g/123/token/?p=1',
+    });
+  });
+
+  test('EH reader preserves DOM order when page numbers are ambiguous',
+      () async {
+    final unknownFormat = _ReaderNetwork({
+      0: _readerPageLinks([
+        'https://e-hentai.org/s/key/123-3',
+        'https://e-hentai.org/s/key/page-two',
+        'https://e-hentai.org/s/key/123-1',
+      ]),
+    });
+    final unknownResult = await unknownFormat.getReaderLink(
+        'https://e-hentai.org/g/123/token/', 1);
+    expect(unknownResult.data, 'https://e-hentai.org/s/key/123-3');
+
+    final duplicatePages = _ReaderNetwork({
+      0: _readerPageLinks([
+        'https://e-hentai.org/s/key/123-3',
+        'https://e-hentai.org/s/key/123-3',
+        'https://e-hentai.org/s/key/123-1',
+      ]),
+    });
+    final duplicateResult = await duplicatePages.getReaderLink(
+        'https://e-hentai.org/g/123/token/', 1);
+    expect(duplicateResult.data, 'https://e-hentai.org/s/key/123-3');
   });
 
   testWidgets('EH toolbar refresh ignores responses after its page is removed',
