@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,35 @@ import 'package:pica_comic/foundation/def.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
+
+class _LastRandom implements math.Random {
+  final List<int> bounds = [];
+
+  @override
+  int nextInt(int max) {
+    bounds.add(max);
+    return max - 1;
+  }
+
+  @override
+  bool nextBool() => throw UnsupportedError('nextBool');
+
+  @override
+  double nextDouble() => throw UnsupportedError('nextDouble');
+}
+
+class _SinglePassTags extends Iterable<String> {
+  _SinglePassTags(this.tags);
+
+  final List<String> tags;
+  int reads = 0;
+
+  @override
+  Iterator<String> get iterator {
+    if (++reads > 1) throw StateError('Tags were read more than once');
+    return tags.iterator;
+  }
+}
 
 class _FixtureComic extends BaseComic {
   const _FixtureComic(this.id, this.title, this.cover);
@@ -104,6 +134,108 @@ ComicSource _fixtureSource({
 }
 
 void main() {
+  test('random categories bound the sample and include the final legal start',
+      () {
+    final tags = List.generate(4, (index) => 'tag$index');
+    for (final count in [1, 3]) {
+      final fixedRandom = _LastRandom();
+      final runtimeRandom = _LastRandom();
+      final fixed = RandomCategoryPart('tags', tags, count, 'search',
+          random: fixedRandom);
+      final runtime = RandomCategoryPartWithRuntimeData(
+          'tags', () => tags, count, 'search',
+          random: runtimeRandom);
+      final expected = tags.sublist(tags.length - count);
+      expect(fixed.categories, expected);
+      expect(runtime.categories, expected);
+      expect(fixedRandom.bounds, [tags.length - count + 1]);
+      expect(runtimeRandom.bounds, fixedRandom.bounds);
+      expect(runtime.categoryParams, isNull);
+    }
+  });
+
+  test('random categories handle empty, non-positive, and oversized samples',
+      () {
+    for (final tags in [
+      <String>[],
+      ['one', 'two']
+    ]) {
+      for (final count in [-1, 0, tags.length, tags.length + 1]) {
+        final random = _LastRandom();
+        final fixed =
+            RandomCategoryPart('tags', tags, count, 'search', random: random);
+        final runtime = RandomCategoryPartWithRuntimeData(
+            'tags', () => tags, count, 'search',
+            random: random);
+        final expected = count <= 0 ? <String>[] : tags;
+        expect(fixed.categories, expected);
+        expect(runtime.categories, expected);
+        expect(random.bounds, isEmpty);
+      }
+    }
+  });
+
+  test('runtime categories read each iterable only once per refresh', () {
+    final samples = <_SinglePassTags>[];
+    final part = RandomCategoryPartWithRuntimeData('tags', () {
+      final tags = _SinglePassTags(['one', 'two', 'three']);
+      samples.add(tags);
+      return tags;
+    }, 2, 'category', random: _LastRandom(), buildParam: (tag) => '/tag/$tag');
+    expect(part.categories, ['two', 'three']);
+    expect(part.categoryParams, ['/tag/two', '/tag/three']);
+    expect(part.categoryParams, ['/tag/two', '/tag/three']);
+    expect(samples, hasLength(1));
+    expect(part.categories, ['two', 'three']);
+    expect(samples, hasLength(2));
+    expect(samples.map((sample) => sample.reads), [1, 1]);
+  });
+
+  test('runtime parameters keep their label snapshot until the next refresh',
+      () {
+    var tags = ['one', 'two'];
+    var loads = 0;
+    final part = RandomCategoryPartWithRuntimeData('tags', () {
+      loads++;
+      return tags;
+    }, 2, 'category', buildParam: (tag) => '/tag/$tag');
+    final labels = part.categories;
+    tags = ['three', 'four'];
+    labels.clear();
+    final params = part.categoryParams!;
+    expect(params, ['/tag/one', '/tag/two']);
+    params.clear();
+    expect(part.categoryParams, ['/tag/one', '/tag/two']);
+    expect(loads, 1);
+    expect(part.categories, ['three', 'four']);
+    expect(part.categoryParams, ['/tag/three', '/tag/four']);
+    expect(loads, 2);
+  });
+
+  test('an empty runtime snapshot does not reload while building parameters',
+      () {
+    var loads = 0;
+    final part = RandomCategoryPartWithRuntimeData('tags', () {
+      loads++;
+      return [];
+    }, 50, 'category', buildParam: (tag) => '/tag/$tag');
+    expect(part.categoryParams, isEmpty);
+    expect(part.categoryParams, isEmpty);
+    expect(loads, 1);
+    expect(part.categories, isEmpty);
+    expect(part.categoryParams, isEmpty);
+    expect(loads, 2);
+  });
+
+  test('full random samples do not expose the source list to display edits',
+      () {
+    final tags = ['one', 'two'];
+    final part = RandomCategoryPart('tags', tags, 50, 'search');
+    part.categories.clear();
+    expect(tags, ['one', 'two']);
+    expect(part.categories, tags);
+  });
+
   test('Hitomi and Htmanga parsers accept current source URL variants', () {
     final gallery = HiNetwork.decodeGalleryJson('''
       var galleryinfo = {"title":"fixture","type":"manga",

@@ -75,6 +75,8 @@ class RandomCategoryPart extends BaseCategoryPart {
 
   final int randomNumber;
 
+  final math.Random? _random;
+
   @override
   final String title;
 
@@ -84,25 +86,36 @@ class RandomCategoryPart extends BaseCategoryPart {
   @override
   final String categoryType;
 
-  List<String> _categories() {
-    if (randomNumber >= tags.length) {
-      return tags;
-    }
-    return tags.sublist(math.Random().nextInt(tags.length - randomNumber));
-  }
-
   @override
-  List<String> get categories => _categories();
+  List<String> get categories =>
+      _randomCategories(tags, randomNumber, _random ?? math.Random());
 
   /// A [BaseCategoryPart] that show random tags on category page.
   const RandomCategoryPart(
-      this.title, this.tags, this.randomNumber, this.categoryType);
+      this.title, this.tags, this.randomNumber, this.categoryType,
+      {math.Random? random})
+      : _random = random;
 }
+
+List<String> _randomCategories(
+    Iterable<String> values, int count, math.Random random) {
+  if (count <= 0) return [];
+  final tags = values.toList();
+  if (count >= tags.length) return tags;
+  final start = random.nextInt(tags.length - count + 1);
+  return tags.sublist(start, start + count);
+}
+
+typedef CategoryParamBuilder = String Function(String tag);
 
 class RandomCategoryPartWithRuntimeData extends BaseCategoryPart {
   final Iterable<String> Function() loadTags;
 
   final int randomNumber;
+
+  final CategoryParamBuilder? buildParam;
+
+  final math.Random? _random;
 
   @override
   final String title;
@@ -115,32 +128,28 @@ class RandomCategoryPartWithRuntimeData extends BaseCategoryPart {
 
   static final random = math.Random();
 
-  List<String> _categories() {
-    var tags = loadTags();
-    if (randomNumber >= tags.length) {
-      return tags.toList();
-    }
-    final start = random.nextInt(tags.length - randomNumber);
-    var res = List.filled(randomNumber, '');
-    int index = -1;
-    for (var s in tags) {
-      index++;
-      if (start > index) {
-        continue;
-      } else if (index == start + randomNumber) {
-        break;
-      }
-      res[index - start] = s;
-    }
-    return res;
+  List<String>? _lastCategories;
+
+  @override
+  List<String> get categories {
+    _lastCategories = List.unmodifiable(
+        _randomCategories(loadTags(), randomNumber, _random ?? random));
+    return List.of(_lastCategories!);
   }
 
   @override
-  List<String> get categories => _categories();
+  List<String>? get categoryParams {
+    final builder = buildParam;
+    if (builder == null) return null;
+    // Navigation must use the same sample as the most recently rendered labels.
+    return (_lastCategories ?? categories).map(builder).toList();
+  }
 
   /// A [BaseCategoryPart] that show random tags on category page.
   RandomCategoryPartWithRuntimeData(
-      this.title, this.loadTags, this.randomNumber, this.categoryType);
+      this.title, this.loadTags, this.randomNumber, this.categoryType,
+      {this.buildParam, math.Random? random})
+      : _random = random;
 }
 
 CategoryData getCategoryDataWithKey(String key) {

@@ -40,7 +40,12 @@ final nhentai = ComicSource.named(
       const FixedCategoryPart("language", ["中文", "日本語", "english"], "category",
           ["/language/chinese", "/language/japanese", "/language/english"]),
       RandomCategoryPartWithRuntimeData(
-          "Tags", () => nhentaiTags.values.toList(), 50, "search"),
+        "tag",
+        () => nhentaiTags.values,
+        50,
+        "category",
+        buildParam: (tag) => nhentaiStackParam([NhentaiTagTerm('tag', tag)]),
+      ),
     ],
     enableRankingPage: false,
     buttons: [

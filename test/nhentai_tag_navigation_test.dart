@@ -12,8 +12,10 @@ import 'package:pica_comic/network/nhentai_network/models.dart';
 import 'package:pica_comic/network/nhentai_network/tag_query.dart';
 import 'package:pica_comic/network/nhentai_network/tag_settings.dart';
 import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
+import 'package:pica_comic/network/nhentai_network/tags.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/category_comics_page.dart';
+import 'package:pica_comic/pages/category_page.dart';
 import 'package:pica_comic/pages/nhentai/comic_page.dart';
 import 'package:pica_comic/pages/nhentai/tag_stack_bar.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
@@ -78,6 +80,90 @@ void main() {
   tearDown(() {
     ComicSource.sources = previousSources;
     appdata.settings = previousSettings;
+  });
+
+  test('built-in random NH tags retain their exact namespace and route value',
+      () {
+    final part = nhentai.categoryData!.categories
+        .whereType<RandomCategoryPartWithRuntimeData>()
+        .single;
+    expect(part.enableRandom, isTrue);
+    expect(part.categoryType, 'category');
+    expect(part.title, 'tag');
+    expect(part.randomNumber, 50);
+    final labels = part.categories;
+    final params = part.categoryParams!;
+    expect(labels, hasLength(50));
+    expect(params, hasLength(labels.length));
+    for (var index = 0; index < labels.length; index++) {
+      expect(nhentaiTermsFromParam(params[index]),
+          [NhentaiTagTerm('tag', labels[index])]);
+    }
+    for (final tag in nhentaiTags.values) {
+      expect(nhentaiTermsFromParam(part.buildParam!(tag)),
+          [NhentaiTagTerm('tag', tag)]);
+    }
+  });
+
+  testWidgets(
+      'random NH refresh keeps displayed labels and click routes aligned',
+      (tester) async {
+    final previousKey = App.mainNavigatorKey;
+    App.mainNavigatorKey = App.navigatorKey;
+    addTearDown(() => App.mainNavigatorKey = previousKey);
+    final builtInPart = nhentai.categoryData!.categories
+        .whereType<RandomCategoryPartWithRuntimeData>()
+        .single;
+    var loads = 0;
+    var tags = ['full color'];
+    final part = RandomCategoryPartWithRuntimeData('tag', () {
+      loads++;
+      return tags;
+    }, 50, 'category', buildParam: builtInPart.buildParam);
+    source = ComicSource.named(
+      name: 'nhentai',
+      key: 'nhentai',
+      filePath: 'test',
+      categoryData: CategoryData(
+        title: 'nhentai',
+        categories: [part],
+        enableRankingPage: false,
+        key: 'nhentai',
+      ),
+      categoryComicsData: source.categoryComicsData,
+      searchPageData: source.searchPageData,
+      comicTileBuilderOverride: source.comicTileBuilderOverride,
+    );
+    ComicSource.sources = [source];
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: App.navigatorKey,
+      home: const Scaffold(body: CategoryPage('nhentai')),
+    ));
+    await tester.pumpAndSettle();
+    expect(loads, 1);
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    await tester.tap(find.text('full color'));
+    await tester.pumpAndSettle();
+    expect(requests.single.$1, '/tag/full-color');
+    expect(tileTerms, const [NhentaiTagTerm('tag', 'full color')]);
+
+    App.navigatorKey.currentState!.pop();
+    await tester.pumpAndSettle();
+    tags = ['x-ray'];
+    final beforeRefresh = loads;
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(loads, beforeRefresh + 1);
+    expect(find.text('full color'), findsNothing);
+    expect(find.text('x-ray'), findsOneWidget);
+    await tester.tap(find.text('x-ray'));
+    await tester.pumpAndSettle();
+    expect(requests.last.$1, startsWith('/combo/'));
+    expect(nhentaiTermsFromParam(requests.last.$1),
+        const [NhentaiTagTerm('tag', 'x-ray')]);
+    expect(tileTerms, const [NhentaiTagTerm('tag', 'x-ray')]);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

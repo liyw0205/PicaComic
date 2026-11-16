@@ -24,7 +24,9 @@ class AllCategoryPage extends StatelessWidget {
             .where((element) => element != null)
             .map((e) => e!)
             .toList();
-        categories = categories.where((element) => allCategories.contains(element)).toList();
+        categories = categories
+            .where((element) => allCategories.contains(element))
+            .toList();
 
         return Material(
           child: DefaultTabController(
@@ -205,7 +207,10 @@ class CategoryPage extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          IconButton(onPressed: onRefresh, icon: const Icon(Icons.refresh))
+          IconButton(
+              onPressed: onRefresh,
+              tooltip: "刷新".tl,
+              icon: const Icon(Icons.refresh))
         ],
       ),
     );
