@@ -893,7 +893,7 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 | 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
 | --- | --- | --- | --- |
-| 网络收藏夹生命周期 | 待提交 | `_MultiFolderFavoritesPageState` 抽取带 `mounted` 检查的 `_reloadFolders()`，删除收藏夹和创建收藏夹完成后的刷新回调统一经过该入口；页面卸载后迟到响应不再调用 `setState` | `test/network_favorite_page_async_test.dart` 复用现有 widget suite，以 Completer 覆盖删除请求挂起、页面卸载、请求完成；目标分析和格式检查通过 |
-| 测试流程 | 待提交 | 删除空的 `test/widget_test.dart`；将缩略图尺寸断言并入 `test/thumbnails_data_test.dart`；将运行时内存 2 项断言并入 `test/runtime_metrics_test.dart`，仅指标 group 保留 `RuntimeMetrics.reset`；断言总数不减少，减少 3 个独立入口 | `dart analyze`、analyzer baseline、异步边界、格式、`git diff --check` 和 runner shell 语法通过；本地 Flutter runner 仍受 Termux Kernel SDK/`impellerc` 环境阻塞，待 tag workflow 全量回归 |
+| 网络收藏夹生命周期 | `6fbecca8` | `_MultiFolderFavoritesPageState` 抽取带 `mounted` 检查的 `_reloadFolders()`，删除收藏夹和创建收藏夹完成后的刷新回调统一经过该入口；页面卸载后迟到响应不再调用 `setState` | `test/network_favorite_page_async_test.dart` 复用现有 widget suite，以 Completer 覆盖删除请求挂起、页面卸载、请求完成；目标分析和格式检查通过 |
+| 测试流程 | `6fbecca8` | 删除空的 `test/widget_test.dart`；将缩略图尺寸断言并入 `test/thumbnails_data_test.dart`；将运行时内存 2 项断言并入 `test/runtime_metrics_test.dart`，仅指标 group 保留 `RuntimeMetrics.reset`；断言总数不减少，减少 3 个独立入口 | `dart analyze`、analyzer baseline、异步边界、格式、`git diff --check` 和 runner shell 语法通过；本地 Flutter runner 仍受 Termux Kernel SDK/`impellerc` 环境阻塞，待 tag workflow 全量回归 |
 
 版本拟递增到 `4.2.65+4265`；普通 `master` push 仍只推送分支、不触发 Android workflow。提交 `master` 后创建或移动 annotated tag `v4.2.65`，仅由该 `v*` tag 触发完整 Flutter/native curl/Android Release 门禁；tag 必须指向本次提交 SHA，旧 tag 不回写。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。

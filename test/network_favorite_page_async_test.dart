@@ -32,6 +32,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     deleteFolder.complete(const Res(true));
     await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
 
     expect(tester.takeException(), isNull);
   });
