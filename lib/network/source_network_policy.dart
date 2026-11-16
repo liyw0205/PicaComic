@@ -197,6 +197,12 @@ class SourceNetworkPolicy {
           throw _cancelled(options, key);
         }
       }
+      // A permit can be available immediately when pacing is disabled. Give
+      // an already-completed cancellation signal one microtask to win before
+      // committing pacing state and returning a lease to the transport.
+      if (await _cancelledNow(cancelFuture)) {
+        throw _cancelled(options, key);
+      }
       bucket.nextAllowed = _now().add(bucket.config.minInterval);
       final openedAfterWait = health.openedUntil;
       if (openedAfterWait != null && openedAfterWait.isAfter(_now())) {
@@ -458,6 +464,17 @@ class SourceNetworkPolicy {
     return Future.any<bool>([
       Future<void>.delayed(duration).then((_) => false),
       cancelFuture.then((_) => true),
+    ]);
+  }
+
+  Future<bool> _cancelledNow(Future<void>? cancelFuture) {
+    if (cancelFuture == null) return Future<bool>.value(false);
+    // Register cancellation first so an already-completed future wins over
+    // the immediate non-cancelled result. A pending cancellation still keeps
+    // the fast path to one microtask.
+    return Future.any<bool>([
+      cancelFuture.then((_) => true),
+      Future<bool>.value(false),
     ]);
   }
 

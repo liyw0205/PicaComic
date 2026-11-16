@@ -65,7 +65,13 @@ int compareNaturalArchivePaths(String left, String right) {
         : a.compareTo(b);
     if (compare != 0) return compare;
   }
-  return leftParts.length.compareTo(rightParts.length);
+  final lengthCompare = leftParts.length.compareTo(rightParts.length);
+  if (lengthCompare != 0) return lengthCompare;
+
+  // Numeric chunks can compare equal while the actual names differ (for
+  // example, `page_01.jpg` and `page_1.jpg`). Keep archive installation
+  // deterministic instead of relying on the platform directory order.
+  return left.compareTo(right);
 }
 
 Future<bool> isValidArchiveImage(File file) async {

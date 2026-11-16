@@ -61,6 +61,21 @@ void main() {
       ..sort(compareNaturalArchivePaths);
     expect(names, ['1.jpg', '2.jpg', '10.jpg']);
 
+    final multiPartNames = [
+      'chapter-10/page-2.jpg',
+      'chapter-2/page-10.jpg',
+      'chapter-2/page-2.jpg',
+      'chapter-2/page-01.jpg',
+      'chapter-2/page-1.jpg',
+    ]..sort(compareNaturalArchivePaths);
+    expect(multiPartNames, [
+      'chapter-2/page-01.jpg',
+      'chapter-2/page-1.jpg',
+      'chapter-2/page-2.jpg',
+      'chapter-2/page-10.jpg',
+      'chapter-10/page-2.jpg',
+    ]);
+
     final directory = await Directory.systemTemp.createTemp('eh-archive-');
     addTearDown(() => directory.delete(recursive: true));
     final validPng = image.encodePng(image.Image(width: 1, height: 1));

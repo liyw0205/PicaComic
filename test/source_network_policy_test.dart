@@ -290,6 +290,38 @@ void main() {
     expect(health['state'], 'healthy');
   });
 
+  test('an already-completed cancellation wins an immediately available permit',
+      () async {
+    final policy = SourceNetworkPolicy();
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+    );
+    final request = RequestOptions(
+      path: 'https://fixture.test/immediate-cancel',
+      extra: {'sourceKey': 'fixture'},
+    );
+    final first = await policy.beforeRequest(request);
+    first.release();
+
+    await expectLater(
+      policy.beforeRequest(request, cancelFuture: Future<void>.value()),
+      throwsA(isA<DioException>().having(
+        (error) => error.type,
+        'type',
+        DioExceptionType.cancel,
+      )),
+    );
+
+    final health = policy.diagnosticSummary()['fixture']! as Map;
+    expect(health['requests'], 2);
+    expect(health['failures'], 1);
+    expect(health['cancelled'], 1);
+
+    final followup = await policy.beforeRequest(request);
+    policy.reportSuccess(followup);
+  });
+
   test('resizing a source budget preserves queued requests', () async {
     final policy = SourceNetworkPolicy();
     policy.configure(
