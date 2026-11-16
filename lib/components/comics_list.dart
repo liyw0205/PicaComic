@@ -131,6 +131,13 @@ class ComicsPageLogic<T> extends StateController {
   }
 
   @override
+  void dispose() {
+    _generation++;
+    loadingData = false;
+    super.dispose();
+  }
+
+  @override
   void refresh() {
     _generation++;
     loading = true;

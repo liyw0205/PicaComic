@@ -828,4 +828,20 @@ void main() {
     expect(await File('$destination/root.txt').readAsString(), 'root');
     expect(await File('$destination/nested/child.txt').readAsString(), 'child');
   });
+
+  test('backup manifest excludes itself from normalized file names', () async {
+    final backup = Directory('${root.path}/manifest');
+    await Directory('${backup.path}/nested').create(recursive: true);
+    await File('${backup.path}/appdata').writeAsString('{"settings":[]}');
+    await File('${backup.path}/nested/payload').writeAsString('payload');
+
+    await writeBackupManifest(backup);
+
+    final decoded = jsonDecode(
+            await File('${backup.path}/$backupManifestName').readAsString())
+        as Map<String, dynamic>;
+    final files = Map<String, dynamic>.from(decoded['files'] as Map);
+    expect(files.keys, containsAll(<String>['appdata', 'nested/payload']));
+    expect(files.containsKey(backupManifestName), isFalse);
+  });
 }

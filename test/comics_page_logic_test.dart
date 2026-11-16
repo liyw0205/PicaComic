@@ -91,4 +91,25 @@ void main() {
     expect(logic.maxPage, 4);
     expect(logic.loadingData, isFalse);
   });
+
+  test('dispose invalidates an in-flight page response', () async {
+    final response = Completer<Res<List<int>>>();
+    final logic = ComicsPageLogic<int>()
+      ..comics = [1]
+      ..current = 1
+      ..maxPage = 3;
+
+    final request = logic.loadNextPage((page) {
+      expect(page, 2);
+      return response.future;
+    });
+
+    logic.dispose();
+    response.complete(const Res([2], subData: 3));
+    await request;
+
+    expect(logic.comics, [1]);
+    expect(logic.current, 1);
+    expect(logic.loadingData, isFalse);
+  });
 }

@@ -26,6 +26,19 @@ void main() {
     second.dispose();
   });
 
+  test('update filters listeners by id', () {
+    final controller = _TestController();
+    final calls = <String>[];
+    controller.subscribe(() => calls.add('first'), id: 'first');
+    controller.subscribe(() => calls.add('second'), id: 'second');
+    controller.subscribe(() => calls.add('unscoped'));
+
+    controller.update(['second']);
+
+    expect(calls, ['second']);
+    controller.dispose();
+  });
+
   test('disposed controllers clear listeners and reject registration', () {
     final controller = _TestController();
     controller.subscribe(() {});

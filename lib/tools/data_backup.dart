@@ -41,10 +41,12 @@ Future<void> writeBackupManifest(Directory root,
   final sensitive = <String>[];
   await for (final entity in root.list(recursive: true, followLinks: false)) {
     if (entity is Link) throw const FormatException('Backup contains a link');
-    if (entity is! File || entity.path.endsWith('/$backupManifestName'))
-      continue;
+    if (entity is! File) continue;
+    // Normalize before comparing so Windows exports do not list the manifest
+    // itself with a stale self-hash.
     final name =
         entity.path.substring(root.path.length + 1).replaceAll('\\', '/');
+    if (name == backupManifestName) continue;
     files[name] = {
       'size': await entity.length(),
       'sha256': await fileDigest(entity)
