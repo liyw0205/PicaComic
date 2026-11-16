@@ -1206,7 +1206,7 @@ Future<void> checkFolder(String name) async {
       if (!available) {
         unavailableNum++;
         if (!comic.tags.contains("Unavailable")) {
-          LocalFavoritesManager()
+          await LocalFavoritesManager()
               .addTagTo(name, comic.target, "Unavailable", comic.type);
         }
       }

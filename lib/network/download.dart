@@ -933,20 +933,26 @@ class DownloadManager with _DownloadDb implements Listenable {
       return await action();
     } finally {
       var shouldStart = false;
-      if (preserveEnqueues) {
-        await _flushPendingLifecycleEnqueues();
-        shouldStart =
-            _startRequestedAfterLifecycle && !_pauseRequestedAfterLifecycle;
-      } else {
-        _pendingLifecycleEnqueues.clear();
+      try {
+        if (preserveEnqueues) {
+          await _flushPendingLifecycleEnqueues();
+          shouldStart =
+              _startRequestedAfterLifecycle && !_pauseRequestedAfterLifecycle;
+        } else {
+          _pendingLifecycleEnqueues.clear();
+        }
+      } finally {
+        // A failed durable flush must not leave callers waiting on a gate
+        // whose operation can never complete. Items already moved into the
+        // main queue remain available for a later persistence retry.
+        _startRequestedAfterLifecycle = false;
+        _pauseRequestedAfterLifecycle = false;
+        if (identical(_lifecycleOperation, operation)) {
+          _preserveLifecycleEnqueues = false;
+          _lifecycleOperation = null;
+        }
+        if (!completer.isCompleted) completer.complete();
       }
-      _startRequestedAfterLifecycle = false;
-      _pauseRequestedAfterLifecycle = false;
-      if (identical(_lifecycleOperation, operation)) {
-        _preserveLifecycleEnqueues = false;
-        _lifecycleOperation = null;
-      }
-      if (!completer.isCompleted) completer.complete();
       if (shouldStart) start();
     }
   }

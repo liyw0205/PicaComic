@@ -720,15 +720,18 @@ class LocalFavoritesManager {
     return rows.map((element) => FavoriteItem.fromRow(element)).toList();
   }
 
-  void addTagTo(String folder, String target, String tag,
-      [FavoriteType? type]) {
-    if (_deferWrite(() => addTagTo(folder, target, tag, type))) return;
+  Future<void> addTagTo(String folder, String target, String tag,
+      [FavoriteType? type]) async {
+    if (DataMaintenance.busy) {
+      return DataMaintenance.run<void>(
+          () => addTagTo(folder, target, tag, type));
+    }
     _db.execute("""
       update ${_identifier(folder)}
       set tags = ? || ',' || tags
       where target == ? ${type == null ? '' : 'and type == ?'};
     """, [tag, target, if (type != null) type.key]);
-    saveData();
+    await saveData();
   }
 
   List<FavoriteItemWithFolderInfo> allComics() {

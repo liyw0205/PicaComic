@@ -140,6 +140,51 @@ void main() {
     expect(favorites.folderSync.single.folderName, before);
   });
 
+  test('favorite tag writes wait for maintenance and propagate errors',
+      () async {
+    final item = comic('tagged');
+    await favorites.addComic(favoritesFolder, item, null, false);
+
+    final db = sqlite3.open('${root.path}/local_favorite.db');
+    db.execute('''
+      create trigger reject_favorite_tag
+      before update of tags on "$favoritesFolder"
+      when new.target = 'tagged'
+      begin
+        select raise(abort, 'injected favorite tag failure');
+      end;
+    ''');
+    db.dispose();
+
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final maintenance = DataMaintenance.run<void>(() async {
+      entered.complete();
+      await release.future;
+    }, suppressSync: true);
+    await entered.future;
+
+    final tagging = favorites.addTagTo(
+        favoritesFolder, item.target, 'Unavailable', item.type);
+    expect(favorites.getComic(favoritesFolder, item.target, item.type).tags,
+        isEmpty);
+
+    release.complete();
+    await maintenance;
+    await expectLater(tagging, throwsA(isA<SqliteException>()));
+    expect(favorites.getComic(favoritesFolder, item.target, item.type).tags,
+        isEmpty);
+
+    final after = comic('after-tag-failure');
+    await favorites.addComic(favoritesFolder, after, null, false);
+    await DataMaintenance.run<void>(
+        () => favorites.addTagTo(
+            favoritesFolder, after.target, 'Unavailable', after.type),
+        suppressSync: true);
+    expect(favorites.getComic(favoritesFolder, after.target, after.type).tags,
+        ['Unavailable']);
+  });
+
   test('normal scope leaves synchronization enabled for user writes', () async {
     final image = favorite('normal');
     await DataMaintenance.run(() async {

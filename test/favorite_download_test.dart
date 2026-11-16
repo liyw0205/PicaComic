@@ -374,6 +374,30 @@ void main() {
     expect(second.startCount, 1);
   });
 
+  test('lifecycle flush failure releases the gate and keeps the task queued',
+      () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final lifecycle = manager.runLifecycleForTesting(() async {
+      entered.complete();
+      await release.future;
+    });
+    await entered.future;
+
+    final favorite = createFavoriteItem()..target = 'flush-failure';
+    manager.addFavoriteDownload(favorite);
+    await Directory('${temp.path}/newDownload.json.tmp').create();
+
+    release.complete();
+    await expectLater(lifecycle, throwsA(isA<FileSystemException>()));
+
+    expect(manager.downloading.map((item) => item.id), ['flush-failure']);
+    expect(manager.isDownloading, isFalse);
+
+    // The failed flush must not permanently block later lifecycle requests.
+    await manager.runLifecycleForTesting(() async {});
+  });
+
   test('pause during cancellation suppresses automatic queue restart',
       () async {
     final stopStarted = Completer<void>();
