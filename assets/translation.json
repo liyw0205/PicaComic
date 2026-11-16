@@ -1,5 +1,12 @@
 {
   "zh_TW": {
+    "点标签时叠加到当前标签": "點標籤時疊加到目前標籤",
+    "这个标签已经在当前组合里了": "這個標籤已在目前組合裡了",
+    "最多同时 @n 个标签": "最多同時 @n 個標籤",
+    "默认排除标签": "預設排除標籤",
+    "标签格式无效": "標籤格式無效",
+    "保存失败": "儲存失敗",
+    "移除": "移除",
     "在标签搜索结果里打开画廊, 再点标签会和搜索里的标签一起搜索, 最多 @n 个": "在標籤搜尋結果裡打開畫廊, 再點標籤會和搜尋裡的標籤一起搜尋, 最多 @n 個",
     "有可用更新": "有可用更新",
     "下载管理器": "下載管理器",
@@ -575,6 +582,13 @@
     "请勿反馈相关问题": "請勿回饋相關問題"
   },
   "en_US": {
+    "点标签时叠加到当前标签": "Combine tags when opening a tag",
+    "这个标签已经在当前组合里了": "This tag is already included",
+    "最多同时 @n 个标签": "Up to @n tags at a time",
+    "默认排除标签": "Default excluded tags",
+    "标签格式无效": "Invalid tag format",
+    "保存失败": "Could not save",
+    "移除": "Remove",
     "在标签搜索结果里打开画廊, 再点标签会和搜索里的标签一起搜索, 最多 @n 个": "When a gallery is opened from a tag search, tapping its tags searches them together with the tags of that search (up to @n)",
     "有可用更新": "Updates available",
     "下载管理器": "Download manager",

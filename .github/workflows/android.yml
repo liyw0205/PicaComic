@@ -36,6 +36,20 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Tags can read the default branch's cache, but not another tag's.
+          # Seed/refresh it with workflow_dispatch on master when inputs change.
+          cache: gradle
+          cache-jdk: false
+          cache-path: |
+            ~/.gradle/caches/modules-2
+            !~/.gradle/caches/modules-2/*.lock
+          cache-dependency-path: |
+            .flutter-version
+            pubspec.lock
+            android/**/*.gradle*
+            android/gradle.properties
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/gradle/wrapper/gradle-wrapper.jar
       - uses: ./.github/actions/setup-flutter
       - run: flutter pub get --enforce-lockfile
       - name: Analyze Dart sources

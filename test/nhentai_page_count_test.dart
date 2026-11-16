@@ -8,10 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' as html;
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/built_in/nhentai.dart';
+import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/nhentai_network/tag_query.dart';
+import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _UnusedCookieJar implements SingleInstanceCookieJar {
   @override
@@ -30,10 +34,12 @@ class _GalleryAdapter implements HttpClientAdapter {
   final Map<int, int?>? pageCounts;
   final int? emptyAfterPage;
   final bool htmlFallback;
+  final requests = <RequestOptions>[];
 
   @override
   Future<ResponseBody> fetch(RequestOptions options,
       Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
     if (htmlFallback) {
       final isApi = options.uri.path.contains('/api/');
       return ResponseBody.fromString(
@@ -73,6 +79,66 @@ class _GalleryAdapter implements HttpClientAdapter {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+      'stacked category queries retain sort, pagination and default exclusions',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final network = NhentaiNetwork();
+    final savedCookieJar = network.cookieJar;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final savedSources = ComicSource.sources;
+    final savedHistory = List<String>.from(appdata.searchHistory);
+    final adapter = _GalleryAdapter({
+      'id': 123,
+      'english_title': 'Test gallery',
+      'thumbnail': 'galleries/456/thumb.jpg',
+      'tag_ids': [29963],
+    }, totalPages: 7);
+    final dio = Dio()..httpClientAdapter = adapter;
+    network.cookieJar = _UnusedCookieJar();
+    network.dio = dio;
+    ComicSource.sources = [
+      ComicSource.named(name: 'nhentai', key: 'nhentai', filePath: 'test')
+        ..data['multiTagDefaultExcludes'] = '-tag:"yaoi"',
+    ];
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    appdata.settings[69] = '1';
+    appdata.settings[91] = '0';
+    addTearDown(() {
+      network.cookieJar = savedCookieJar;
+      appdata.settings = savedSettings;
+      appdata.searchHistory
+        ..clear()
+        ..addAll(savedHistory);
+      ComicSource.sources = savedSources;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close();
+    });
+
+    final param = nhentaiStackParam(const [
+      NhentaiTagTerm('tag', 'glasses'),
+      NhentaiTagTerm('language', 'translated'),
+    ]);
+    final result = await nhentai.categoryComicsData!
+        .load('glasses', param, ['&sort=popular-month'], 3);
+    expect(result.success, isTrue);
+    expect(result.subData, 7);
+    final request = adapter.requests.single.uri;
+    expect(request.path, '/api/v2/search');
+    expect(request.queryParameters['page'], '3');
+    expect(request.queryParameters['sort'], 'popular-month');
+    expect(request.queryParameters['query'],
+        'tag:"glasses" language:translated language:chinese -tag:"yaoi"');
+
+    await nhentai.categoryComicsData!.load('yaoi', '/tag/yaoi', [''], 1);
+    expect(adapter.requests.last.uri.queryParameters['query'],
+        'tag:"yaoi" language:chinese');
+  });
 
   test('API gallery page count is separate from listing pagination', () async {
     final network = NhentaiNetwork();

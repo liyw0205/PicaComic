@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/nhentai_network/tag_query.dart';
+import 'package:pica_comic/network/nhentai_network/tag_settings.dart';
+import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/category_comics_page.dart';
 import 'package:pica_comic/pages/comic_page.dart';
@@ -19,11 +22,15 @@ import '../../network/download.dart';
 import 'comments.dart';
 
 class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
-  const NhentaiComicPage(String id, {super.key, this.comicCover}) : _id = id;
+  const NhentaiComicPage(String id,
+      {super.key, this.comicCover, this.tagTerms = const []})
+      : _id = id;
 
   final String _id;
 
   final String? comicCover;
+
+  final List<NhentaiTagTerm> tagTerms;
 
   @override
   String get url => "https://nhentai.net/g/$_id/";
@@ -216,24 +223,8 @@ class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
 
   @override
   void tapOnTag(String tag, String key) {
-    if (tag.contains(" | ")) {
-      tag = tag.replaceAll(' | ', '-');
-    }
-    if (tag.contains(" ")) {
-      tag = tag.replaceAll(' ', '-');
-    }
-    String? categoryParam = switch (key) {
-      "Parodies" => "/parody/$tag",
-      "Character" => "/character/$tag",
-      "Tags" => "/tag/$tag",
-      "Artists" => "/artist/$tag",
-      "Groups" => "/group/$tag",
-      "Languages" => "/language/$tag",
-      "Categories" => "/category/$tag",
-      _ => null
-    };
-
-    if (categoryParam == null) {
+    final namespace = nhentaiNamespaceOfField(key);
+    if (namespace == null) {
       context.to(
         () => SearchResultPage(
           keyword: tag,
@@ -241,11 +232,25 @@ class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
         ),
       );
     } else {
+      final term = NhentaiTagTerm(namespace, tag);
+      final result = nhentaiStackAdd(
+          NhentaiTagSettings.stackEnabled ? tagTerms : const [], term);
+      switch (result.outcome) {
+        case NhentaiStackOutcome.duplicate:
+          showToast(message: '这个标签已经在当前组合里了'.tl);
+          return;
+        case NhentaiStackOutcome.limit:
+          showToast(
+              message: '最多同时 @n 个标签'.tlParams({'n': '$nhentaiTagStackLimit'}));
+          return;
+        case NhentaiStackOutcome.added:
+          break;
+      }
       context.to(
         () => CategoryComicsPage(
           category: tag,
           categoryKey: ComicSource.find(sourceKey)!.categoryData!.key,
-          param: categoryParam,
+          param: nhentaiStackParam(result.terms),
         ),
       );
     }

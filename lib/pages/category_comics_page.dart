@@ -4,6 +4,10 @@ import 'package:pica_comic/components/components.dart';
 import "package:pica_comic/foundation/app.dart";
 import 'package:pica_comic/network/base_comic.dart';
 import "package:pica_comic/network/res.dart";
+import 'package:pica_comic/network/nhentai_network/tag_query.dart';
+import 'package:pica_comic/network/nhentai_network/tag_settings.dart';
+import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
+import 'package:pica_comic/pages/nhentai/tag_stack_bar.dart';
 import "package:pica_comic/tools/translations.dart";
 
 class CategoryComicsPage extends StatefulWidget {
@@ -28,10 +32,18 @@ class _CategoryComicsPageState extends State<CategoryComicsPage> {
   late final CategoryComicsData data;
   late final List<CategoryComicsOptions> options;
   late List<String> optionsValue;
+  late final String sourceKey;
+  late String? param = widget.param;
+
+  List<NhentaiTagTerm> get nhentaiTerms =>
+      sourceKey == 'nhentai' && NhentaiTagSettings.stackEnabled
+          ? nhentaiTermsFromParam(param) ?? const []
+          : const [];
 
   void findData() {
     for (final source in ComicSource.sources) {
       if (source.categoryData?.key == widget.categoryKey) {
+        sourceKey = source.key;
         data = source.categoryComicsData!;
         options = data.options.where((element) {
           if (element.notShowWhen.contains(widget.category)) {
@@ -51,7 +63,29 @@ class _CategoryComicsPageState extends State<CategoryComicsPage> {
   @override
   void initState() {
     findData();
+    if (sourceKey == 'nhentai') {
+      NhentaiTagSettings.changes.addListener(_refreshTagSettings);
+    }
     super.initState();
+  }
+
+  void _refreshTagSettings() => setState(() {});
+
+  @override
+  void dispose() {
+    if (sourceKey == 'nhentai') {
+      NhentaiTagSettings.changes.removeListener(_refreshTagSettings);
+    }
+    super.dispose();
+  }
+
+  void removeNhentaiTerm(NhentaiTagTerm term) {
+    final rest = [
+      for (final current in nhentaiTerms)
+        if (!current.sameTarget(term)) current,
+    ];
+    if (rest.isEmpty) return;
+    setState(() => param = nhentaiStackParam(rest));
   }
 
   @override
@@ -60,23 +94,24 @@ class _CategoryComicsPageState extends State<CategoryComicsPage> {
       appBar: Appbar(
         title: Text(widget.category),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _CategoryComicsList(
-              key: ValueKey(
-                  "${widget.category} with ${widget.param} and $optionsValue"),
-              loader: data.load,
-              category: widget.category,
-              options: optionsValue,
-              param: widget.param,
-              header: buildOptions(),
-              sourceKey: ComicSource.sources
-                  .firstWhere((e) => e.categoryData?.key == widget.categoryKey)
-                  .key,
+      body: NhentaiTagScope(
+        terms: nhentaiTerms,
+        child: Column(
+          children: [
+            Expanded(
+              child: _CategoryComicsList(
+                key: ValueKey(
+                    "${widget.category} with $param and $optionsValue ${sourceKey == 'nhentai' ? NhentaiTagSettings.changes.value : ''}"),
+                loader: data.load,
+                category: widget.category,
+                options: optionsValue,
+                param: param,
+                header: buildOptions(),
+                sourceKey: sourceKey,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -119,7 +154,13 @@ class _CategoryComicsPageState extends State<CategoryComicsPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [...children, const Divider()],
+        children: [
+          if (nhentaiTerms.length > 1)
+            NhentaiTagStackBar(
+                terms: nhentaiTerms, onRemove: removeNhentaiTerm),
+          ...children,
+          const Divider(),
+        ],
       ).paddingLeft(8).paddingRight(8),
     );
   }

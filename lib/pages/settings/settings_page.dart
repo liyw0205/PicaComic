@@ -42,6 +42,8 @@ import '../../network/jm_network/jm_network.dart';
 import '../../network/native_curl.dart';
 import '../../network/network_logging.dart';
 import '../../network/nhentai_network/nhentai_main_network.dart';
+import '../../network/nhentai_network/tag_query.dart';
+import '../../network/nhentai_network/tag_settings.dart';
 import '../../network/res.dart';
 import '../../network/update.dart';
 import '../../network/webdav.dart';

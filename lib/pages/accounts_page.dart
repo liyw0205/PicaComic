@@ -16,8 +16,6 @@ class AccountsPageLogic extends StateController {
 class AccountsPage extends StatelessWidget {
   const AccountsPage({super.key});
 
-  AccountsPageLogic get logic => StateController.find<AccountsPageLogic>();
-
   @override
   Widget build(BuildContext context) {
     var body = StateBuilder<AccountsPageLogic>(
@@ -27,7 +25,7 @@ class AccountsPage extends StatelessWidget {
           slivers: [
             SliverList(
               delegate: SliverChildListDelegate(
-                buildContent(context).toList(),
+                buildContent(context, logic).toList(),
               ),
             ),
             SliverPadding(
@@ -50,7 +48,8 @@ class AccountsPage extends StatelessWidget {
     }
   }
 
-  Iterable<Widget> buildContent(BuildContext context) sync* {
+  Iterable<Widget> buildContent(
+      BuildContext context, AccountsPageLogic controller) sync* {
     var sources =
         ComicSource.sources.where((element) => element.account != null);
     if (sources.isEmpty) return;
@@ -80,7 +79,7 @@ class AccountsPage extends StatelessWidget {
               );
               element.saveData();
             }
-            logic.update();
+            controller.update();
           },
         );
       }
@@ -96,27 +95,42 @@ class AccountsPage extends StatelessWidget {
             );
           }
         }
-        if (element.account!.allowReLogin) {
-          bool loading = logic._reLogin[element.key] == true;
+        final login = element.account!.login;
+        if (element.account!.allowReLogin && login != null) {
+          bool loading = controller._reLogin[element.key] == true;
           yield ListTile(
             title: Text("重新登录".tl),
             subtitle: Text("如果登录失效点击此处".tl),
             onTap: () async {
-              if (element.data["account"] == null) {
+              if (controller.isDisposed ||
+                  controller._reLogin[element.key] == true) {
+                return;
+              }
+              final account = element.data["account"];
+              if (account is! List ||
+                  account.length < 2 ||
+                  account[0] is! String ||
+                  account[1] is! String) {
                 showToast(message: "无数据".tl);
                 return;
               }
-              logic._reLogin[element.key] = true;
-              logic.update();
-              final List account = element.data["account"];
-              var res = await element.account!.login!(account[0], account[1]);
-              if (res.error) {
-                showToast(message: res.errorMessage!);
-              } else {
-                showToast(message: "重新登录成功".tl);
+              controller._reLogin[element.key] = true;
+              controller.update();
+              try {
+                final res = await login(account[0], account[1]);
+                if (!context.mounted || controller.isDisposed) return;
+                showToast(
+                    message: res.error
+                        ? res.errorMessage ?? "网络错误".tl
+                        : "重新登录成功".tl);
+              } catch (_) {
+                if (context.mounted && !controller.isDisposed) {
+                  showToast(message: "网络错误".tl);
+                }
+              } finally {
+                controller._reLogin.remove(element.key);
+                controller.update();
               }
-              logic._reLogin[element.key] = false;
-              logic.update();
             },
             trailing: loading
                 ? const SizedBox.square(
@@ -134,7 +148,7 @@ class AccountsPage extends StatelessWidget {
             element.data["account"] = null;
             element.account?.logout();
             element.saveData();
-            logic.update();
+            controller.update();
           },
           trailing: const Icon(Icons.logout),
         );

@@ -11,6 +11,9 @@ import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/eh_network/tag_settings.dart';
 import 'package:pica_comic/network/eh_network/tag_stack.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/network/nhentai_network/tag_settings.dart';
+import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
+import 'package:pica_comic/pages/nhentai/tag_stack_bar.dart';
 import 'package:pica_comic/pages/ehentai/tag_stack_bar.dart';
 import 'package:pica_comic/network/search_language.dart';
 import 'package:pica_comic/tools/extensions.dart';
@@ -42,14 +45,15 @@ class _SearchPageComicList extends ComicsPage<BaseComic> {
   @override
   Future<Res<List<BaseComic>>> getComics(int i) async {
     final searchData = ComicSource.find(sourceKey)!.searchPageData!;
-    final query = withDefaultSearchLanguage(keyword, languageIndex,
-        enabled: searchData.enableLanguageFilter);
+    final query = sourceKey == 'nhentai'
+        ? withNhentaiSearchLanguage(keyword, languageIndex)
+        : withDefaultSearchLanguage(keyword, languageIndex,
+            enabled: searchData.enableLanguageFilter);
     return await searchData.loadPage!(query, i, options);
   }
 
   @override
-  String? get tag =>
-      "$sourceKey search page with ${withDefaultSearchLanguage(keyword, languageIndex, enabled: ComicSource.find(sourceKey)!.searchPageData!.enableLanguageFilter)}";
+  String? get tag => '$sourceKey search page with $keyword and $languageIndex';
 
   @override
   String? get title => null;
@@ -135,6 +139,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
     suggestionsController = _SuggestionsController(controller);
     SearchResultPage._activePages.add(this);
     SearchPageContext._pages.add(this);
+    NhentaiTagSettings.changes.addListener(_refreshNhentaiTags);
     super.initState();
   }
 
@@ -145,6 +150,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
     }
     SearchResultPage._activePages.remove(this);
     SearchPageContext._unregister(this);
+    NhentaiTagSettings.changes.removeListener(_refreshNhentaiTags);
     controller.dispose();
     super.dispose();
   }
@@ -168,6 +174,10 @@ class _SearchResultPageState extends State<SearchResultPage> {
   void updateDefaultLanguage(int index) {
     if (!mounted || languageIndex == index) return;
     setState(() => languageIndex = index);
+  }
+
+  void _refreshNhentaiTags() {
+    if (sourceKey == 'nhentai') setState(() {});
   }
 
   void onChanged(String s) {
@@ -215,11 +225,13 @@ class _SearchResultPageState extends State<SearchResultPage> {
             searchData.searchOptions!.length != options.length
         ? searchData.searchOptions!.map((e) => e.defaultValue).toList()
         : options;
-    final query = withDefaultSearchLanguage(
-      keyword,
-      languageIndex,
-      enabled: searchData.enableLanguageFilter,
-    );
+    final query = sourceKey == 'nhentai'
+        ? withNhentaiSearchLanguage(keyword, languageIndex)
+        : withDefaultSearchLanguage(
+            keyword,
+            languageIndex,
+            enabled: searchData.enableLanguageFilter,
+          );
     if (searchData.overrideSearchResultBuilder != null) {
       return KeyedSubtree(
         key: ValueKey('$sourceKey:$query:${effectiveOptions.join(',')}'),
@@ -297,36 +309,41 @@ class _SearchResultPageState extends State<SearchResultPage> {
           setState(() {});
           return false;
         },
-        child: _SearchPageComicList(
-          keyword: keyword,
-          languageIndex: languageIndex,
-          sourceKey: sourceKey,
-          key: Key(
-            '$query${effectiveOptions.toString()}$sourceKey',
-          ),
-          header: SliverPersistentHeader(
-            pinned: _showFab && SmoothScrollProvider.isMouseScroll,
-            floating: !SmoothScrollProvider.isMouseScroll,
-            delegate: _SliverAppBarDelegate(
-              minHeight: headerHeight,
-              maxHeight: headerHeight,
-              child: stackedTerms == null
-                  ? searchBar
-                  : Material(
-                      color: context.colorScheme.surface,
-                      child: Column(
-                        children: [
-                          SizedBox(height: 60, child: searchBar),
-                          EhTagStackBar(
-                            terms: stackedTerms,
-                            onRemove: removeStackedTerm,
-                          ),
-                        ],
-                      ),
-                    ),
+        child: NhentaiTagScope(
+          terms: sourceKey == 'nhentai' && NhentaiTagSettings.stackEnabled
+              ? nhentaiTermsFromKeyword(keyword) ?? const []
+              : const [],
+          child: _SearchPageComicList(
+            keyword: keyword,
+            languageIndex: languageIndex,
+            sourceKey: sourceKey,
+            key: Key(
+              '$query${effectiveOptions.toString()}$sourceKey${sourceKey == 'nhentai' ? NhentaiTagSettings.changes.value : ''}',
             ),
+            header: SliverPersistentHeader(
+              pinned: _showFab && SmoothScrollProvider.isMouseScroll,
+              floating: !SmoothScrollProvider.isMouseScroll,
+              delegate: _SliverAppBarDelegate(
+                minHeight: headerHeight,
+                maxHeight: headerHeight,
+                child: stackedTerms == null
+                    ? searchBar
+                    : Material(
+                        color: context.colorScheme.surface,
+                        child: Column(
+                          children: [
+                            SizedBox(height: 60, child: searchBar),
+                            EhTagStackBar(
+                              terms: stackedTerms,
+                              onRemove: removeStackedTerm,
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+            ),
+            options: effectiveOptions,
           ),
-          options: effectiveOptions,
         ),
       ),
     );

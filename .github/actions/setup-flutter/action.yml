@@ -15,3 +15,7 @@ runs:
         channel: stable
         flutter-version: ${{ steps.sdk.outputs.version }}
         architecture: x64
+        cache: true
+        cache-key: 'flutter-sdk-v1-:os:-:arch:-:channel:-:version:-:hash:'
+        # flutter-action appends the pubspec.lock hash to this key.
+        pub-cache-key: 'flutter-pub-v1-:os:-:arch:-:channel:-:version:'

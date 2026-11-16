@@ -17,7 +17,7 @@ import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
 import '../network_logging.dart';
-import '../search_language.dart';
+import 'tag_settings.dart';
 import 'models.dart';
 import 'package:html/parser.dart';
 
@@ -914,7 +914,7 @@ class NhentaiNetwork {
     }
     appdata.searchHistory.add(keyword);
     await appdata.writeHistory();
-    keyword = withDefaultSearchLanguage(
+    keyword = NhentaiTagSettings.searchQuery(
         keyword, int.tryParse(appdata.settings[69]) ?? 0);
     final queryParameters = {
       "query": keyword,

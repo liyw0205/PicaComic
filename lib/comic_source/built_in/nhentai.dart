@@ -5,6 +5,9 @@ import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/network/nhentai_network/login.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
 import 'package:pica_comic/network/nhentai_network/tags.dart';
+import 'package:pica_comic/network/nhentai_network/tag_query.dart';
+import 'package:pica_comic/network/nhentai_network/tag_settings.dart';
+import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
@@ -13,6 +16,7 @@ import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/nhentai/comic_page.dart';
+import 'package:pica_comic/pages/nhentai/tag_stack_bar.dart';
 import 'package:pica_comic/tools/tags_translation.dart';
 import '../../base.dart';
 import '../../foundation/history.dart';
@@ -50,17 +54,20 @@ final nhentai = ComicSource.named(
   ),
   categoryComicsData: CategoryComicsData.named(
     load: (category, param, options, page) async {
-      var [_, type, name] = param!.split('/');
+      final terms = nhentaiTermsFromParam(param);
+      if (terms == null) return const Res.error('Invalid category');
       var lang = int.tryParse(appdata.settings[69]) ?? 0;
-      if (lang >= 1 && lang <= 3) {
+      if (param!.startsWith('/combo/') ||
+          (lang >= 1 && lang <= 3) ||
+          NhentaiTagSettings.defaultExcludes.isNotEmpty) {
         return NhentaiNetwork().search(
-          "$type:$name",
+          NhentaiTagQuery(terms: terms).toQuery(),
           page,
           NhentaiSort.fromValue(options[0]),
         );
       }
-      return NhentaiNetwork().getCategoryComics(
-          "/$type/$name", page, NhentaiSort.fromValue(options[0]));
+      return NhentaiNetwork()
+          .getCategoryComics(param, page, NhentaiSort.fromValue(options[0]));
     },
     options: [
       CategoryComicsOptions.named(
@@ -101,6 +108,7 @@ final nhentai = ComicSource.named(
     return _NhentaiComicTile(
       comic as NhentaiComicBrief,
       addonMenuOptions: options,
+      tagTerms: List.unmodifiable(NhentaiTagScope.termsOf(context)),
     );
   },
   explorePages: [
@@ -165,7 +173,10 @@ final nhentai = ComicSource.named(
 class _NhentaiComicTile extends ComicTile {
   final NhentaiComicBrief comic;
 
-  const _NhentaiComicTile(this.comic, {this.addonMenuOptions});
+  const _NhentaiComicTile(this.comic,
+      {this.addonMenuOptions, this.tagTerms = const []});
+
+  final List<NhentaiTagTerm> tagTerms;
 
   @override
   String get description => comic.lang;
@@ -199,10 +210,10 @@ class _NhentaiComicTile extends ComicTile {
   @override
   void onTap_() {
     App.mainNavigatorKey!.currentContext!.to(
-      () => ComicPage(
-        sourceKey: 'nhentai',
-        id: comic.id,
-        cover: comic.cover,
+      () => NhentaiComicPage(
+        comic.id,
+        comicCover: comic.cover,
+        tagTerms: tagTerms,
       ),
     );
   }
