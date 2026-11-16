@@ -330,8 +330,10 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
       foldersLoader: comicSource?.favoriteData?.loadFolders == null
           ? null
           : () => comicSource!.favoriteData!.loadFolders!(data!.comicId),
-      initialFolder:
-          (comicSource!.favoriteData?.multiFolder ?? false) ? null : '0',
+      initialFolder: comicSource!.favoriteData != null &&
+              !(comicSource!.favoriteData?.multiFolder ?? false)
+          ? '0'
+          : null,
       localFavoriteItem: toLocalFavoriteItem(),
       setFavorite: (b) {
         if (favorite != b) {
@@ -1946,7 +1948,47 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
                     ),
                   ),
                 const Spacer(),
-                if (isSelected) const AnimatedCheckIcon()
+                if (p == 1 && addedFolders.contains(name))
+                  GestureDetector(
+                    onTap: () {
+                      unawaited(LocalFavoritesManager()
+                          .deleteComic(name, widget.localFavoriteItem));
+                      setState(() {
+                        addedFolders.remove(name);
+                        selected.remove(name);
+                      });
+                      if (addedFolders.isEmpty &&
+                          widget.favoriteOnPlatform != true &&
+                          favoritedFolders.isEmpty) {
+                        widget.setFavorite(false);
+                      }
+                      showToast(message: "取消收藏成功".tl);
+                    },
+                    child: Container(
+                      height: 30,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        borderRadius:
+                            const BorderRadius.all(Radius.circular(16)),
+                      ),
+                      child: Center(
+                        child: Text(
+                          "取消收藏".tl,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isSelected) ...[
+                  const SizedBox(width: 8),
+                  const AnimatedCheckIcon(),
+                ]
               ],
             ),
           ),
