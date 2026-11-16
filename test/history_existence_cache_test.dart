@@ -84,7 +84,11 @@ void main() {
       'beta',
     ));
 
-    await tester.pumpWidget(const MaterialApp(home: HistoryPage()));
+    await tester.pumpWidget(MaterialApp(
+      home: HistoryPage(
+        tileBuilder: (context, history) => Text(history.title),
+      ),
+    ));
     await tester.pump();
     expect(find.text('Alpha'), findsOneWidget);
     expect(find.text('Beta'), findsOneWidget);
