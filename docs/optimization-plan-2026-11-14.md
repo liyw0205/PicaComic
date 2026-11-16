@@ -812,6 +812,18 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
 
+## 39. 2026-11-16 图片收藏搜索去重与 v4.2.59 发布
+
+本轮继续处理页面层重复查询，先收敛图片收藏搜索，不改动历史页和数据库查询语义：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A13 图片收藏搜索 | `bc72fc0a` | `_setKeyword` 增加 180ms debounce，连续输入只在停顿后执行一次 `count()+getPage()`；销毁和关闭搜索时取消定时器，避免迟到回调访问已释放页面 | `test/image_favorites_pagination_test.dart` 合并 widget 回归，验证输入期间保留旧结果、停顿后切换过滤结果；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `dfb04f58` 将版本递增到 `4.2.59+4259`，annotated tag `v4.2.59` 指向该提交。标准 tag workflow `43795930087` 的 build 用时 11m10s、publish 用时 21s；Flutter 全量回归、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.59.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
 ## 40. 2026-11-16 启动延后维护与 v4.2.60 发布
 
 本轮继续优化首帧前的工作边界，同时避免把启动步骤并发化后引入迁移竞态：
@@ -838,14 +850,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
 
-## 39. 2026-11-16 图片收藏搜索去重与 v4.2.59 发布
+## 42. 2026-11-16 回归入口合并与 v4.2.62 发布准备
 
-本轮继续处理页面层重复查询，先收敛图片收藏搜索，不改动历史页和数据库查询语义：
+本轮继续压缩测试维护和手工执行成本，把未被 `flutter test` 自动发现的旧回归入口并入现有标准 suite：
 
 | 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
 | --- | --- | --- | --- |
-| A13 图片收藏搜索 | `bc72fc0a` | `_setKeyword` 增加 180ms debounce，连续输入只在停顿后执行一次 `count()+getPage()`；销毁和关闭搜索时取消定时器，避免迟到回调访问已释放页面 | `test/image_favorites_pagination_test.dart` 合并 widget 回归，验证输入期间保留旧结果、停顿后切换过滤结果；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+| 测试流程 | `7f782c99` | 删除 `download_progress_regression.dart`、`eh_archive_page_count_regression.dart`、`eh_archive_utils_regression.dart` 和 `eh_image_response_regression.dart`；下载进度断言并入 `test/download_image_task_test.dart`，归档路径、页数、图片字节和 EH 响应流断言并入 `test/eh_archive_symlink_test.dart`，不新增 runner | 同一 Flutter suite 统一发现和执行，避免维护未发现的 `main()` 入口；下载器、缓存和字节缓存既有 wrapper 保持不变，行为覆盖不减少 |
+| 测试门禁 | `7f782c99` | 保持 `tool/run_flutter_tests.sh` 的串行、fail-fast、定向筛选和 tag 性能开关；新增断言只增加到既有 suite，日常不重复启动进程 | 目标 `dart analyze`、analyzer baseline、异步边界、格式和 `git diff --check` 通过；本地 Flutter runner 仍受 Termux 缺少 `impellerc` 阻塞，待标准 tag workflow 完成最终回归 |
 
-版本提交 `dfb04f58` 将版本递增到 `4.2.59+4259`，annotated tag `v4.2.59` 指向该提交。标准 tag workflow `43795930087` 的 build 用时 11m10s、publish 用时 21s；Flutter 全量回归、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.59.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
-
-普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+版本提交 `7f782c99` 将版本递增到 `4.2.62+4262`。`master` 提交已推送但不触发 Android workflow；后续 annotated tag `v4.2.62` 将指向文档收口提交并触发一次完整 Flutter/native/Android 发布门禁。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
