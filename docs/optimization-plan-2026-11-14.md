@@ -976,3 +976,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 历史缓存测试流程 | `bce8ab08` | 将唯一用例 `test/history_existence_cache_test.dart` 并入 `test/database_correctness_test.dart`；测试内使用独立临时目录、`HistoryManager.create()` 和显式 `try/finally` 清理，不复用数据库 suite 的全局 singleton | 自动发现的 Flutter suite 从 50 减少到 49，缺失/新增/删除/再次新增四个缓存状态断言保持不变；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
 
 版本提交 `f8cd205b` 将版本递增到 `4.2.72+4272`；方案文档提交为 `87500855`，annotated tag `v4.2.72` 指向构建提交 `87500855`。标准 workflow `43870792493` 的 build 用时 9m46s、publish 用时 21s；`FLUTTER_TEST_PERFORMANCE=1` 下 Flutter regression 通过 389 项，native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.72.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。手工 `workflow_dispatch` 仍跳过性能基准，普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。本地 Termux Flutter runner 仍受缺少 `impellerc` 限制，不能替代标准 tag workflow。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+
+## 53. 2026-11-16 页面异步逻辑测试 suite 合并
+
+本轮继续合并无共享全局状态的纯内存异步测试，减少重复 Flutter suite 启动和维护入口：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 测试流程 | `e92f4564` | 将 `test/picacg_collections_async_test.dart` 和 `test/jm_week_recommendation_async_test.dart` 的 6 个请求互斥、重试和 dispose 用例并入 `test/eh_comments_async_test.dart`；保留全部测试名、断言、Completer 时序和 `dispose()`，删除两个独立 suite 入口；为跨模型同名 helper 增加明确命名并隐藏无关 `Comment` 导出 | 自动发现的 Flutter suite 从 49 减少到 47，9 个纯内存异步用例和约 27 个断言保持不变；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
+
+版本提交 `bdb07bf2` 将版本递增到 `4.2.73+4273`；本轮方案文档和发布 tag 待标准 workflow 完成后补记结果。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
