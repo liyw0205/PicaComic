@@ -986,3 +986,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `e92f4564` | 将 `test/picacg_collections_async_test.dart` 和 `test/jm_week_recommendation_async_test.dart` 的 6 个请求互斥、重试和 dispose 用例并入 `test/eh_comments_async_test.dart`；保留全部测试名、断言、Completer 时序和 `dispose()`，删除两个独立 suite 入口；为跨模型同名 helper 增加明确命名并隐藏无关 `Comment` 导出 | 自动发现的 Flutter suite 从 49 减少到 47，9 个纯内存异步用例和约 27 个断言保持不变；目标 `dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
 
 版本提交 `bdb07bf2` 将版本递增到 `4.2.73+4273`；方案文档提交为 `a91502ca`，annotated tag `v4.2.73` 指向该提交。标准 workflow `43874910049` 的 build 用时 10m16s、publish 用时 21s；`FLUTTER_TEST_PERFORMANCE=1` 下 Flutter regression 通过 389 项，native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.73.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。手工 `workflow_dispatch` 仍跳过性能基准，普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。本地 Termux Flutter runner 仍受缺少 `impellerc` 限制，不能替代标准 tag workflow。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+
+## 54. 2026-11-16 Hitomi 与绅士漫画源兼容性修复、v4.2.74 发布计划
+
+本轮针对当前 CDN/页面实际返回结构修复两个异常源，并把解析边界并入既有 source contract suite：
+
+| 功能组 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- |
+| Hitomi 元数据 | `galleryblock/{id}.html` 在当前 CDN 返回 404，改为优先解析 `galleries/{id}.js` 的 `var galleryinfo = {...}`，旧 HTML 仅作为镜像回退；兼容空 artists/groups、字符串/数字标记和相对链接，并从首文件恢复缩略图 URL | `test/comic_source_contract_test.dart` 覆盖 JS 包装解析、标签性别标记、相对链接和空作者 |
+| Hitomi 读图 | 按文件声明优先选择 WebP/AVIF，格式失败时回退；缓存 MIME 识别支持 AVIF；`gg.js` 解析请求并发合并并缓存 10 分钟；详情缩略图不再固定请求 WebP | 目标分析、analyzer baseline、异步边界、格式和差异检查；标准 tag workflow 做真实 Android/Flutter 回归 |
+| 绅士漫画 | 统一解析绝对、协议相对和相对 URL；修复绝对 URL 被再次拼接 `https:` 的问题；中英文逗号均可解析页数/时间；首页单个坏卡片跳过；详情封面、头像、缩略图、图库链接统一走解析器 | 同一 source contract suite 覆盖 URL 形态和三种列表字段排列，不新增独立 Flutter runner |
+| 测试流程 | 继续复用 `test/comic_source_contract_test.dart`，只增加一组离线契约断言；发布 tag 仍只运行一次完整串行 Flutter/native/Android 门禁 | 本机 Flutter 受 Termux 缺少 `impellerc` 限制，最终以 `v4.2.74` tag workflow 为准 |
+
+现场探测记录：`https://ltn.gold-usergeneratedcontent.net/galleries/4333638.js` 返回 200；同 CDN 的 `galleryblock/4333638.html` 返回 404。普通 `master` push 仍不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布；提交作者统一为 `liyw0205 <2650115317@qq.com>`。
