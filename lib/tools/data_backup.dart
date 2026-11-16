@@ -8,6 +8,57 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 const backupManifestName = 'backup-manifest.json';
+const _backupMaxFiles = 100000;
+const _backupSettingsBytes = 16 * 1024 * 1024;
+const _backupManifestBytes = 64 * 1024 * 1024;
+
+int? _metadataLimit(String name) => switch (name) {
+      'appdata' => _backupSettingsBytes,
+      backupManifestName => _backupManifestBytes,
+      _ => null,
+    };
+
+/// Streams downloads and large files without archive 3.x's in-memory deflate.
+Future<void> writeDataBackupArchive(Directory root, String destination) async {
+  final output = OutputFileStream(destination);
+  final encoder = ZipEncoder()..startEncode(output);
+  var count = 0;
+  try {
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (++count > _backupMaxFiles) {
+        throw const FormatException('Too many backup entries');
+      }
+      final name =
+          entity.path.substring(root.path.length + 1).replaceAll('\\', '/');
+      if (entity is Directory) {
+        encoder.addFile(ArchiveFile('$name/', 0, <int>[])
+          ..isFile = false
+          ..compress = false);
+      } else if (entity is File) {
+        final size = await entity.length();
+        final limit = _metadataLimit(name);
+        if (limit != null && size > limit) {
+          throw const FormatException('Backup metadata exceeds size limit');
+        }
+        final input = InputFileStream(entity.path);
+        try {
+          final file = ArchiveFile.stream(name, size, input)
+            ..compress = !name.startsWith('download/') && size <= 1024 * 1024
+            ..lastModTime =
+                (await entity.lastModified()).millisecondsSinceEpoch ~/ 1000;
+          encoder.addFile(file, autoClose: false);
+        } finally {
+          input.closeSync();
+        }
+      } else {
+        throw const FormatException('Unsupported backup entity');
+      }
+    }
+    encoder.endEncode();
+  } finally {
+    output.closeSync();
+  }
+}
 
 Future<String> fileDigest(File file) async =>
     (await sha256.bind(file.openRead()).first).toString();
@@ -228,8 +279,11 @@ List<_ZipEntryInfo> _readZipHeaders(_ZipReader reader,
   for (var p = reader.length - 22; p >= searchStart; p--) {
     reader.seek(p);
     if (reader.u32() == 0x06054b50) {
-      eocd = p;
-      break;
+      reader.seek(p + 20);
+      if (p + 22 + reader.u16() == reader.length) {
+        eocd = p;
+        break;
+      }
     }
   }
   if (eocd < 0) throw const FormatException('Invalid ZIP archive');
@@ -237,28 +291,76 @@ List<_ZipEntryInfo> _readZipHeaders(_ZipReader reader,
   final disk = reader.u16();
   final centralDisk = reader.u16();
   final countOnDisk = reader.u16();
-  final count = reader.u16();
-  final centralSize32 = reader.u32();
-  final centralOffset32 = reader.u32();
+  var count = reader.u16();
+  var centralSize = reader.u32();
+  var centralOffset = reader.u32();
   final commentLength = reader.u16();
-  if (eocd + 22 + commentLength > reader.length ||
-      disk != 0 ||
-      centralDisk != 0 ||
-      countOnDisk != count ||
-      count == 0xffff ||
-      centralSize32 == 0xffffffff ||
-      centralOffset32 == 0xffffffff) {
+  var directoryEnd = eocd;
+  var hasZip64 = false;
+  if (eocd >= 20) {
+    final locator = eocd - 20;
+    reader.seek(locator);
+    if (reader.u32() == 0x07064b50) {
+      hasZip64 = true;
+      final locatorDisk = reader.u32();
+      final zip64Offset = reader.u64();
+      final disks = reader.u32();
+      if (locatorDisk != 0 || disks != 1 || zip64Offset > locator - 56) {
+        throw const FormatException('Invalid ZIP64 locator');
+      }
+      reader.seek(zip64Offset);
+      if (reader.u32() != 0x06064b50) {
+        throw const FormatException('Invalid ZIP64 directory');
+      }
+      final recordSize = reader.u64();
+      if (recordSize < 44 || recordSize != locator - zip64Offset - 12) {
+        throw const FormatException('Invalid ZIP64 directory size');
+      }
+      reader.u16(); // version made by
+      reader.u16(); // version needed
+      final zip64Disk = reader.u32();
+      final zip64CentralDisk = reader.u32();
+      final zip64CountOnDisk = reader.u64();
+      final zip64Count = reader.u64();
+      final zip64Size = reader.u64();
+      final zip64CentralOffset = reader.u64();
+      if (zip64Disk != 0 ||
+          zip64CentralDisk != 0 ||
+          zip64CountOnDisk != zip64Count ||
+          (disk != 0xffff && disk != zip64Disk) ||
+          (centralDisk != 0xffff && centralDisk != zip64CentralDisk) ||
+          (countOnDisk != 0xffff && countOnDisk != zip64CountOnDisk) ||
+          (count != 0xffff && count != zip64Count) ||
+          (centralSize != 0xffffffff && centralSize != zip64Size) ||
+          (centralOffset != 0xffffffff &&
+              centralOffset != zip64CentralOffset)) {
+        throw const FormatException('Unsupported ZIP64 directory');
+      }
+      count = zip64Count;
+      centralSize = zip64Size;
+      centralOffset = zip64CentralOffset;
+      directoryEnd = zip64Offset;
+    }
+  }
+  // archive 3.x also writes classic directories with exactly 65535 entries.
+  if (eocd + 22 + commentLength != reader.length ||
+      (!hasZip64 &&
+          (disk != 0 ||
+              centralDisk != 0 ||
+              countOnDisk != count ||
+              centralSize == 0xffffffff ||
+              centralOffset == 0xffffffff))) {
     throw const FormatException('Unsupported ZIP directory');
   }
   if (count > maxFiles ||
-      centralOffset32 > reader.length ||
-      centralSize32 > reader.length - centralOffset32 ||
-      centralOffset32 + centralSize32 > eocd) {
+      count > centralSize ~/ 46 ||
+      centralOffset > directoryEnd ||
+      centralSize > directoryEnd - centralOffset) {
     throw const FormatException('Invalid ZIP directory');
   }
-  reader.centralOffset = centralOffset32;
+  reader.centralOffset = centralOffset;
 
-  reader.seek(centralOffset32);
+  reader.seek(centralOffset);
   final entries = <_ZipEntryInfo>[];
   final names = <String, bool>{};
   var total = 0;
@@ -303,6 +405,10 @@ List<_ZipEntryInfo> _readZipHeaders(_ZipReader reader,
     }
     total += uncompressed;
     final normalized = _normaliseZipPath(filename);
+    final metadataLimit = _metadataLimit(normalized);
+    if (metadataLimit != null && uncompressed > metadataLimit) {
+      throw const FormatException('Backup metadata exceeds size limit');
+    }
     final unixMode = (versionMadeBy >> 8) == 3 ? externalAttributes >> 16 : 0;
     final fileType = unixMode & 0xf000;
     final directory = filename.endsWith('/') ||
@@ -330,7 +436,7 @@ List<_ZipEntryInfo> _readZipHeaders(_ZipReader reader,
         flags: flags,
         isDirectory: directory));
   }
-  if (reader.position != centralOffset32 + centralSize32) {
+  if (reader.position != centralOffset + centralSize) {
     throw const FormatException('Invalid ZIP central directory size');
   }
   // A file cannot also be a parent directory. This is checked before any
@@ -515,10 +621,14 @@ void _extractZipEntry(
 
 /// Validates all entry names and sizes before writing the first entry.
 Future<Map<String, dynamic>> extractDataBackup(String source, Directory root,
-    {int maxFiles = 100000,
-    int maxExpandedBytes = 8 * 1024 * 1024 * 1024,
-    int maxFileBytes = 256 * 1024 * 1024}) async {
+    {int maxFiles = _backupMaxFiles,
+    int? maxExpandedBytes,
+    int? maxFileBytes}) async {
   final input = InputFileStream(source);
+  // Stored image data already occupies this much disk. Permit a fixed amount
+  // of additional expansion while retaining a finite budget for compressed ZIPs.
+  maxExpandedBytes ??= input.length + 8 * 1024 * 1024 * 1024;
+  maxFileBytes ??= input.length + 256 * 1024 * 1024;
   try {
     final reader = _ZipReader(input);
     final entries = _readZipHeaders(reader,

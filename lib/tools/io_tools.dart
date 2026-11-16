@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
-import 'package:archive/archive_io.dart' show ZipFileEncoder;
 import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/tools/data_backup.dart';
 
@@ -325,9 +324,8 @@ Future<String> exportDataToFile(bool includeDownload, String outPath,
             await copyBackupEntity(downloads.path, '${stage.path}/download');
         }
         await writeBackupManifest(stage, revision: revision);
-        await compute<List<String>, void>((paths) {
-          ZipFileEncoder().zipDirectory(Directory(paths[0]),
-              filename: paths[1], followLinks: false);
+        await compute<List<String>, void>((paths) async {
+          await writeDataBackupArchive(Directory(paths[0]), paths[1]);
         }, [stage.path, output.path]);
         if (Platform.isWindows && File(outPath).existsSync())
           File(outPath).deleteSync();

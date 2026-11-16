@@ -42,6 +42,40 @@ void main() {
     }
   }
 
+  int readU32(List<int> bytes, int offset) =>
+      readU16(bytes, offset) | (readU16(bytes, offset + 2) << 16);
+
+  List<int> withZip64Directory(List<int> bytes, {bool sentinel = true}) {
+    final eocd = bytes.length - 22;
+    final count = readU16(bytes, eocd + 10);
+    final size = readU32(bytes, eocd + 12);
+    final offset = readU32(bytes, eocd + 16);
+    final output = OutputStream()..writeBytes(bytes.sublist(0, eocd));
+    output.writeUint32(0x06064b50);
+    output.writeUint64(44);
+    output.writeUint16(45);
+    output.writeUint16(45);
+    output.writeUint32(0);
+    output.writeUint32(0);
+    output.writeUint64(count);
+    output.writeUint64(count);
+    output.writeUint64(size);
+    output.writeUint64(offset);
+    output.writeUint32(0x07064b50);
+    output.writeUint32(0);
+    output.writeUint64(eocd);
+    output.writeUint32(1);
+    output.writeUint32(0x06054b50);
+    output.writeUint16(0);
+    output.writeUint16(sentinel ? 0xffff : 0);
+    output.writeUint16(sentinel ? 0xffff : count);
+    output.writeUint16(sentinel ? 0xffff : count);
+    output.writeUint32(sentinel ? 0xffffffff : size);
+    output.writeUint32(sentinel ? 0xffffffff : offset);
+    output.writeUint16(0);
+    return output.getBytes();
+  }
+
   int patchZipNames(List<int> bytes, String from, String to) {
     final oldBytes = utf8.encode(from);
     final newBytes = utf8.encode(to);
@@ -811,6 +845,173 @@ void main() {
     final output = Directory('${root.path}/streaming-output');
     await extractDataBackup(archive.path, output);
     expect(await File('${output.path}/payload').length(), payload.length);
+  });
+
+  test('ZIP64 directories restore with sentinel or matching classic fields',
+      () async {
+    final archive = await writeZip('zip64.zip', [
+      ArchiveFile.string('appdata', '{"settings":["ok"]}'),
+      ArchiveFile.string('download/book/1.jpg', 'image'),
+    ]);
+    final classic = await archive.readAsBytes();
+    for (final sentinel in [true, false]) {
+      await archive
+          .writeAsBytes(withZip64Directory(classic, sentinel: sentinel));
+      final output = Directory('${root.path}/zip64-$sentinel');
+      await extractDataBackup(archive.path, output);
+      expect(await File('${output.path}/download/book/1.jpg').readAsString(),
+          'image');
+    }
+  });
+
+  test('ZIP64 rejects malformed directories and retains extraction budgets',
+      () async {
+    final archive = await writeZip('zip64-bad.zip', [
+      ArchiveFile.string('appdata', '{"settings":["ok"]}'),
+      ArchiveFile.string('payload', '0123456789'),
+    ]);
+    final bytes = withZip64Directory(await archive.readAsBytes());
+    final record = bytes.length - 98;
+    final mutations = <void Function(List<int>)>[
+      (b) => writeU32(b, record, 0), // missing ZIP64 signature
+      (b) => writeU32(b, record + 4, 43), // truncated record
+      (b) => writeU32(b, record + 16, 1), // split archive
+      (b) => writeU32(b, record + 24, 3), // inconsistent entry counts
+      (b) => writeU32(b, record + 32, 100001), // oversized entry count
+      (b) => writeU32(b, record + 40, 0xffffffff), // central size
+      (b) => writeU32(b, record + 48, bytes.length), // central offset
+      (b) => writeU32(b, record + 60, 1), // locator disk
+      (b) => writeU32(b, record + 64, bytes.length), // locator offset
+      (b) => writeU32(b, record + 68, 0x80000000), // negative uint64
+      (b) => writeU32(b, record + 72, 2), // locator disk count
+      (b) => writeU32(b, record + 88, 1), // inconsistent classic size
+    ];
+    for (var i = 0; i < mutations.length; i++) {
+      final invalid = List<int>.from(bytes);
+      mutations[i](invalid);
+      await archive.writeAsBytes(invalid);
+      final output = Directory('${root.path}/invalid-zip64-$i');
+      await expectLater(extractDataBackup(archive.path, output),
+          throwsA(isA<FormatException>()),
+          reason: 'mutation $i');
+      expect(output.existsSync(), isFalse);
+    }
+    await archive.writeAsBytes(bytes);
+    for (final limits in [
+      (files: 1, total: 100, single: 100),
+      (files: 2, total: 20, single: 100),
+      (files: 2, total: 100, single: 9),
+    ]) {
+      final output = Directory('${root.path}/zip64-budget');
+      await expectLater(
+          extractDataBackup(archive.path, output,
+              maxFiles: limits.files,
+              maxExpandedBytes: limits.total,
+              maxFileBytes: limits.single),
+          throwsA(isA<FormatException>()));
+      expect(output.existsSync(), isFalse);
+    }
+  });
+
+  test('ZIP64 reads offsets above 4 GiB from a sparse fixture', () async {
+    final archive = await writeZip('zip64-offset.zip', [
+      ArchiveFile.string('appdata', '{"settings":["ok"]}'),
+    ]);
+    final classic = await archive.readAsBytes();
+    final end = classic.length - 22;
+    final centralOffset = readU32(classic, end + 16);
+    const shift = 0x100000000;
+    final central = List<int>.from(classic.sublist(centralOffset, end));
+    final compressed = readU32(central, 20);
+    final uncompressed = readU32(central, 24);
+    writeU32(central, 20, 0xffffffff);
+    writeU32(central, 24, 0xffffffff);
+    writeU32(central, 42, 0xffffffff);
+    central[30] = 28; // ZIP64 sizes and local-header offset
+    central[31] = 0;
+    final extra = OutputStream()
+      ..writeUint16(1)
+      ..writeUint16(24)
+      ..writeUint64(uncompressed)
+      ..writeUint64(compressed)
+      ..writeUint64(shift);
+    final expanded = <int>[
+      ...classic.sublist(0, centralOffset),
+      ...central,
+      ...extra.getBytes(),
+      ...classic.sublist(end),
+    ];
+    writeU32(expanded, expanded.length - 10, central.length + 28);
+    final bytes = withZip64Directory(expanded);
+    final tail = List<int>.from(bytes.sublist(centralOffset));
+    final record = central.length + 28;
+    void writeU64(List<int> data, int offset, int value) {
+      writeU32(data, offset, value);
+      writeU32(data, offset + 4, value >> 32);
+    }
+
+    writeU64(tail, record + 48, centralOffset + shift);
+    writeU64(tail, record + 64, centralOffset + record + shift);
+    final file = archive.openSync(mode: FileMode.write);
+    try {
+      // Seeking creates a hole; this fixture uses only a few filesystem blocks.
+      file.setPositionSync(shift);
+      file.writeFromSync(classic, 0, centralOffset);
+      file.writeFromSync(tail);
+    } finally {
+      file.closeSync();
+    }
+    final output = Directory('${root.path}/zip64-offset-output');
+    await extractDataBackup(archive.path, output);
+    expect(await File('${output.path}/appdata').readAsString(),
+        '{"settings":["ok"]}');
+  });
+
+  test('backup writer stores downloads and large files and compresses settings',
+      () async {
+    final stage = Directory('${root.path}/export')..createSync();
+    File('${stage.path}/appdata').writeAsStringSync('{"settings":["ok"]}');
+    Directory('${stage.path}/empty').createSync();
+    final image = File('${stage.path}/download/book/1.jpg')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('image');
+    final large = File('${stage.path}/large.db')
+      ..writeAsBytesSync(List<int>.filled(1024 * 1024 + 1, 65));
+    final archive = File('${root.path}/export.zip');
+    await writeDataBackupArchive(stage, archive.path);
+
+    final decoded = ZipDecoder().decodeBytes(await archive.readAsBytes());
+    expect(decoded.findFile('appdata')!.compressionType, ArchiveFile.DEFLATE);
+    expect(decoded.findFile('download/book/1.jpg')!.compressionType,
+        ArchiveFile.STORE);
+    expect(decoded.findFile('large.db')!.compressionType, ArchiveFile.STORE);
+    final output = Directory('${root.path}/export-restored');
+    await extractDataBackup(archive.path, output);
+    expect(await fileDigest(File('${output.path}/download/book/1.jpg')),
+        await fileDigest(image));
+    expect(await fileDigest(File('${output.path}/large.db')),
+        await fileDigest(large));
+    expect(Directory('${output.path}/empty').existsSync(), isTrue);
+  });
+
+  test('backup writer rejects links and restore bounds metadata separately',
+      () async {
+    final stage = Directory('${root.path}/export-link')..createSync();
+    final target = File('${root.path}/outside')..writeAsStringSync('outside');
+    await Link('${stage.path}/link').create(target.path);
+    await expectLater(writeDataBackupArchive(stage, '${root.path}/link.zip'),
+        throwsA(isA<FormatException>()));
+
+    final archive = await writeZip('oversized-metadata.zip',
+        [ArchiveFile.string('appdata', '{"settings":["ok"]}')]);
+    final bytes = await archive.readAsBytes();
+    expect(patchZipSizes(bytes, 'appdata', 16 * 1024 * 1024 + 1), 2);
+    await archive.writeAsBytes(bytes);
+    final output = Directory('${root.path}/metadata-output');
+    await expectLater(
+        extractDataBackup(archive.path, output, maxFileBytes: 32 * 1024 * 1024),
+        throwsA(isA<FormatException>()));
+    expect(output.existsSync(), isFalse);
   });
 
   test('manifest hash and required backup payload are validated', () async {
