@@ -798,3 +798,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `7c6557cc` | A7 边界复用已有 native curl 与网络 retry suite；tag workflow 仍一次性执行完整串行 Flutter/native 门禁，不为每个平台边界重复启动 runner | 本机 native curl 7 项全部通过；标准 tag workflow `43791053238` 负责最终 Flutter、Android 和 Release 验收 |
 
 版本提交 `71685412` 将版本递增到 `4.2.57+4257`，annotated tag `v4.2.57` 指向该提交。普通 `master` push 仍不触发 Android workflow；仅创建或更新 `v*` tag 才触发发布，workflow 校验 tag、版本字段与构建 SHA 一致。上述提交作者统一为 `liyw0205 <2650115317@qq.com>`。
+
+## 38. 2026-11-16 测试性能门禁收敛、下载快照 symlink 防护与 v4.2.58 发布
+
+本轮继续压缩日常测试耗时，同时保留发布门禁的完整证据，并补齐下载队列恢复的文件类型边界：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| Flutter 测试流程 | `13b8921a` | 1k/10k/50k 数据库性能基准默认跳过，仅通过 `FLUTTER_TEST_PERFORMANCE=1` 显式开启；`tool/run_flutter_tests.sh` 校验参数并导出 `PICA_RUN_PERF_TESTS=1`，保留 `FLUTTER_TEST_FILES` 定向执行和全量功能回归 | 日常 runner 不重复执行 4 分钟诊断型基准；Android tag workflow 显式开启性能基准，发布覆盖不降低；本地参数校验、分析基线、异步边界、格式和差异检查通过 |
+| A11 下载队列恢复 | `13b8921a` | `_readQueueSnapshot()` 使用 `followLinks: false`，只读取 regular file；`.bak`/`.tmp` symlink 不得从下载根之外导入有效 JSON，异常候选仍由现有恢复逻辑隔离为 `.corrupt.*` | `test/download_persistence_test.dart` 合并覆盖外部有效队列 symlink、队列不恢复、外部文件内容不变和链接隔离 |
+
+版本提交 `cc45a2c9` 将版本递增到 `4.2.58+4258`，annotated tag `v4.2.58` 指向该提交。标准 tag workflow `43793949396` 的 build 用时 11m38s、publish 用时 14s；Flutter 全量回归（含显式性能基准）、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.58.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
