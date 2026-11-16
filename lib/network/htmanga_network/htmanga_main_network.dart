@@ -26,6 +26,49 @@ class HtmangaNetwork {
 
   static String get baseUrl => appdata.settings[31];
 
+  /// Resolve image and link attributes from both protocol-relative and
+  /// absolute URLs. The site mixes all three forms across its pages.
+  static String resolveUrl(String raw, {String? base}) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    final parsed = Uri.tryParse(value);
+    if (parsed?.hasScheme == true) return value;
+    if (value.startsWith('//')) return 'https:$value';
+    final root = Uri.parse(base ?? baseUrl);
+    return root.resolve(value).toString();
+  }
+
+  static List<String> _infoParts(String info) => info
+      .split(RegExp(r'[,，]'))
+      .map((part) => part.replaceAll('\n', '').trim())
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+
+  static int parsePages(String info) {
+    final explicit =
+        RegExp(r'(\d[\d,]*)\s*(?:頁|页|pages?)', caseSensitive: false)
+            .firstMatch(info);
+    final parts = _infoParts(info);
+    final fallback = parts
+        .where((part) => !RegExp(r'\d{4}[-/.]\d').hasMatch(part))
+        .map((part) => RegExp(r'^\d[\d,]*$').firstMatch(part)?.group(0))
+        .whereType<String>()
+        .firstOrNull;
+    final value = explicit?.group(1) ?? fallback;
+    return int.tryParse(value?.replaceAll(',', '') ?? '') ?? 0;
+  }
+
+  static String parseTime(String info) {
+    final parts = _infoParts(info);
+    for (final part in parts) {
+      if (!RegExp(r'\d[\d,]*\s*(?:頁|页|pages?)', caseSensitive: false)
+          .hasMatch(part)) {
+        return part;
+      }
+    }
+    return parts.firstOrNull ?? '';
+  }
+
   void logout() {
     SingleInstanceCookieJar.instance?.deleteUri(Uri.parse(baseUrl));
   }
@@ -116,10 +159,13 @@ class HtmangaNetwork {
       var comicBlocks = document.querySelectorAll("div.bodywrap");
       Map<String, String> titleRes = {};
       for (var title in titles) {
-        var text = title.querySelector("div.title_h2")!.text;
+        final titleNode = title.querySelector("div.title_h2");
+        final linkNode = title.querySelector("div.r > a");
+        if (titleNode == null || linkNode == null) continue;
+        var text = titleNode.text;
         text = text.replaceAll("\n", "").removeAllBlank;
-        var link = title.querySelector("div.r > a")!.attributes["href"]!;
-        link = baseUrl + link;
+        var link = linkNode.attributes["href"] ?? '';
+        link = resolveUrl(link);
         titleRes[text] = link;
       }
       var comicsRes = <List<HtComicBrief>>[];
@@ -127,25 +173,19 @@ class HtmangaNetwork {
         var cs = block.querySelectorAll("div.gallary_wrap > ul.cc > li");
         var comics = <HtComicBrief>[];
         for (var c in cs) {
-          var link = c.querySelector("div.pic_box > a")!.attributes["href"]!;
-          var id = RegExp(r"(?<=-aid-)[0-9]+").firstMatch(link)![0]!;
-          var image =
-              c.querySelector("div.pic_box > a > img")!.attributes["src"]!;
-          image = "https:$image";
-          var name = c.querySelector("div.info > div.title > a")!.text;
-          var infoCol = c.querySelector("div.info > div.info_col")!.text;
-          var lr = infoCol.split(",");
-          var time = lr[0];
-          var pagesStr = "";
-          for (int i = 0; i < lr[1].length; i++) {
-            if (lr[1][i].isNum) {
-              pagesStr += lr[1][i];
-            }
-          }
-          var pages = int.parse(pagesStr);
           try {
-            comics.add(HtComicBrief(name, time, image, id, pages));
-          } finally {}
+            var link = c.querySelector("div.pic_box > a")!.attributes["href"]!;
+            var id = RegExp(r"(?<=-aid-)[0-9]+").firstMatch(link)![0]!;
+            var image =
+                c.querySelector("div.pic_box > a > img")!.attributes["src"]!;
+            image = resolveUrl(image);
+            var name = c.querySelector("div.info > div.title > a")!.text;
+            var infoCol = c.querySelector("div.info > div.info_col")!.text;
+            comics.add(HtComicBrief(
+                name, parseTime(infoCol), image, id, parsePages(infoCol)));
+          } catch (_) {
+            continue;
+          }
         }
         comicsRes.add(comics);
       }
@@ -193,7 +233,7 @@ class HtmangaNetwork {
           var id = RegExp(r"(?<=-aid-)[0-9]+").firstMatch(link)![0]!;
           var image =
               comic.querySelector("div.pic_box > a > img")!.attributes["src"]!;
-          image = "https:$image";
+          image = resolveUrl(image);
           var name = comic
               .querySelector("div.info > div.title > a")!
               .attributes["title"]
@@ -206,17 +246,8 @@ class HtmangaNetwork {
                   .replaceAll("<em>", "")
                   .replaceAll("</em>", "");
           var infoCol = comic.querySelector("div.info > div.info_col")!.text;
-          var lr = infoCol.split("，");
-          var time = lr[1].removeAllBlank;
-          time = time.replaceAll("\n", "");
-          var pagesStr = "";
-          for (int i = 0; i < lr[0].length; i++) {
-            if (lr[0][i].isNum) {
-              pagesStr += lr[0][i];
-            }
-          }
-          var pages = pagesStr == "" ? 0 : int.parse(pagesStr);
-          comics.add(HtComicBrief(name, time, image, id, pages));
+          comics.add(HtComicBrief(
+              name, parseTime(infoCol), image, id, parsePages(infoCol)));
         } catch (e) {
           continue;
         }
@@ -274,8 +305,7 @@ class HtmangaNetwork {
           .querySelector(
               "div.userwrap > div.asTB > div.asTBcell.uwthumb > img")!
           .attributes["src"]!;
-      coverPath = "https:$coverPath";
-      coverPath = coverPath.replaceRange(6, 8, "");
+      coverPath = resolveUrl(coverPath);
       var labels = document.querySelectorAll("div.asTBcell.uwconn > label");
       var category = labels[0].text.split("：")[1];
       var pages = int.parse(
@@ -283,7 +313,7 @@ class HtmangaNetwork {
       var tagsDom = document.querySelectorAll("a.tagshow");
       var tags = <String, String>{};
       for (var tag in tagsDom) {
-        var link = tag.attributes["href"]!;
+        var link = resolveUrl(tag.attributes["href"] ?? '');
         tags[tag.text] = link;
       }
       var description = document.querySelector("div.asTBcell.uwconn > p")!.text;
@@ -292,12 +322,12 @@ class HtmangaNetwork {
       var avatar = document
           .querySelector("div.asTBcell.uwuinfo > a > img")!
           .attributes["src"]!;
-      avatar = "$baseUrl/$avatar";
+      avatar = resolveUrl(avatar);
       var uploadNum = int.parse(
           document.querySelector("div.asTBcell.uwuinfo > p > font")!.text);
       var photosDom = document.querySelectorAll("div.pic_box.tb > a > img");
       var photos = List<String>.generate(photosDom.length,
-          (index) => "https:${photosDom[index].attributes["src"]!}");
+          (index) => resolveUrl(photosDom[index].attributes["src"] ?? ''));
       return Res(HtComicInfo(id, coverPath, name, category, pages, tags,
           description, uploader, avatar, uploadNum, photos));
     } catch (e, s) {
@@ -316,7 +346,7 @@ class HtmangaNetwork {
       var document = parse(res.data);
       var photosDom = document.querySelectorAll("div.pic_box.tb > a > img");
       var photos = List<String>.generate(photosDom.length,
-          (index) => "https:${photosDom[index].attributes["src"]!}");
+          (index) => resolveUrl(photosDom[index].attributes["src"] ?? ''));
       return Res(photos);
     } catch (e, s) {
       LogManager.addLog(
@@ -331,11 +361,12 @@ class HtmangaNetwork {
       return Res(null, errorMessage: res.errorMessage);
     }
     try {
-      var urls = RegExp(r"(?<=//)[\w./\[\]()-]+").allMatches(res.data);
-      var images = <String>[];
-      for (var url in urls) {
-        images.add("https://${url[0]!}");
-      }
+      final urls = RegExp(r'''(?:(?:https?:)?//)[^"'\s<>]+''')
+          .allMatches(res.data)
+          .map((match) => resolveUrl(match[0]!))
+          .where((url) => url.isNotEmpty)
+          .toSet();
+      final images = urls.toList(growable: false);
       return Res(images);
     } catch (e, s) {
       LogManager.addLog(
@@ -416,7 +447,7 @@ class HtmangaNetwork {
         var cover = comic
             .querySelector("div.asTBcell.thumb > div > img")!
             .attributes["src"]!;
-        cover = "https:$cover";
+        cover = resolveUrl(cover);
         var time = comic
             .querySelector("div.box_cel.u_listcon > p.l_catg > span")!
             .text

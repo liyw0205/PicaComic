@@ -634,23 +634,45 @@ class ImageManager {
       final savePath = cachingFile.file.path;
       yield DownloadProgress(0, 100, key, savePath);
 
-      final gg = GG();
-      var url = await gg.urlFromUrlFromHash(galleryId, image, 'webp', null);
-      int l;
-      for (l = url.length - 1; l >= 0; l--) {
-        if (url[l] == '.') {
-          break;
-        }
-      }
       var dio = logDio();
       dio.options.headers = {
         "User-Agent": webUA,
         "Referer": "https://hitomi.la/reader/$galleryId.html"
       };
 
-      var res = await dio.get<ResponseBody>(url,
-          cancelToken: cancelToken,
-          options: Options(responseType: ResponseType.stream));
+      final extensions = <String>{
+        image.preferredExtension,
+        if (image.hasWebp) 'webp',
+        if (image.hasAvif) 'avif',
+      };
+      final gg = GG();
+      Response<ResponseBody>? res;
+      String? url;
+      Object? lastError;
+      for (final extension in extensions) {
+        final candidate =
+            await gg.urlFromUrlFromHash(galleryId, image, extension, extension);
+        try {
+          final response = await dio.get<ResponseBody>(candidate,
+              cancelToken: cancelToken,
+              options: Options(responseType: ResponseType.stream));
+          if (response.data == null || _isHtmlResponse(response)) {
+            throw const FormatException("Invalid image response");
+          }
+          res = response;
+          url = candidate;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (error is DioException && error.type == DioExceptionType.cancel) {
+            rethrow;
+          }
+        }
+      }
+      if (res == null || url == null) {
+        if (lastError != null) throw lastError;
+        throw const FormatException("Invalid image response");
+      }
       if (res.data == null || _isHtmlResponse(res)) {
         throw const FormatException("Invalid image response");
       }
@@ -1024,11 +1046,12 @@ class ImageManager {
         "image/png" => "png",
         "image/gif" => "gif",
         "image/webp" => "webp",
+        "image/avif" => "avif",
         _ => null
       };
     }
     ext ??= url.split('.').last;
-    if (!["jpg", "jpeg", "png", "gif", "webp"].contains(ext)) {
+    if (!["jpg", "jpeg", "png", "gif", "webp", "avif"].contains(ext)) {
       ext = "jpg";
       LogManager.addLog(
           LogLevel.warning,

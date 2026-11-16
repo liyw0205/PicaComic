@@ -8,6 +8,9 @@ import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
 import 'package:pica_comic/foundation/def.dart';
+import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
+import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
+import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
 
 class _FixtureComic extends BaseComic {
   const _FixtureComic(this.id, this.title, this.cover);
@@ -101,6 +104,44 @@ ComicSource _fixtureSource({
 }
 
 void main() {
+  test('Hitomi and Htmanga parsers accept current source URL variants', () {
+    final gallery = HiNetwork.decodeGalleryJson('''
+      var galleryinfo = {"title":"fixture","type":"manga",
+        "language":"chinese","galleryurl":"/galleries/42.html",
+        "tags":[{"tag":"female:fixture","female":"1","url":"/tag/fixture.html"}],
+        "artists":null};
+    ''');
+    final brief = HiNetwork.briefFromGalleryJson('42', gallery);
+    expect(brief.title, 'fixture');
+    expect(brief.link, 'https://hitomi.la/galleries/42.html');
+    expect(brief.tags, ['female:fixture ♀']);
+    expect(brief.tagList.single.link, 'https://hitomi.la/tag/fixture.html');
+    expect(brief.subTitle, 'N/A');
+    expect(
+      HitomiFile('01.webp', 'hash', false, true, 1, 1, '42').preferredExtension,
+      'avif',
+    );
+
+    expect(
+      HtmangaNetwork.resolveUrl('//img.fixture.test/cover.jpg',
+          base: 'https://www.wnacg.com'),
+      'https://img.fixture.test/cover.jpg',
+    );
+    expect(
+      HtmangaNetwork.resolveUrl('https://img.fixture.test/cover.jpg',
+          base: 'https://www.wnacg.com'),
+      'https://img.fixture.test/cover.jpg',
+    );
+    for (final info in [
+      '2026-01-01, 12頁',
+      '12页，2026-01-01',
+      '2026-01-01, 12'
+    ]) {
+      expect(HtmangaNetwork.parsePages(info), 12);
+      expect(HtmangaNetwork.parseTime(info), '2026-01-01');
+    }
+  });
+
   test('built-in source definitions are valid without opening the network', () {
     final keys = <String>{};
     expect(ComicSource.builtIn.map((source) => source.key).toSet(),

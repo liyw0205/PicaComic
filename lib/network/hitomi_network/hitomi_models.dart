@@ -76,6 +76,12 @@ class HitomiFile {
   HitomiFile(this.name, this.hash, this.hasWebp, this.hasAvif, this.height,
       this.width, this.galleryId);
 
+  String get preferredExtension => hasWebp
+      ? 'webp'
+      : hasAvif
+          ? 'avif'
+          : 'webp';
+
   Map<String, dynamic> toMap() => {
         "name": name,
         "hash": hash,

@@ -38,16 +38,35 @@ class GG {
   static DateTime? cacheTime;
   static String? cacheB;
   static List<String>? cacheNumbers;
+  static Future<void>? _loading;
 
   Future<void> getGg(String galleryId) async {
     if (cacheTime != null &&
-        DateTime.now().millisecondsSinceEpoch -
-                cacheTime!.millisecondsSinceEpoch <
-            100) {
-      numbers = cacheNumbers!;
-      b = cacheB!;
+        DateTime.now().difference(cacheTime!) < const Duration(minutes: 10)) {
+      _useCachedGg();
       return;
     }
+    final pending = _loading;
+    if (pending != null) {
+      await pending;
+      _useCachedGg();
+      return;
+    }
+    final load = _loadGg(galleryId);
+    _loading = load;
+    try {
+      await load;
+    } finally {
+      if (identical(_loading, load)) _loading = null;
+    }
+  }
+
+  void _useCachedGg() {
+    numbers = List<String>.from(cacheNumbers ?? const []);
+    b = cacheB;
+  }
+
+  Future<void> _loadGg(String galleryId) async {
     var dio = logDio(BaseOptions(responseType: ResponseType.plain, headers: {
       "User-Agent": webUA,
       "Referer": "https://hitomi.la/reader/$galleryId.html"
@@ -66,7 +85,7 @@ class GG {
     initialG = int.parse(exp.firstMatch(res.data!)![0]!);
     cacheTime = DateTime.now();
     cacheB = b;
-    cacheNumbers = numbers;
+    cacheNumbers = List<String>.from(numbers);
   }
 
   String subdomainFromUrl(String url, String? base) {

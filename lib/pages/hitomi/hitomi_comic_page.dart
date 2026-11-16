@@ -191,8 +191,9 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
           var gg = GG();
           var images = <String>[];
           for (var file in data!.files) {
+            final ext = file.preferredExtension;
             images.add(await gg.urlFromUrlFromHash(
-                data!.id, file, "webpsmallsmalltn", "webp"));
+                data!.id, file, "${ext}smallsmalltn", ext));
           }
           return Res(images);
         } catch (e, s) {

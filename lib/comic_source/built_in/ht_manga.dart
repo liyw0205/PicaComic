@@ -113,7 +113,7 @@ final htManga = ComicSource.named(
   categoryComicsData: CategoryComicsData.named(
     load: (category, param, options, page) async {
       if (!param!.startsWith("http")) {
-        param = HtmangaNetwork.baseUrl + param;
+        param = HtmangaNetwork.resolveUrl(param);
       }
       return HtmangaNetwork().getComicList(
         param,
