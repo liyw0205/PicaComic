@@ -373,11 +373,13 @@ class DownloadManager with _DownloadDb implements Listenable {
     if (winner == null) {
       // Keep incomplete candidates as evidence for diagnostics and manual
       // recovery instead of silently deleting them.
-      if (await target.exists()) await _moveQueueFileAside(target, 'corrupt');
-      if (await temporary.exists()) {
+      if (await _queueCandidateExists(target)) {
+        await _moveQueueFileAside(target, 'corrupt');
+      }
+      if (await _queueCandidateExists(temporary)) {
         await _moveQueueFileAside(temporary, 'corrupt');
       }
-      if (await backup.exists()) {
+      if (await _queueCandidateExists(backup)) {
         await _moveQueueFileAside(backup, 'corrupt');
       }
       return;
@@ -407,7 +409,7 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   Future<void> _discardQueueCandidate(
       File file, Map<String, dynamic>? snapshot) async {
-    if (!await file.exists()) return;
+    if (!await _queueCandidateExists(file)) return;
     if (snapshot == null) {
       await _moveQueueFileAside(file, 'corrupt');
     } else {
@@ -415,17 +417,30 @@ class DownloadManager with _DownloadDb implements Listenable {
     }
   }
 
+  Future<bool> _queueCandidateExists(File file) async {
+    return await FileSystemEntity.type(file.path, followLinks: false) !=
+        FileSystemEntityType.notFound;
+  }
+
   Future<void> _moveQueueFileAside(File file, String reason) async {
-    if (!await file.exists()) return;
-    final destination = File(
-      '${file.path}.$reason.${DateTime.now().microsecondsSinceEpoch}',
-    );
+    final type = await FileSystemEntity.type(file.path, followLinks: false);
+    if (type == FileSystemEntityType.notFound) return;
+    final destinationPath =
+        '${file.path}.$reason.${DateTime.now().microsecondsSinceEpoch}';
     try {
-      await file.rename(destination.path);
+      // A malformed candidate can be a directory (for example when a failed
+      // writer leaves a path behind). Preserve it with the same quarantine
+      // rules so the next startup can proceed safely.
+      if (type == FileSystemEntityType.directory) {
+        await Directory(file.path).rename(destinationPath);
+      } else {
+        await file.rename(destinationPath);
+      }
     } catch (_) {
       // Rename can fail on some platforms when another reader has the file
       // open. A copy still preserves the original before replacement.
-      await file.copy(destination.path);
+      if (type == FileSystemEntityType.directory) rethrow;
+      await file.copy(destinationPath);
     }
   }
 
