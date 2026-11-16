@@ -872,3 +872,17 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试 runner | `7684acfb` | `tool/run_flutter_tests.sh` 对显式参数和 `FLUTTER_TEST_FILES` 使用同一去重集合，避免同一 `test/*.dart` 被传入两次；tag 全量调用路径不变 | `bash -n`、显式参数与环境参数重叠追踪、非法路径返回码和 analyzer baseline、异步边界、格式、差异检查通过 |
 
 版本提交 `7684acfb` 将版本递增到 `4.2.63+4263`；annotated tag `v4.2.63` 指向文档提交 `79d6f207`。标准 workflow `43815160601` build 用时 12m29s、publish 用时 15s，Flutter regression 通过 381 tests，native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功；Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，标准 tag workflow 已完成最终回归。
+版本提交 `7684acfb` 将版本递增到 `4.2.63+4263`；annotated tag `v4.2.63` 指向文档提交 `79d6f207`。标准 workflow `43815160601` build 用时 12m29s、publish 用时 15s，Flutter regression 通过 381 tests，native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功；Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，标准 tag workflow 已完成最终回归。
+
+## 44. 2026-11-16 恢复与分页生命周期收口、测试 suite 继续合并
+
+本轮按 A1/A15/A16 方案修复跨平台恢复和迟到异步响应边界，并继续把同域小用例合并到已有 suite：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A1 备份 manifest | `f5520f9b` | 生成 manifest 时先把相对路径统一为 `/`，再排除 `backup-manifest.json`；修复 Windows 路径分隔符导致 manifest 自包含、后续恢复文件数量校验失败的问题 | `test/data_restore_transaction_test.dart` 验证正常文件和嵌套文件被列出且 manifest 不列自身；目标分析、格式、baseline、异步边界和差异检查通过 |
+| A16 漫画分页生命周期 | `f5520f9b` | `ComicsPageLogic.dispose()` 递增 generation 并清除 loading 状态；dispose 后迟到的分页响应不再修改 comics/current | `test/comics_page_logic_test.dart` 使用 Completer 覆盖迟到响应；目标分析通过，Flutter 定向 runner 受本机 Kernel SDK mismatch 阻塞 |
+| A15 状态更新契约 | `f5520f9b` | 在既有 StateController suite 增加 `update(ids)` 过滤回归，验证只通知匹配 id 的监听器 | `test/state_controller_test.dart`；目标分析、baseline、异步边界、格式和差异检查通过 |
+| 测试流程 | `f5520f9b`, `222ec65c` | 搜索语言纯函数并入 `search_result_language_test.dart`，LoadingDialog 用例并入 `loading_state_async_test.dart`；页面 fixture 收进 group，避免污染纯函数测试；删除两个独立 suite 入口 | 测试数量保持不变、减少两个 Flutter suite 启动；目标分析和格式检查通过，tag 门禁仍全量串行执行 |
+
+版本提交 `f5520f9b` 将版本递增到 `4.2.64+4264`；文档提交为 `222ec65c` 后续收口。普通 `master` push 仍只推送分支，不触发 Android workflow；完成验证后移动 annotated tag `v4.2.64` 触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
