@@ -192,6 +192,52 @@ void main() {
     expect(manager.findSync(target), isNull);
   });
 
+  test('lazy existence cache tracks absent, added, and removed targets',
+      () async {
+    final cacheDirectory =
+        await Directory.systemTemp.createTemp('pica_history_cache_');
+    final manager = HistoryManager.create();
+    try {
+      await manager.init(
+        databasePath: '${cacheDirectory.path}/history.db',
+        importLegacy: false,
+      );
+      const target = 'cache-target';
+      expect(manager.findSync(target), isNull);
+
+      await manager.addHistory(History(
+        HistoryType.picacg,
+        DateTime.now(),
+        'Title',
+        '',
+        '',
+        0,
+        0,
+        target,
+      ));
+      expect(manager.findSync(target), isNotNull);
+
+      await manager.remove(target);
+      await DataMaintenance.waitForIdle();
+      expect(manager.findSync(target), isNull);
+
+      await manager.addHistory(History(
+        HistoryType.picacg,
+        DateTime.now(),
+        'Title again',
+        '',
+        '',
+        0,
+        0,
+        target,
+      ));
+      expect(manager.findSync(target)?.title, 'Title again');
+    } finally {
+      manager.close();
+      await cacheDirectory.delete(recursive: true);
+    }
+  });
+
   test('history deletions publish and keep the local cache coherent', () async {
     final manager = HistoryManager.create();
     await manager.init(
