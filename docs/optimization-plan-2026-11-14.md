@@ -722,3 +722,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A19 来源网络策略 | `0d384045` | 流式响应完整读取后才记录成功；响应体超限或读取异常计入失败并释放 lease，后续请求不会被错误占用的并发额度阻塞 | `test/source_network_policy_test.dart` 覆盖流式超限、失败计数和后续 lease；目标分析、baseline、异步边界、格式和差异检查通过 |
 
 版本提交 `353b1a5c` 将版本递增到 `4.2.51+4251`，annotated tag `v4.2.51` 指向该提交。标准 workflow `43775549354` 的 build 用时约 9m27s、publish 约 16s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功，发布 4 个 APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow；tag 创建或更新才触发发布。Termux 本地 Flutter 测试继续受 Kernel SDK mismatch 阻塞，不能替代上述标准 CI。
+
+## 32. 2026-11-16 A2/A16 异步契约收口与 v4.2.52 发布
+
+本轮继续沿统一测试入口推进，新增回归均并入现有契约/生命周期 suite，避免为单个边界重复启动完整 Flutter 测试流程：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A2 导入结果契约 | `ef9a3cdb` | 文件选择器返回空路径时明确返回 `DataImportResult.cancelled`，与已有导入成功/失败契约测试合并维护 | `test/data_import_contract_test.dart`；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+| A16 设置页生命周期 | `da5bbfd8` | 代理可用性/质量探测在配置、TCP 和 HTTP await 边界检查 `mounted`，结果先落局部变量再统一提交；WebDAV 设置等待配置后补 context 守卫 | `test/proxy_setting_dialog_async_test.dart` 覆盖对话框销毁后迟到配置；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `9413e53c` 将版本递增到 `4.2.52+4252`，annotated tag `v4.2.52` 指向该提交。标准 tag workflow `43777530632` 的 build 用时 13m23s、publish 用时 21s；Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.52.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。
+
+标准 runner 已通过本轮新增测试；Termux 本地 Flutter runner 仍受 `Unexpected Kernel SDK Version 9811646114`（期望 `d684a576a6`）阻塞，不能替代 CI。工作区保留用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak`，未纳入提交。
