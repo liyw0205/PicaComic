@@ -912,3 +912,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | 新增边界均追加到现有 suite，删除会卡住发布 runner 的重复 widget 用例；日常仍可通过 `FLUTTER_TEST_FILES` 定向执行；发布 tag 仍只运行一次完整串行 Flutter/native/Android 门禁 | `dart analyze`、analyzer baseline、异步边界、format、shell 语法和差异检查通过；workflow `43842756497` 的 Flutter regression 通过 387 项，native curl 通过 7 项 |
 
 版本 `4.2.66+4266` 已由提交 `2fc8a3cd` 发布；`v4.2.66` 指向该提交。workflow `43842756497` 的 build 用时 11m54s、publish 用时 14s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+
+## 47. 2026-11-16 异步持久化边界与数据库测试入口收敛
+
+本轮继续减少重复测试启动，同时修复两个会让异步失败被吞掉或阻塞后续操作的边界：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A2 收藏夹标签持久化 | `c14afc7e` | `LocalFavoritesManager.addTagTo()` 改为 `Future<void>`；维护忙时进入 `DataMaintenance` 队列，正常路径等待 `saveData()`，持久化失败会传播给调用方；文件夹可用性扫描同步等待标签写入 | `test/data_sync_boundary_test.dart` 覆盖维护等待、SQLite 触发器失败传播、失败后后续写入可继续 |
+| A11 下载生命周期 gate | `c14afc7e` | `_runLifecycle()` 对 pending enqueue flush 使用内层 `finally` 清理 gate、标志位和 completer；持久化失败时保留已转入主队列的任务，但不错误自动启动，也不阻塞后续 lifecycle 请求 | `test/favorite_download_test.dart` 覆盖 flush 失败、任务保留、暂停状态和后续 gate 可用 |
+| 测试流程 | `c14afc7e` | 删除独立 `test/database_performance_test.dart`，将 1k/10k/50k 历史数据库性能基准并入 `test/database_correctness_test.dart`；默认跳过，仅 `PICA_RUN_PERF_TESTS=1` 或 tag runner 显式开启；旧维护用例显式等待新的 Future API | 自动发现的 Flutter suite 减少一个，正确性覆盖和发布性能门禁不降低；目标 analyze、analyzer baseline、异步边界、格式、shell 语法和差异检查通过 |
+
+版本提交将版本递增到 `4.2.67+4267`，计划创建或移动 annotated tag `v4.2.67` 指向该提交。普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布，且 tag 必须解析到本次构建提交。Flutter/Android 完整验收以本次 tag workflow 为准；Termux 本地 Flutter 仍可能受 Kernel SDK mismatch 或 `impellerc` 环境限制。提交作者统一为 `liyw0205 <2650115317@qq.com>`，用户原有未跟踪文件继续保留且不纳入提交。
