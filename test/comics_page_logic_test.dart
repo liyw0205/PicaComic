@@ -56,6 +56,9 @@ class _ReaderNetwork extends EhNetwork {
   final requests = <String>[];
 
   @override
+  Future<String> getCookies(bool setNW, [String? url]) async => '';
+
+  @override
   Future<Res<String>> request(String url,
       {Map<String, String>? headers,
       CacheExpiredTime expiredTime = CacheExpiredTime.short,
@@ -646,45 +649,57 @@ void main() {
 
   test('EH reader resolves images by gallery page number, not DOM order',
       () async {
-    final network = _ReaderNetwork({
-      0: _readerPage(List.generate(20, (index) => 20 - index)),
-      1: _readerPage(List.generate(20, (index) => 40 - index)),
-    });
-    for (final page in [1, 3, 20, 21, 25, 40]) {
-      final result = await network.getReaderLink(
-          'https://e-hentai.org/g/123/token/', page);
-      expect(result.success, isTrue, reason: 'page=$page');
-      expect(result.data, 'https://e-hentai.org/s/key/123-$page');
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      final network = _ReaderNetwork({
+        0: _readerPage(List.generate(20, (index) => 20 - index)),
+        1: _readerPage(List.generate(20, (index) => 40 - index)),
+      });
+      for (final page in [1, 3, 20, 21, 25, 40]) {
+        final result = await network.getReaderLink(
+            'https://e-hentai.org/g/123/token/', page);
+        expect(result.success, isTrue, reason: 'page=$page');
+        expect(result.data, 'https://e-hentai.org/s/key/123-$page');
+      }
+      expect(network.requests.toSet(), {
+        'https://e-hentai.org/g/123/token/',
+        'https://e-hentai.org/g/123/token/?p=1',
+      });
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
     }
-    expect(network.requests.toSet(), {
-      'https://e-hentai.org/g/123/token/',
-      'https://e-hentai.org/g/123/token/?p=1',
-    });
   });
 
   test('EH reader preserves DOM order when page numbers are ambiguous',
       () async {
-    final unknownFormat = _ReaderNetwork({
-      0: _readerPageLinks([
-        'https://e-hentai.org/s/key/123-3',
-        'https://e-hentai.org/s/key/page-two',
-        'https://e-hentai.org/s/key/123-1',
-      ]),
-    });
-    final unknownResult = await unknownFormat.getReaderLink(
-        'https://e-hentai.org/g/123/token/', 1);
-    expect(unknownResult.data, 'https://e-hentai.org/s/key/123-3');
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      final unknownFormat = _ReaderNetwork({
+        0: _readerPageLinks([
+          'https://e-hentai.org/s/key/123-3',
+          'https://e-hentai.org/s/key/page-two',
+          'https://e-hentai.org/s/key/123-1',
+        ]),
+      });
+      final unknownResult = await unknownFormat.getReaderLink(
+          'https://e-hentai.org/g/123/token/', 1);
+      expect(unknownResult.data, 'https://e-hentai.org/s/key/123-3');
 
-    final duplicatePages = _ReaderNetwork({
-      0: _readerPageLinks([
-        'https://e-hentai.org/s/key/123-3',
-        'https://e-hentai.org/s/key/123-3',
-        'https://e-hentai.org/s/key/123-1',
-      ]),
-    });
-    final duplicateResult = await duplicatePages.getReaderLink(
-        'https://e-hentai.org/g/123/token/', 1);
-    expect(duplicateResult.data, 'https://e-hentai.org/s/key/123-3');
+      final duplicatePages = _ReaderNetwork({
+        0: _readerPageLinks([
+          'https://e-hentai.org/s/key/123-3',
+          'https://e-hentai.org/s/key/123-3',
+          'https://e-hentai.org/s/key/123-1',
+        ]),
+      });
+      final duplicateResult = await duplicatePages.getReaderLink(
+          'https://e-hentai.org/g/123/token/', 1);
+      expect(duplicateResult.data, 'https://e-hentai.org/s/key/123-3');
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
+    }
   });
 
   testWidgets('EH toolbar refresh ignores responses after its page is removed',
