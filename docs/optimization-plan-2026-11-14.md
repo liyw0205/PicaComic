@@ -924,3 +924,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `c14afc7e` | 删除独立 `test/database_performance_test.dart`，将 1k/10k/50k 历史数据库性能基准并入 `test/database_correctness_test.dart`；默认跳过，仅 `PICA_RUN_PERF_TESTS=1` 或 tag runner 显式开启；旧维护用例显式等待新的 Future API | 自动发现的 Flutter suite 减少一个，正确性覆盖和发布性能门禁不降低；目标 analyze、analyzer baseline、异步边界、格式、shell 语法和差异检查通过 |
 
 版本提交 `3e0305e1` 将版本递增到 `4.2.67+4267`，annotated tag `v4.2.67` 指向该提交。标准 tag workflow `43849041708` 的 build 用时约 10m32s、publish 用时 14s；Flutter regression 通过 389 项，native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.67.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布，且 workflow 校验 tag 仍指向本次构建提交。Termux 本地 Flutter 仍可能受 Kernel SDK mismatch 或 `impellerc` 环境限制，不能替代标准 CI。提交作者统一为 `liyw0205 <2650115317@qq.com>`，用户原有未跟踪文件继续保留且不纳入提交。
+
+## 48. 2026-11-16 缓存测试 suite 继续合并
+
+本轮只调整测试入口，不改变缓存行为或断言：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 测试流程 | `57e91e56` | 将唯一用例 `test/byte_lru_cache_test.dart` 并入已有 `test/cache_manager_test.dart`，保留 `byte_lru_cache_regression.dart` 作为局部 helper；不合并共享 `DownloadManager` 状态的高耦合 suite | 自动发现的 Flutter suite 从 54 减少到 53，缓存替换、淘汰和 owner-safe cleanup 断言保持不变；目标 analyze、analyzer baseline、格式和 `git diff --check` 通过 |
+
+版本提交将版本递增到 `4.2.68+4268`，计划创建 annotated tag `v4.2.68` 指向该提交。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。Flutter/Android 完整验收以本次 tag workflow 为准，Termux 本地 Flutter runner 仍受 `impellerc` 环境限制。提交作者统一为 `liyw0205 <2650115317@qq.com>`，用户原有未跟踪文件继续保留且不纳入提交。
