@@ -358,6 +358,13 @@ class EhNetwork {
     return 0.5;
   }
 
+  String _listingCover(dom.Element? image) {
+    final src = image?.attributes['src'];
+    return src != null && src.isNotEmpty && !src.startsWith('data:')
+        ? src
+        : image?.attributes['data-src'] ?? '';
+  }
+
   ///从e-hentai链接中获取当前页面的所有画廊
   Future<Res<Galleries>> getGalleries(String url,
       {bool leaderboard = false, bool favoritePage = false}) async {
@@ -383,12 +390,8 @@ class EhNetwork {
           var time = item.children[1 + t].children[2].children[0].text;
           var stars = getStarsFromPosition(item
               .children[1 + t].children[2].children[1].attributes["style"]!);
-          var cover = item.children[1 + t].children[1].children[0].children[0]
-              .attributes["src"];
-          if (cover![0] == 'd') {
-            cover = item.children[1 + t].children[1].children[0].children[0]
-                .attributes["data-src"];
-          }
+          final cover =
+              _listingCover(item.children[1 + t].querySelector('img'));
           var title = item.children[2 + t].children[0].children[0].text;
           var link = item.children[2 + t].children[0].attributes["href"];
           String uploader = "";
@@ -406,7 +409,7 @@ class EhNetwork {
           }
 
           galleries.add(EhGalleryBrief(
-              title, type, time, uploader, cover!, stars, link!, tags,
+              title, type, time, uploader, cover, stars, link!, tags,
               pages: pages));
         } catch (e) {
           //表格中存在空行或者被屏蔽
@@ -426,7 +429,7 @@ class EhNetwork {
                       (element) => DateTime.tryParse(element.text) != null)
                   ?.text ??
               "Unknown";
-          final coverPath = item.querySelector("img")?.attributes["src"] ?? "";
+          final coverPath = _listingCover(item.querySelector('img'));
           final stars = getStarsFromPosition(item
                   .querySelector("div.gl5t > div > div.ir")
                   ?.attributes["style"] ??
@@ -465,10 +468,8 @@ class EhNetwork {
           final uploader =
               item.querySelector("td.gl2e > div > div.gl3e > div > a")?.text ??
                   "Unknown";
-          final coverPath = item
-                  .querySelector("td.gl1e > div > a > img")
-                  ?.attributes["src"] ??
-              "";
+          final coverPath =
+              _listingCover(item.querySelector('td.gl1e > div > a > img'));
           final stars = getStarsFromPosition(item
                   .querySelector("td.gl2e > div > div.gl3e > div.ir")
                   ?.attributes["style"] ??
@@ -509,20 +510,15 @@ class EhNetwork {
               "Unknown";
           final uploader =
               item.querySelector("td.gl5m > div > a")?.text ?? "Unknown";
-          var coverPath = item
-              .querySelector("td.gl2m > div > div > img")
-              ?.attributes["src"];
-          if (coverPath![0] == 'd') {
-            coverPath = item.children[1 + t].children[1].children[0].children[0]
-                .attributes["data-src"];
-          }
+          final coverPath =
+              _listingCover(item.querySelector('td.gl2m > div > div > img'));
           final stars = getStarsFromPosition(
               item.querySelector("td.gl4m > div.ir")?.attributes["style"] ??
                   "");
           final link =
               item.querySelector("td.gl3m > a")?.attributes["href"] ?? "";
           galleries.add(EhGalleryBrief(
-              title, type, time, uploader, coverPath!, stars, link, []));
+              title, type, time, uploader, coverPath, stars, link, []));
         } catch (e) {
           //忽视
         }

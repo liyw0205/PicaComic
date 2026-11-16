@@ -52,7 +52,11 @@ class ComicsPageLogic<T> extends StateController {
         if (res.error) {
           paginationError = res.errorMessage ?? "Network Error";
         } else {
+          if (res.subData is int) maxPage = res.subData as int;
           dividedComics![requestedPage] = res.data;
+          if (maxPage != null && current > maxPage! && maxPage! > 0) {
+            current = maxPage!;
+          }
           paginationError = null;
         }
       }
