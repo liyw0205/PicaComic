@@ -30,6 +30,12 @@ class _HistoryPageState extends State<HistoryPage> {
   String keyword = "";
   bool isModified = false;
   bool _loadingPage = false;
+  Timer? _searchDebounce;
+
+  void _cancelSearchDebounce() {
+    _searchDebounce?.cancel();
+    _searchDebounce = null;
+  }
 
   @override
   void initState() {
@@ -39,10 +45,11 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void _reload() {
+    _cancelSearchDebounce();
     comics.clear();
     _hasMore = true;
     _loadingPage = false;
-    _totalCount = HistoryManager().count(keyword: searchMode ? keyword : '');
+    if (!searchMode) _totalCount = HistoryManager().count();
     _loadPage();
   }
 
@@ -57,7 +64,9 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void _onScroll() {
-    if (!mounted || !_hasMore || _loadingPage) return;
+    if (!mounted || _searchDebounce != null || !_hasMore || _loadingPage) {
+      return;
+    }
     if (_scrollController.position.extentAfter >= 800) return;
     _loadingPage = true;
     setState(_loadPage);
@@ -68,6 +77,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
   @override
   void dispose() {
+    _cancelSearchDebounce();
     if (isModified) {
       unawaited(appdata.history.saveData());
     }
@@ -83,9 +93,11 @@ class _HistoryPageState extends State<HistoryPage> {
         decoration:
             InputDecoration(border: InputBorder.none, hintText: "搜索".tl),
         onChanged: (s) {
-          setState(() {
-            keyword = s.toLowerCase();
-            _reload();
+          keyword = s.toLowerCase();
+          _cancelSearchDebounce();
+          _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+            _searchDebounce = null;
+            if (mounted) setState(_reload);
           });
         },
       );
@@ -119,6 +131,7 @@ class _HistoryPageState extends State<HistoryPage> {
                               TextButton(
                                   onPressed: () {
                                     appdata.history.clearHistory();
+                                    _cancelSearchDebounce();
                                     setState(_reload);
                                     isModified = true;
                                     App.globalBack();
@@ -134,6 +147,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   icon: const Icon(Icons.search),
                   onPressed: () {
                     setState(() {
+                      _cancelSearchDebounce();
                       searchMode = !searchMode;
                       if (!searchMode) {
                         keyword = "";
