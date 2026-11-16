@@ -749,3 +749,18 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 版本提交 `cf975029` 将版本递增到 `4.2.53+4253`，annotated tag `v4.2.53` 指向该提交。标准 tag workflow `43780343004` 的 build 用时 10m26s、publish 用时 13s；Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.53.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。
 
 标准 runner 已通过本轮新增及合并后的全量测试；Termux 本地 Flutter runner 仍受 Kernel SDK/kernel 与 `impellerc` 环境不匹配阻塞，不能替代 CI。工作区继续保留用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak`，未纳入提交。
+
+## 34. 2026-11-16 测试流程收敛、恢复边界与 v4.2.54 发布
+
+本轮先压缩日常测试路径，再继续处理恢复和持久化边界，避免每个异常分支都启动一次独立 Flutter suite：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A10 WebDAV 凭据 | `ba546774` | 合并安全存储不可用的 legacy、匿名设置和设置页读取场景；保留显式一次性匿名配置的独立正向回归。`Webdav` 对安全存储写入/删除执行回读验证，迁移失败时保留 legacy 设置，缺失凭据时禁止匿名降级 | `test/secret_store_test.dart`；目标 Dart analyze、analyzer baseline、异步边界、格式和差异检查通过 |
+| Flutter 测试入口 | `ba546774` | `tool/run_flutter_tests.sh` 默认仍串行、fail-fast、全量运行；新增 `FLUTTER_TEST_FILES` 去重筛选和 `FLUTTER_TEST_NAME` 过滤，日常只跑受影响 suite，tag 门禁不改变 | 定向参数校验通过；标准 tag runner 全量 Flutter regression 通过 |
+| A1/A18 恢复可信根 | `52a5748e` | 恢复拒绝 `journal.json`/`.previous` 符号链接；目录迁移拒绝 journal 符号链接，避免外部控制面伪造 committed 状态触发源目录删除 | `test/data_restore_transaction_test.dart`、`test/directory_maintenance_test.dart`；标准 runner 通过 |
+| A11 下载队列 | `52a5748e` | legacy 快照含非法 generation 时允许回退有效 `.bak`，并保留坏源文件为 `.corrupt` | `test/download_persistence_test.dart`；标准 runner 通过 |
+
+版本提交 `65024f22` 将版本递增到 `4.2.54+4254`，annotated tag `v4.2.54` 指向该提交。标准 tag workflow `43782966404` 的 build 用时约 12m08s、publish 用时约 22s；Flutter regression、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 资产为 `PicaComic-4.2.54.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter runner 仍受 `Unexpected Kernel SDK Version 9811646114`（期望 `d684a576a6`）阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
