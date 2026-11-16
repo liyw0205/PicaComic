@@ -811,3 +811,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 版本提交 `cc45a2c9` 将版本递增到 `4.2.58+4258`，annotated tag `v4.2.58` 指向该提交。标准 tag workflow `43793949396` 的 build 用时 11m38s、publish 用时 14s；Flutter 全量回归（含显式性能基准）、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.58.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
+## 39. 2026-11-16 图片收藏搜索去重与 v4.2.59 发布
+
+本轮继续处理页面层重复查询，先收敛图片收藏搜索，不改动历史页和数据库查询语义：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A13 图片收藏搜索 | `bc72fc0a` | `_setKeyword` 增加 180ms debounce，连续输入只在停顿后执行一次 `count()+getPage()`；销毁和关闭搜索时取消定时器，避免迟到回调访问已释放页面 | `test/image_favorites_pagination_test.dart` 合并 widget 回归，验证输入期间保留旧结果、停顿后切换过滤结果；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `dfb04f58` 将版本递增到 `4.2.59+4259`，annotated tag `v4.2.59` 指向该提交。标准 tag workflow `43795930087` 的 build 用时 11m10s、publish 用时 21s；Flutter 全量回归、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.59.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
