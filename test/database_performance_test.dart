@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final runPerformance = Platform.environment['PICA_RUN_PERF_TESTS'] == '1';
 
   test('indexed history pages keep object allocation bounded at 50k rows',
       () async {
@@ -64,5 +65,7 @@ void main() {
     } finally {
       await directory.delete(recursive: true);
     }
-  }, timeout: const Timeout(Duration(minutes: 4)));
+  },
+      timeout: const Timeout(Duration(minutes: 4)),
+      skip: runPerformance ? false : 'opt-in performance benchmark');
 }

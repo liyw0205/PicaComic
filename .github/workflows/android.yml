@@ -29,7 +29,7 @@ jobs:
       - name: Check async and file I/O boundaries
         run: bash tool/check-async-boundary.sh
       - name: Run Flutter regression tests
-        run: bash tool/run_flutter_tests.sh
+        run: FLUTTER_TEST_PERFORMANCE=1 bash tool/run_flutter_tests.sh
       - name: Install native curl test dependency
         run: |
           sudo apt-get update

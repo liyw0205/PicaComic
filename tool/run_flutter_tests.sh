@@ -10,6 +10,16 @@ if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+run_performance="${FLUTTER_TEST_PERFORMANCE:-0}"
+if [[ "$run_performance" != 0 && "$run_performance" != 1 ]]; then
+  echo "FLUTTER_TEST_PERFORMANCE must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "$run_performance" == 1 ]]; then
+  # Long-running database benchmarks stay out of release regression runs.
+  export PICA_RUN_PERF_TESTS=1
+fi
+
 flutter_args=("$@")
 
 # Local iteration can select the affected suites without changing the full

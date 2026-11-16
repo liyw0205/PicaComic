@@ -119,6 +119,38 @@ void main() {
     expect(preserved, hasLength(1));
   });
 
+  test('a backup symlink cannot import a queue from outside the root',
+      () async {
+    final externalDirectory =
+        await Directory.systemTemp.createTemp('pica-download-external-');
+    addTearDown(() async {
+      if (await externalDirectory.exists()) {
+        await externalDirectory.delete(recursive: true);
+      }
+    });
+    final externalQueue = File('${externalDirectory.path}/queue.json');
+    final externalContents = jsonEncode(
+      committedQueue([fixtureTask('external')], 9),
+    );
+    await externalQueue.writeAsString(externalContents);
+    await getQueueFile().writeAsString('{"version":1');
+    final backupLink = Link(getQueueFile('.bak').path);
+    await backupLink.create(externalQueue.path);
+
+    await manager.init();
+
+    expect(manager.downloading, isEmpty);
+    expect(await externalQueue.readAsString(), externalContents);
+    expect(await backupLink.exists(), isFalse);
+    expect(
+      directory
+          .listSync()
+          .whereType<FileSystemEntity>()
+          .where((file) => file.path.contains('newDownload.json.bak.corrupt.')),
+      hasLength(1),
+    );
+  });
+
   test('a complete temporary queue is promoted when the target is missing',
       () async {
     await getQueueFile('.tmp').writeAsString(jsonEncode(committedQueue()));

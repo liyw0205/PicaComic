@@ -289,8 +289,15 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   Future<Map<String, dynamic>?> _readQueueSnapshot(File file) async {
-    if (!await file.exists()) return null;
     try {
+      // Recovery candidates must be regular files. Following a symlink here
+      // could import JSON from outside the configured download directory and
+      // later rename that link as the active queue snapshot.
+      final type = await FileSystemEntity.type(
+        file.path,
+        followLinks: false,
+      );
+      if (type != FileSystemEntityType.file) return null;
       final snapshot =
           _decodeQueueEnvelope(jsonDecode(await file.readAsString()));
       // A structurally valid envelope can still contain an unusable task. Do
