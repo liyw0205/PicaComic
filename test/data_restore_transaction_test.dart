@@ -694,6 +694,41 @@ void main() {
     expect(transaction.journal.existsSync(), isTrue);
   });
 
+  test('recovery rejects a journal symlink before consuming its state',
+      () async {
+    final dataPath = '${root.path}/data';
+    final external = Directory('${root.path}/external')..createSync();
+    final externalJournal = File('${external.path}/journal.json');
+    await externalJournal.writeAsString(
+      jsonEncode({
+        'version': 1,
+        'phase': 'committed',
+        'id': '123',
+        'allowedRoots': <String>[],
+        'preferences': {
+          'firstUse': ['old'],
+          'blockingKeyword': null,
+          'favoriteTags': null,
+        },
+        'entries': <Object>[],
+      }),
+      flush: true,
+    );
+    final journal = File('$dataPath/data-restore/journal.json')
+      ..parent.createSync(recursive: true);
+    await Link(journal.path).create(externalJournal.path);
+
+    await expectLater(
+      recoverPendingDataRestore(dataPath),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      FileSystemEntity.typeSync(journal.path, followLinks: false),
+      FileSystemEntityType.link,
+    );
+    expect(await externalJournal.exists(), isTrue);
+  });
+
   test('ZIP rejects traversal, links, duplicate paths, count and expanded size',
       () async {
     final link = ArchiveFile.string('link', 'target')

@@ -1199,9 +1199,19 @@ class DataRestoreTransaction {
 Future<void> recoverPendingDataRestore(String dataPath,
     {Iterable<String> trustedAllowedRoots = const []}) async {
   final canonical = File('$dataPath/data-restore/journal.json');
+  if (FileSystemEntity.typeSync(canonical.path, followLinks: false) ==
+      FileSystemEntityType.link) {
+    throw const FormatException(
+        'Invalid restore journal link; retained for recovery');
+  }
   var journal = canonical;
   if (!journal.existsSync()) {
     final previous = File('${canonical.path}.previous');
+    if (FileSystemEntity.typeSync(previous.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw const FormatException(
+          'Invalid restore journal link; retained for recovery');
+    }
     if (!previous.existsSync()) return;
     journal = previous;
   }

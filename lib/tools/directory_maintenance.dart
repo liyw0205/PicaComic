@@ -329,6 +329,11 @@ Future<DirectoryMigrationReport> migrateDirectory(
   await _ensureDirectoryRoot(source);
   await _ensureDirectoryRoot(destination);
   final journal = journalFile ?? File('$destinationPath.migration.json');
+  // A journal is control-plane input. Never read a journal through a link:
+  // a planted committed record could otherwise authorize source deletion.
+  if (await _isSymbolicLink(journal.path)) {
+    throw StateError('Directory migration journal must not be a symbolic link');
+  }
   final timer = RuntimeMetrics.start('directory.migration');
   try {
     var resumed = false;

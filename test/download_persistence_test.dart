@@ -249,6 +249,30 @@ void main() {
     expect(preserved, hasLength(1));
   });
 
+  test('a legacy snapshot with an invalid generation falls back to backup',
+      () async {
+    await getQueueFile().writeAsString(jsonEncode({
+      'generation': 'not-an-integer',
+      'downloading': <Object?>[],
+    }));
+    await getQueueFile('.bak').writeAsString(
+      jsonEncode(committedQueue([fixtureTask('backup')], 19)),
+    );
+
+    await manager.init();
+
+    expect(manager.downloading.single.id, 'backup');
+    expect(jsonDecode(await getQueueFile().readAsString())['generation'], 19);
+    expect(await getQueueFile('.bak').exists(), isFalse);
+    expect(
+      directory
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('newDownload.json.corrupt.')),
+      hasLength(1),
+    );
+  });
+
   test('duplicate task ids are rejected to prevent duplicate downloads',
       () async {
     await getQueueFile().writeAsString(

@@ -410,4 +410,48 @@ void main() {
     expect(await Link(stagingPath).exists(), isTrue);
     expect(await journal.exists(), isTrue);
   });
+
+  test('journal symlink is rejected before source deletion', () async {
+    final root =
+        await Directory.systemTemp.createTemp('pica-dir-journal-link-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    final external = Directory('${root.path}/external');
+    await source.create(recursive: true);
+    await destination.create(recursive: true);
+    await external.create(recursive: true);
+    const contents = 'payload';
+    await File('${source.path}/comic.bin').writeAsString(contents);
+    await File('${destination.path}/comic.bin').writeAsString(contents);
+    final digest = sha256.convert(utf8.encode(contents)).toString();
+    final externalJournal = File('${external.path}/journal.json');
+    await externalJournal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'committed',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': '${destination.path}.migration-attacker.tmp',
+      'deleteSource': true,
+      'totalBytes': contents.length,
+      'files': [
+        {
+          'path': 'comic.bin',
+          'size': contents.length,
+          'sha256': digest,
+          'done': true,
+        },
+      ],
+    }));
+    final journal = File('${destination.path}.migration.json');
+    await Link(journal.path).create(externalJournal.path);
+
+    await expectLater(
+      migrateDirectory(source, destination),
+      throwsA(isA<StateError>()),
+    );
+    expect(await source.exists(), isTrue);
+    expect(await externalJournal.exists(), isTrue);
+    expect(await Link(journal.path).exists(), isTrue);
+  });
 }

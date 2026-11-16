@@ -245,7 +245,7 @@ class DownloadManager with _DownloadDb implements Listenable {
     if (version != null && version != _downloadQueueVersion) {
       throw FormatException('Unsupported download queue version: $version');
     }
-    if (version != null && _generationOf(envelope) < 0) {
+    if (envelope.containsKey('generation') && _generationOf(envelope) < 0) {
       throw const FormatException('Invalid download queue generation');
     }
     final state = envelope['state'];
