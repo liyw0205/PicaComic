@@ -999,3 +999,16 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | 继续复用 `test/comic_source_contract_test.dart`，只增加一组离线契约断言；发布 tag 仍只运行一次完整串行 Flutter/native/Android 门禁 | 本机 Flutter 受 Termux 缺少 `impellerc` 限制，最终以 `v4.2.74` tag workflow 为准 |
 
 现场探测记录：`https://ltn.gold-usergeneratedcontent.net/galleries/4333638.js` 返回 200；同 CDN 的 `galleryblock/4333638.html` 返回 404。普通 `master` push 仍不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布；提交作者统一为 `liyw0205 <2650115317@qq.com>`。
+
+## 55. 2026-11-16 v4.2.74 发布结果
+
+本轮源兼容性修复已完成发布。版本提交 `810e1b07` 将版本递增到 `4.2.74+4274`；源修复提交为 `e5031778`，发布方案记录提交为 `f632128b`。annotated tag `v4.2.74` 指向 `f632128b`，未移动或重写历史 tag。
+
+| 验证项 | 结果 |
+| --- | --- |
+| 标准 tag workflow | `43891132231` 成功；tag `v4.2.74`、SHA `f632128bef1b42f3b6cf6972c7a8764a04abb4e8` 校验一致 |
+| build / publish | build 约 9m44s，publish 约 25s；Flutter regression、native curl、analyzer baseline、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 均成功 |
+| 离线来源契约 | `test/comic_source_contract_test.dart` 保留 9 个测试，覆盖 Hitomi 当前 JS 包装/标签/链接/空字段和绅士漫画 URL、分页字段及坏卡片边界；未新增独立 runner |
+| Release 资产 | `PicaComic-4.2.74.apk`、`PicaComic-4.2.74-arm64-v8a.apk`、`PicaComic-4.2.74-armeabi-v7a.apk`、`PicaComic-4.2.74-x86_64.apk`、`SHA256SUMS`、`apk-metadata.json` |
+
+Release 地址：<https://github.com/liyw0205/PicaComic/releases/tag/v4.2.74>。普通 `master` push 只更新分支，不触发 Android 发布 workflow；只有 `v*` tag 创建或更新才触发。Termux 本机 Flutter runner 仍受缺少 `flutter/bin/cache/artifacts/engine/linux-arm64/impellerc` 限制，不能替代标准 tag workflow。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 未纳入提交。
