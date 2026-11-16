@@ -343,7 +343,7 @@ class DownloadPage extends StatelessWidget {
     try {
       completed = await runFontDownload(
         (token) => dio.download(
-          "https://raw.githubusercontent.com/Pacalini/PicaComic/master/fonts/NotoSansSC-Regular.ttf",
+          "https://raw.githubusercontent.com/liyw0205/PicaComic/master/fonts/NotoSansSC-Regular.ttf",
           "${App.dataPath}/font.ttf",
           cancelToken: token,
         ),
