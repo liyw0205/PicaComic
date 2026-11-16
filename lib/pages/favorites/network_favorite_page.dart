@@ -112,6 +112,13 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
     }
   }
 
+  void _reloadFolders() {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+    });
+  }
+
   void openFolder(String key, String title) {
     context.to(() => _FavoriteFolder(widget.data, key, title));
   }
@@ -158,9 +165,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
                     deleteFolder: widget.data.deleteFolder == null
                         ? null
                         : () => widget.data.deleteFolder!(keys[i]),
-                    updateState: () => setState(() {
-                      _loading = true;
-                    }),
+                    updateState: _reloadFolders,
                   );
                 }
               } else {
@@ -170,9 +175,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
                   deleteFolder: widget.data.deleteFolder == null
                       ? null
                       : () => widget.data.deleteFolder!(keys[i]),
-                  updateState: () => setState(() {
-                    _loading = true;
-                  }),
+                  updateState: _reloadFolders,
                 );
               }
             }),
@@ -201,10 +204,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
                           context: context,
                           builder: (context) {
                             return _CreateFolderDialog(
-                                widget.data,
-                                () => setState(() {
-                                      _loading = true;
-                                    }));
+                                widget.data, _reloadFolders);
                           });
                     },
                   ),

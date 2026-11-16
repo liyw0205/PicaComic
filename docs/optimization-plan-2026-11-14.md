@@ -886,3 +886,14 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `f5520f9b`, `222ec65c` | 搜索语言纯函数并入 `search_result_language_test.dart`，LoadingDialog 用例并入 `loading_state_async_test.dart`；页面 fixture 收进 group，避免污染纯函数测试；删除两个独立 suite 入口 | 测试数量保持不变、减少两个 Flutter suite 启动；目标分析和格式检查通过，tag 门禁仍全量串行执行 |
 
 版本提交 `f5520f9b` 将版本递增到 `4.2.64+4264`；annotated tag `v4.2.64` 指向文档提交 `e8e981bd`。标准 workflow `43819467270` build 用时 12m15s、publish 用时 17s，Flutter regression 通过 384 tests，native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功；Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。Termux 本地 Flutter 定向 runner 仍受 Kernel SDK mismatch 阻塞，标准 tag workflow 已完成最终回归。
+
+## 45. 2026-11-16 网络收藏夹生命周期与测试入口继续收敛
+
+本轮继续处理页面卸载期间的异步回调，并把低成本、同域测试合并到现有 suite，减少重复启动 Flutter 测试进程：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 网络收藏夹生命周期 | 待提交 | `_MultiFolderFavoritesPageState` 抽取带 `mounted` 检查的 `_reloadFolders()`，删除收藏夹和创建收藏夹完成后的刷新回调统一经过该入口；页面卸载后迟到响应不再调用 `setState` | `test/network_favorite_page_async_test.dart` 复用现有 widget suite，以 Completer 覆盖删除请求挂起、页面卸载、请求完成；目标分析和格式检查通过 |
+| 测试流程 | 待提交 | 删除空的 `test/widget_test.dart`；将缩略图尺寸断言并入 `test/thumbnails_data_test.dart`；将运行时内存 2 项断言并入 `test/runtime_metrics_test.dart`，仅指标 group 保留 `RuntimeMetrics.reset`；断言总数不减少，减少 3 个独立入口 | `dart analyze`、analyzer baseline、异步边界、格式、`git diff --check` 和 runner shell 语法通过；本地 Flutter runner 仍受 Termux Kernel SDK/`impellerc` 环境阻塞，待 tag workflow 全量回归 |
+
+版本拟递增到 `4.2.65+4265`；普通 `master` push 仍只推送分支、不触发 Android workflow。提交 `master` 后创建或移动 annotated tag `v4.2.65`，仅由该 `v*` tag 触发完整 Flutter/native curl/Android Release 门禁；tag 必须指向本次提交 SHA，旧 tag 不回写。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
