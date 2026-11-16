@@ -934,3 +934,13 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `57e91e56` | 将唯一用例 `test/byte_lru_cache_test.dart` 并入已有 `test/cache_manager_test.dart`，保留 `byte_lru_cache_regression.dart` 作为局部 helper；不合并共享 `DownloadManager` 状态的高耦合 suite | 自动发现的 Flutter suite 从 54 减少到 53，缓存替换、淘汰和 owner-safe cleanup 断言保持不变；目标 analyze、analyzer baseline、格式和 `git diff --check` 通过 |
 
 版本提交 `71f348b5` 将版本递增到 `4.2.68+4268`，annotated tag `v4.2.68` 指向该提交。标准 tag workflow `43852898428` 的 build 用时约 9m53s、publish 用时 20s；Flutter regression 通过 389 项，native curl 通过 7 项，版本/tag 校验、Android 多 ABI、metadata、签名校验和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.68.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支、不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布，且 workflow 校验 tag 仍指向本次构建提交。Termux 本地 Flutter runner 仍受 `impellerc` 环境限制，不能替代标准 CI。提交作者统一为 `liyw0205 <2650115317@qq.com>`，用户原有未跟踪文件继续保留且不纳入提交。
+
+## 49. 2026-11-16 网络测试入口继续合并
+
+本轮继续减少重复 Flutter 进程启动，选择无共享持久化状态的网络测试进行合并：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 测试流程 | `fe4c11ca` | 将 `test/cloudflare_interceptor_test.dart` 的两个 Cloudflare 403 用例和局部 response adapter 并入 `test/network_logging_test.dart`；保留测试名、断言和每个 Dio 的 `addTearDown`，删除独立 suite 入口 | 自动发现的 Flutter suite 从 53 减少到 52，Cloudflare challenge/普通 403 覆盖不减少；`dart analyze`、analyzer baseline、异步边界、格式、runner shell 语法和 `git diff --check` 通过 |
+
+版本提交 `ea482005` 将版本递增到 `4.2.69+4269`；本地定向 Flutter runner 仍因 Termux 缺少 `flutter/bin/cache/artifacts/engine/linux-arm64/impellerc` 无法启动，不能作为测试失败证据。普通 `master` push 仍只推送分支、不触发 Android workflow；创建或移动 `v4.2.69` 后只运行一次完整串行 Flutter/native/Android 发布门禁，workflow 必须确认 tag 指向本次构建提交。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
