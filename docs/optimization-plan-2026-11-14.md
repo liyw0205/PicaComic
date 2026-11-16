@@ -735,3 +735,17 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 版本提交 `9413e53c` 将版本递增到 `4.2.52+4252`，annotated tag `v4.2.52` 指向该提交。标准 tag workflow `43777530632` 的 build 用时 13m23s、publish 用时 21s；Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.52.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。
 
 标准 runner 已通过本轮新增测试；Termux 本地 Flutter runner 仍受 `Unexpected Kernel SDK Version 9811646114`（期望 `d684a576a6`）阻塞，不能替代 CI。工作区保留用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak`，未纳入提交。
+
+## 33. 2026-11-16 A15/A17/A19 收口与 v4.2.53 发布
+
+本轮继续按风险优先级推进，并将新增边界合并到已有 suite，避免为每个异常路径新增独立 runner：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A15 StateController 生命周期 | `ff6cd424` | `putIfNotExists` 命中已有实例时释放未被其他 tag 注册的候选 controller；同实例和已有其他注册保持存活，避免重复构造造成资源泄漏 | `test/state_controller_test.dart` 新增候选释放、跨 tag 保活和同实例幂等回归；目标分析、baseline、异步边界、格式和差异检查通过 |
+| A19 来源契约与脱敏 | `991bc622` | 统一识别 `RATE_LIMITED`、`FORBIDDEN`、`REQUEST_TIMEOUT`、`REQUEST_CANCELLED` 等结构化错误码；契约 violation 不回显原始 payload；重试/状态 fixture 合并覆盖 403、408、Retry-After 和退避上限 | `test/comic_source_contract_test.dart`、`test/source_network_policy_test.dart`；目标分析、格式和差异检查通过 |
+| A17 PDF 资源上界 | `eae56369` | 普通/isolate 导出增加单图 128 MiB 编码字节和 100 MP 解码像素默认上限，读取前检查文件大小、解码后检查像素数，超限不替换旧 PDF | `test/pdf_export_test.dart` 合并覆盖取消后无临时文件、字节超限和像素超限；目标分析、baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `cf975029` 将版本递增到 `4.2.53+4253`，annotated tag `v4.2.53` 指向该提交。标准 tag workflow `43780343004` 的 build 用时 10m26s、publish 用时 13s；Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传 `PicaComic-4.2.53.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。
+
+标准 runner 已通过本轮新增及合并后的全量测试；Termux 本地 Flutter runner 仍受 Kernel SDK/kernel 与 `impellerc` 环境不匹配阻塞，不能替代 CI。工作区继续保留用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak`，未纳入提交。
