@@ -62,6 +62,14 @@ class DownloadManager with _DownloadDb implements Listenable {
   // I/O. New cancellation requests wait for that transition to finish.
   Future<void>? _lifecycleOperation;
 
+  // Queue additions and control requests that arrive while a path switch is
+  // in flight must not write to or start work from the old directory.
+  final Queue<DownloadingItem> _pendingLifecycleEnqueues =
+      Queue<DownloadingItem>();
+  bool _preserveLifecycleEnqueues = false;
+  bool _startRequestedAfterLifecycle = false;
+  bool _pauseRequestedAfterLifecycle = false;
+
   bool _startRequestedDuringStop = false;
 
   bool _pauseRequestedDuringStop = false;
@@ -161,7 +169,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       // progress so the destination can be resumed after a restart without
       // relying on an in-memory queue.
       await _waitForPendingCancellations();
-      if (isDownloading) await pause();
+      if (isDownloading) await _pauseInternal();
       await _waitForPendingCancellations();
       await _saveInfo();
       await _queueWriteTail;
@@ -185,7 +193,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       downloading.clear();
       await init();
       return "ok";
-    });
+    }, preserveEnqueues: true);
   }
 
   ///读取数据, 获取未完成的下载和已下载的漫画ID
@@ -518,7 +526,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       _db?.dispose();
       _db = null;
       _DownloadDb.clearAllDirectoryCache();
-    });
+    }, preserveEnqueues: false);
   }
 
   ///初始化下载管理器
@@ -606,15 +614,29 @@ class DownloadManager with _DownloadDb implements Listenable {
   /// Add a task only once. A queued task is identified by its durable id, so
   /// repeated taps or retries cannot create two workers for the same comic.
   bool _enqueue(DownloadingItem item) {
-    if (downloading.any((queued) => queued.id == item.id)) {
+    if (_hasTaskId(item.id)) {
       LogManager.addLog(LogLevel.warning, 'Download',
           'Ignored duplicate download task: ${item.id}');
       return false;
+    }
+    if (_lifecycleOperation != null) {
+      if (!_preserveLifecycleEnqueues) return false;
+      _pendingLifecycleEnqueues.addLast(item);
+      if (!isDownloading) {
+        _startRequestedAfterLifecycle = true;
+        _pauseRequestedAfterLifecycle = false;
+      }
+      return true;
     }
     downloading.addLast(item);
     _saveInfoDetached();
     if (!isDownloading) start();
     return true;
+  }
+
+  bool _hasTaskId(String id) {
+    return downloading.any((queued) => queued.id == id) ||
+        _pendingLifecycleEnqueues.any((queued) => queued.id == id);
   }
 
   Future<void> _writeQueueSnapshot(File target, String encoded) async {
@@ -647,6 +669,11 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   /// move comic to first
   Future<void> moveToFirst(DownloadingItem item) async {
+    final lifecycle = _lifecycleOperation;
+    if (lifecycle != null) {
+      await lifecycle;
+      return moveToFirst(item);
+    }
     if (!downloading.any((queued) => identical(queued, item)) ||
         identical(downloading.firstOrNull, item) ||
         _stopping.isNotEmpty) {
@@ -717,6 +744,15 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///暂停下载
   Future<void> pause() async {
+    if (_lifecycleOperation != null) {
+      _pauseRequestedAfterLifecycle = true;
+      _startRequestedAfterLifecycle = false;
+      return;
+    }
+    await _pauseInternal();
+  }
+
+  Future<void> _pauseInternal() async {
     _downloadControlGeneration++;
     isDownloading = false;
     final item = downloading.firstOrNull;
@@ -746,6 +782,13 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///开始或继续下载
   void start() {
+    if (_lifecycleOperation != null) {
+      if (_preserveLifecycleEnqueues) {
+        _startRequestedAfterLifecycle = true;
+        _pauseRequestedAfterLifecycle = false;
+      }
+      return;
+    }
     if (isDownloading) return;
     final item = downloading.firstOrNull;
     if (item == null) return;
@@ -810,21 +853,50 @@ class DownloadManager with _DownloadDb implements Listenable {
     }
   }
 
-  Future<T> _runLifecycle<T>(Future<T> Function() action) async {
+  @visibleForTesting
+  Future<T> runLifecycleForTesting<T>(Future<T> Function() action) {
+    return _runLifecycle(action, preserveEnqueues: true);
+  }
+
+  Future<T> _runLifecycle<T>(Future<T> Function() action,
+      {required bool preserveEnqueues}) async {
     final running = _lifecycleOperation;
     if (running != null) await running;
 
     final completer = Completer<void>();
     final operation = completer.future;
     _lifecycleOperation = operation;
+    _preserveLifecycleEnqueues = preserveEnqueues;
     try {
       return await action();
     } finally {
+      var shouldStart = false;
+      if (preserveEnqueues) {
+        await _flushPendingLifecycleEnqueues();
+        shouldStart =
+            _startRequestedAfterLifecycle && !_pauseRequestedAfterLifecycle;
+      } else {
+        _pendingLifecycleEnqueues.clear();
+      }
+      _startRequestedAfterLifecycle = false;
+      _pauseRequestedAfterLifecycle = false;
       if (identical(_lifecycleOperation, operation)) {
+        _preserveLifecycleEnqueues = false;
         _lifecycleOperation = null;
       }
       if (!completer.isCompleted) completer.complete();
+      if (shouldStart) start();
     }
+  }
+
+  Future<void> _flushPendingLifecycleEnqueues() async {
+    if (_pendingLifecycleEnqueues.isEmpty) return;
+    final pending = List<DownloadingItem>.of(_pendingLifecycleEnqueues);
+    _pendingLifecycleEnqueues.clear();
+    for (final item in pending) {
+      if (!_hasTaskId(item.id)) downloading.addLast(item);
+    }
+    await _saveInfo();
   }
 
   Future<void> _waitForPendingCancellations() async {

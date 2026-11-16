@@ -335,6 +335,45 @@ void main() {
     }
   });
 
+  test('lifecycle gate defers start, enqueue, and move-to-first requests',
+      () async {
+    final first = _TestDownloadingItem('first');
+    final second = _TestDownloadingItem('second');
+    manager.downloading
+      ..add(first)
+      ..add(second);
+    manager.isDownloading = false;
+
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final lifecycle = manager.runLifecycleForTesting(() async {
+      entered.complete();
+      await release.future;
+      return null;
+    });
+    await entered.future;
+
+    manager.start();
+    final move = manager.moveToFirst(second);
+    expect(first.startCount, 0);
+    expect(manager.downloading.toList(), [first, second]);
+
+    final favorite = createFavoriteItem()..target = 'queued-during-lifecycle';
+    manager.addFavoriteDownload(favorite);
+    expect(manager.downloading.toList(), [first, second]);
+
+    release.complete();
+    await lifecycle;
+    await move;
+
+    expect(manager.downloading.first, same(second));
+    expect(
+        manager.downloading.any((item) => item.id == 'queued-during-lifecycle'),
+        isTrue);
+    expect(first.startCount, 1);
+    expect(second.startCount, 1);
+  });
+
   test('pause during cancellation suppresses automatic queue restart',
       () async {
     final stopStarted = Completer<void>();
