@@ -35,6 +35,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
+  Timer? _searchDebounce;
 
   int? _nextCursor;
   int? _headRowId;
@@ -56,6 +57,7 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _scrollController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -157,11 +159,15 @@ class _ImageFavoritesPageState extends StateWithController<ImageFavoritesPage> {
 
   void _setKeyword(String value) {
     _keyword = value.trim();
-    _reload();
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (mounted) _reload();
+    });
   }
 
   void _toggleSearch() {
     final enabled = !_searchMode;
+    _searchDebounce?.cancel();
     setState(() {
       _searchMode = enabled;
       if (!enabled) {

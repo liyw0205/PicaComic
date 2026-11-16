@@ -236,6 +236,31 @@ void main() {
     expect(find.text('New image'), findsOneWidget);
   });
 
+  testWidgets('search reload is debounced while typing', (tester) async {
+    insertRows([
+      ('image-alpha', 'Alpha'),
+      ('image-beta', 'Beta'),
+    ]);
+    await HistoryManager().init(databasePath: path, importLegacy: false);
+
+    await tester.pumpWidget(MaterialApp(
+      home: ImageFavoritesPage(
+        tileBuilder: (context, image) => Text(image.title),
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.search));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'alpha');
+
+    expect(find.text('Beta'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Beta'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Beta'), findsNothing);
+    expect(find.text('Alpha'), findsOneWidget);
+  });
+
   test('existing key lookup preserves identity and handles missing rows',
       () async {
     insertRows([
