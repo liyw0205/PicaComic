@@ -909,6 +909,6 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | A11 下载快照 | 原子快照写入失败时隔离未提交 `.tmp`；`dispose()` 清空任务后若空快照提交失败，隔离 `target/.tmp/.bak`，避免停止任务在重启时复活；保留失败证据 | `test/download_persistence_test.dart`、`test/favorite_download_test.dart` 合并覆盖失败写入、取消和重新初始化 |
 | A1 恢复事务 | 恢复 journal 已记录 `restored=true`、目标被删除但 backup 仍在时，继续现有 backup rename 恢复；仅 backup 也缺失时保持 fail-closed | `test/data_restore_transaction_test.dart` 合并覆盖中断窗口恢复 |
 | A16 设置目录 | 桌面/Android 两个提交入口统一到 `_submit()`，防重复提交；等待迁移和设置落盘，页面卸载后不再访问失效 context，失败恢复旧路径 | 保留既有 proxy 配置卸载回归；目录迁移边界以目标 analyze、异步检查和标准 runner 验收，未增加会拖慢全量 runner 的独立 widget 用例 |
-| 测试流程 | 新增边界均追加到现有 suite，日常仍可通过 `FLUTTER_TEST_FILES` 定向执行；发布 tag 仍只运行一次完整串行 Flutter/native/Android 门禁 | `dart analyze`、analyzer baseline、异步边界、format、shell 语法和差异检查通过；本机 Flutter 受 Kernel SDK mismatch 阻塞，待 tag runner 验收 |
+| 测试流程 | 新增边界均追加到现有 suite，删除会卡住发布 runner 的重复 widget 用例；日常仍可通过 `FLUTTER_TEST_FILES` 定向执行；发布 tag 仍只运行一次完整串行 Flutter/native/Android 门禁 | `dart analyze`、analyzer baseline、异步边界、format、shell 语法和差异检查通过；workflow `43842756497` 的 Flutter regression 通过 387 项，native curl 通过 7 项 |
 
-版本字段将递增到 `4.2.66+4266`，普通 `master` push 仍不触发 Android workflow；完成提交推送后移动 `v4.2.66`，由 tag workflow 校验提交 SHA、全量 Flutter 回归、native curl、Android 多 ABI、metadata、签名和 Release 资产。提交作者统一为 `liyw0205 <2650115317@qq.com>`。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
+版本 `4.2.66+4266` 已由提交 `2fc8a3cd` 发布；`v4.2.66` 指向该提交。workflow `43842756497` 的 build 用时 11m54s、publish 用时 14s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。
