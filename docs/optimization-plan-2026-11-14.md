@@ -764,3 +764,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 版本提交 `65024f22` 将版本递增到 `4.2.54+4254`，annotated tag `v4.2.54` 指向该提交。标准 tag workflow `43782966404` 的 build 用时约 12m08s、publish 用时约 22s；Flutter regression、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功。Release 资产为 `PicaComic-4.2.54.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter runner 仍受 `Unexpected Kernel SDK Version 9811646114`（期望 `d684a576a6`）阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
+## 35. 2026-11-16 下载生命周期 gate 与 v4.2.55 发布
+
+继续处理 A11 下载目录切换期间的进程内竞态，并把三个入口合并到一个可控生命周期 fixture：
+
+| 功能组 | 提交 | 修复内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A11 下载生命周期 | `91eb14a6` | `updatePath`/`dispose` 持有生命周期 gate；切换期间的新任务先暂存，`start()` 请求延后到新目录初始化后，`moveToFirst()` 等待迁移完成；销毁期间拒绝新增任务，内部暂停仍使用受控路径 | `test/favorite_download_test.dart` 单个 gate 用例合并覆盖延迟启动、延迟入队和延迟置顶；目标 analyze、baseline、异步边界、格式和差异检查通过 |
+
+版本提交 `8220e877` 将版本递增到 `4.2.55+4255`，annotated tag `v4.2.55` 指向该提交。workflow `43785315346` 最终 rerun 成功，build 用时约 9m15s、publish 用时约 27s；Flutter regression、native curl、analyzer baseline、异步边界、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部通过。Release 资产为 `PicaComic-4.2.55.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。首次尝试因 artifact 上传服务长时间无响应取消，未产生发布结果；同一 SHA/tag 的 rerun 完成并发布资产。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；`v*` tag 创建或更新才触发发布，workflow 只接受仍指向本次构建 SHA 的结果。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter runner 仍受 Kernel SDK mismatch 阻塞，不能替代标准 CI；用户原有未跟踪文件继续保留且未纳入提交。
