@@ -10,6 +10,8 @@ void main() {
       () {
     final policy = SourceNetworkPolicy();
     expect(policy.classifyStatus(401), SourceNetworkErrorKind.authentication);
+    expect(policy.classifyStatus(403), SourceNetworkErrorKind.authentication);
+    expect(policy.classifyStatus(408), SourceNetworkErrorKind.timeout);
     expect(policy.classifyStatus(429), SourceNetworkErrorKind.rateLimited);
     expect(policy.classifyStatus(503), SourceNetworkErrorKind.server);
     expect(policy.classify(const SocketException('offline')),
@@ -43,6 +45,11 @@ void main() {
         policy.shouldRetry(post, SourceNetworkErrorKind.server, 0, 'fixture'),
         isFalse);
     expect(policy.retryDelay('fixture', 1), const Duration(milliseconds: 10));
+    expect(policy.retryDelay('fixture', 3), const Duration(milliseconds: 20));
+    expect(
+      policy.retryDelay('fixture', 1, retryAfter: const Duration(seconds: 1)),
+      const Duration(milliseconds: 20),
+    );
 
     final response = ResponseBody.fromBytes(
       Uint8List.fromList([1, 2, 3, 4]),

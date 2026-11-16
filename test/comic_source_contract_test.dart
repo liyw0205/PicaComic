@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:collection';
 
 import 'package:dio/dio.dart';
@@ -31,6 +30,18 @@ class _FixtureComic extends BaseComic {
   @override
   String get description => 'fixture';
 }
+
+// These payloads contain only synthetic values. Keep all source error cases
+// on the same redacted JSON shape so contract tests never depend on live data.
+const _fixtureErrorJson = <String, String>{
+  'rate-limited':
+      '{"code":"RATE_LIMITED","message":"fixture rate","token":"<redacted>"}',
+  'authentication':
+      '{"code":"FORBIDDEN","message":"fixture auth","password":"<redacted>"}',
+  'timeout': '{"code":"REQUEST_TIMEOUT","message":"fixture timeout"}',
+  'cancelled': '{"code":"REQUEST_CANCELLED","message":"fixture cancelled"}',
+  'parse': '{"code":"INVALID_JSON","message":"fixture parse"}',
+};
 
 Future<Res<ComicInfoData>> _fixtureDetail(String id) async => Res(
       ComicInfoData(
@@ -108,16 +119,15 @@ void main() {
       loadComicInfo: (id) async {
         switch (id) {
           case 'cancelled':
-            throw const ComicSourceContractException(
-                SourceNetworkErrorKind.cancelled);
+            return Res.error(_fixtureErrorJson['cancelled']!);
           case 'rate-limited':
-            return const Res.error('429 rate limit');
+            return Res.error(_fixtureErrorJson['rate-limited']!);
           case 'authentication':
-            return const Res.error('403 authentication required');
+            return Res.error(_fixtureErrorJson['authentication']!);
           case 'timeout':
-            throw TimeoutException('fixture request timed out');
+            return Res.error(_fixtureErrorJson['timeout']!);
           case 'parse':
-            return const Res.error('invalid JSON payload');
+            return Res.error(_fixtureErrorJson['parse']!);
           case 'wrapped-parse':
             throw DioException(
               requestOptions: RequestOptions(path: 'https://fixture.test'),

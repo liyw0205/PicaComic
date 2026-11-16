@@ -357,39 +357,50 @@ class ComicSourceContract {
       return SourceNetworkErrorKind.unknown;
     }
     final text = message.toLowerCase();
-    if (text.contains('cancel') || text.contains('abort')) {
+    // Source adapters often serialize an error code as JSON. Normalize
+    // separators so codes such as REQUEST_CANCELLED and RATE_LIMITED keep
+    // the same contract as their human-readable equivalents without ever
+    // including the payload in a violation message.
+    final normalized = text.replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
+    if (normalized.contains('cancel') ||
+        normalized.contains('abort') ||
+        normalized.contains('request cancelled')) {
       return SourceNetworkErrorKind.cancelled;
     }
-    if (text.contains('429') || text.contains('rate limit')) {
+    if (text.contains('429') ||
+        normalized.contains('rate limit') ||
+        normalized.contains('too many requests')) {
       return SourceNetworkErrorKind.rateLimited;
     }
     if (text.contains('401') ||
         text.contains('403') ||
-        text.contains('auth') ||
-        text.contains('login')) {
+        normalized.contains('auth') ||
+        normalized.contains('login') ||
+        normalized.contains('forbidden') ||
+        normalized.contains('unauthorized')) {
       return SourceNetworkErrorKind.authentication;
     }
-    if (text.contains('timeout') || text.contains('timed out')) {
+    if (normalized.contains('timeout') || normalized.contains('timed out')) {
       return SourceNetworkErrorKind.timeout;
     }
-    if (text.contains('tls') || text.contains('certificate')) {
+    if (normalized.contains('tls') || normalized.contains('certificate')) {
       return SourceNetworkErrorKind.tls;
     }
-    if (text.contains('parse') ||
-        text.contains('json') ||
-        text.contains('format') ||
-        text.contains('invalid')) {
+    if (normalized.contains('parse') ||
+        normalized.contains('json') ||
+        normalized.contains('format') ||
+        normalized.contains('invalid')) {
       return SourceNetworkErrorKind.parse;
     }
-    if (text.contains('circuit')) {
+    if (normalized.contains('circuit')) {
       return SourceNetworkErrorKind.circuitOpen;
     }
-    if (text.contains('server') || RegExp(r'\b5\d{2}\b').hasMatch(text)) {
+    if (normalized.contains('server') || RegExp(r'\b5\d{2}\b').hasMatch(text)) {
       return SourceNetworkErrorKind.server;
     }
-    if (text.contains('connection') ||
-        text.contains('network') ||
-        text.contains('offline')) {
+    if (normalized.contains('connection') ||
+        normalized.contains('network') ||
+        normalized.contains('offline')) {
       return SourceNetworkErrorKind.connection;
     }
     return SourceNetworkErrorKind.unknown;
