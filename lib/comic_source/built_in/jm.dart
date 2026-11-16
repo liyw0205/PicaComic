@@ -137,7 +137,7 @@ final jm = ComicSource.named(
       CategoryButtonData(
         label: "每周推荐",
         onTap: () => App.mainNavigatorKey?.currentContext?.to(
-              () => JmWeekRecommendationPage(),
+          () => JmWeekRecommendationPage(),
         ),
       ),
     ],
@@ -180,6 +180,7 @@ final jm = ComicSource.named(
     registerWebsite: "https://jmcomicgo.org",
     login: (account, pwd) async {
       var res = await jmNetwork.login(account, pwd);
+      if (res.error) return res;
       var a = <String>[account, pwd];
       var source = ComicSource.find('jm')!;
       source.data['account'] = a;
@@ -307,7 +308,7 @@ class _JmComicTile extends ComicTile {
         } else {
           var history = await History.findOrCreate(res.data);
           App.globalTo(
-                () => ComicReadingPage.jmComic(
+            () => ComicReadingPage.jmComic(
               res.data,
               history.ep,
               initialPage: history.page,

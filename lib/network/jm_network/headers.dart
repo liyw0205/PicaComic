@@ -34,9 +34,10 @@ Map<String, String> getBaseHeaders() {
   };
 }
 
-Map<String, String> getImgHeaders(){
+Map<String, String> getImgHeaders() {
   return {
-    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept":
+        "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     "Connection": "keep-alive",
@@ -50,14 +51,14 @@ Map<String, String> getImgHeaders(){
   };
 }
 
-BaseOptions getApiOptions(int time,
-    {bool post = false, bool byte = true}) {
-
+BaseOptions getApiOptions(int time, {bool post = false, bool byte = true}) {
   var token = md5.convert(const Utf8Encoder().convert("$time$_jmAuthKey"));
 
   return BaseOptions(
       receiveDataWhenStatusError: true,
       connectTimeout: const Duration(seconds: 8),
+      sendTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
       responseType: byte ? ResponseType.bytes : null,
       headers: {
         ...getBaseHeaders(),
