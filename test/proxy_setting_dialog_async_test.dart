@@ -58,6 +58,7 @@ void main() {
     ));
     await tester.enterText(find.byType(TextField), directory.path);
     await tester.tap(find.byType(CheckboxListTile));
+    await tester.ensureVisible(find.text('提交'));
     await tester.tap(find.text('提交'));
     await tester.pump(const Duration(milliseconds: 250));
     await started.future;
@@ -99,6 +100,7 @@ void main() {
     ));
     await tester.enterText(find.byType(TextField), directory.path);
     await tester.tap(find.byType(CheckboxListTile));
+    await tester.ensureVisible(find.text('提交'));
     await tester.tap(find.text('提交'));
     await tester.pump(const Duration(milliseconds: 250));
     await started.future;
