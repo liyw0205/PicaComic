@@ -2,6 +2,8 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:csslib/parser.dart' as css_parser;
+import 'package:csslib/visitor.dart' as css;
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart';
@@ -326,36 +328,53 @@ class EhNetwork {
 
   ///解析星星的html元素的位置属性, 返回评分
   double getStarsFromPosition(String position) {
-    int i = 0;
-    while (position[i] != ";") {
-      i++;
-      if (i == position.length) {
-        break;
+    if (position.trim().isEmpty) return 0.5;
+
+    num? pixels(css.Expression term) {
+      if (term is css.LengthTerm && term.unitToString() == 'px') {
+        return term.value is num ? term.value as num : null;
       }
+      return term is css.NumberTerm && term.value == 0 ? 0 : null;
     }
-    switch (position.substring(0, i)) {
-      case "background-position:0px -1px":
-        return 5;
-      case "background-position:0px -21px":
-        return 4.5;
-      case "background-position:-16px -1px":
-        return 4;
-      case "background-position:-16px -21px":
-        return 3.5;
-      case "background-position:-32px -1px":
-        return 3;
-      case "background-position:-32px -21px":
-        return 2.5;
-      case "background-position:-48px -1px":
-        return 2;
-      case "background-position:-48px -21px":
-        return 1.5;
-      case "background-position:-64px -1px":
-        return 1;
-      case "background-position:-64px -21px":
-        return 0.5;
+
+    var stars = 0.5;
+    var important = false;
+    try {
+      final sheet = css_parser.parse('.rating {$position}', errors: []);
+      final rule = sheet.topLevels.whereType<css.RuleSet>().firstOrNull;
+      if (rule == null) return stars;
+      for (final declaration
+          in rule.declarationGroup.declarations.whereType<css.Declaration>()) {
+        if (declaration.property.toLowerCase() != 'background-position' ||
+            (important && !declaration.important)) {
+          continue;
+        }
+        final value = declaration.expression;
+        if (value is! css.Expressions || value.expressions.length != 2) {
+          continue;
+        }
+        final x = pixels(value.expressions[0]);
+        final y = pixels(value.expressions[1]);
+        if (x == null || y == null) continue;
+        stars = switch ((x, y)) {
+          (0, -1) => 5,
+          (0, -21) => 4.5,
+          (-16, -1) => 4,
+          (-16, -21) => 3.5,
+          (-32, -1) => 3,
+          (-32, -21) => 2.5,
+          (-48, -1) => 2,
+          (-48, -21) => 1.5,
+          (-64, -1) => 1,
+          _ => 0.5,
+        };
+        important = declaration.important;
+      }
+    } catch (_) {
+      // Missing or malformed rating CSS must not discard an otherwise valid gallery.
+      return 0.5;
     }
-    return 0.5;
+    return stars;
   }
 
   String _listingCover(dom.Element? image) {
@@ -389,7 +408,10 @@ class EhNetwork {
           var type = item.children[0 + t].children[0].text;
           var time = item.children[1 + t].children[2].children[0].text;
           var stars = getStarsFromPosition(item
-              .children[1 + t].children[2].children[1].attributes["style"]!);
+                  .children[1 + t].children[2].children
+                  .elementAtOrNull(1)
+                  ?.attributes["style"] ??
+              "");
           final cover =
               _listingCover(item.children[1 + t].querySelector('img'));
           var title = item.children[2 + t].children[0].children[0].text;
@@ -687,7 +709,7 @@ class EhNetwork {
 
       //星星
       var stars = getStarsFromPosition(
-          document.getElementById("rating_image")!.attributes["style"]!);
+          document.getElementById("rating_image")?.attributes["style"] ?? "");
 
       //平均分数
       var rating = document.getElementById("rating_label")?.text;

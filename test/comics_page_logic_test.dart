@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:html/parser.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/network/cache_network.dart';
@@ -65,7 +66,7 @@ const _watchedFixtures = {
     </tr></tbody></table>''',
   'compact': '''<table class="itg gltc"><tbody><tr><td><div>Manga</div></td>
     <td><div></div><div><div>$_listingImage</div></div>
-    <div><div>2026-11-17 01:00</div><div style="background-position:0px -1px"></div></div></td>
+    <div><div>2026-11-17 01:00</div><div class="ir" style="background-position:0px -1px"></div></div></td>
     <td><a href="$_listingLink"><div>Title</div><div><div title="female:glasses"></div></div></a></td>
     <td><div><a>User</a></div><div>12 pages</div></td></tr></tbody></table>''',
   'extended': '''<table class="itg glte"><tbody><tr>
@@ -75,6 +76,18 @@ const _watchedFixtures = {
     <div>12 pages</div><div><a>User</a></div>
     <div class="ir" style="background-position:0px -1px"></div></div></div></td></tr></tbody></table>''',
 };
+
+const _galleryFixture = '''<html><h1 id="gn">Title</h1>
+  <h1 id="gj">Original title</h1><div class="cs">Manga</div>
+  <div id="gleft"><div id="gd1"><div
+    style="background:url(https://img.invalid/cover.jpg)"></div></div></div>
+  <div id="gdn"><a>User</a></div><div id="gdd"><table><tbody>
+    <tr><td class="gdt2">2026-11-17 01:00</td></tr>
+    <tr><td class="gdt2">12 pages</td></tr></tbody></table></div>
+  <div id="rating_image" style="background-position:0px -1px"></div>
+  <div id="rating_label">Average: 5</div>
+  <a id="favoritelink"> Add to Favorites</a>
+  <script>var gid=123; var token="fixture";</script></html>''';
 
 void main() {
   AppTranslation.translations = const {};
@@ -453,6 +466,150 @@ void main() {
             'https://e-hentai.org/watched?next=123',
           ]);
         }
+      }
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
+    }
+  });
+
+  test('EH rating CSS keeps all ten scores across formatting changes',
+      () async {
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      final network = _WatchedNetwork('');
+      for (final x in [0, -16, -32, -48, -64]) {
+        for (final y in [-1, -21]) {
+          final expected = 5 + x / 16 - (y == -21 ? 0.5 : 0);
+          for (final style in [
+            'background-position:${x}px ${y}px',
+            'background-position: ${x}px ${y}px;',
+            'display:inline-block; background-position:\t${x}px\n${y}px; color:red',
+            'BACKGROUND-POSITION: ${x}PX ${y}PX !important;',
+            'background-position:/* rating */ ${x}px ${y}px',
+          ]) {
+            expect(network.getStarsFromPosition(style), expected,
+                reason: style);
+          }
+        }
+      }
+      expect(network.getStarsFromPosition('background-position:0 -1px'), 5);
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
+    }
+  });
+
+  test('EH rating CSS handles missing data and valid declaration precedence',
+      () async {
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      final network = _WatchedNetwork('');
+      for (final style in [
+        '',
+        ' ',
+        'display:block',
+        'background-position:',
+        'background-position:garbage',
+        'background-position:0px',
+        'background-position:0px -1px -21px',
+        'background-position:0% -1px',
+        'background-position:0em -1px',
+        'background-position:-80px -1px',
+        'background-position:0px -2px',
+      ]) {
+        expect(network.getStarsFromPosition(style), 0.5, reason: style);
+      }
+      const five = 'background-position:0px -1px';
+      const three = 'background-position:-32px -1px';
+      expect(network.getStarsFromPosition('$five; $three'), 3);
+      expect(network.getStarsFromPosition('$five !important; $three'), 5);
+      expect(network.getStarsFromPosition('$five; $three !important'), 3);
+      expect(
+          network.getStarsFromPosition('$five !important; $three !important'),
+          3);
+      expect(network.getStarsFromPosition('$five; background-position:garbage'),
+          5);
+      expect(network.getStarsFromPosition('content:"$three"; $five'), 5);
+      expect(network.getStarsFromPosition('/* $three; */ $five'), 5);
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
+    }
+  });
+
+  test('EH lists retain galleries when rating elements or styles are missing',
+      () async {
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      for (final fixture in _watchedFixtures.entries) {
+        for (final style in [
+          null,
+          '',
+          'missing-element',
+          'broken',
+          'display:block; background-position: -16px -21px;'
+        ]) {
+          final document = parse(fixture.value);
+          final rating = document.querySelector('.ir')!;
+          if (style == 'missing-element') {
+            rating.remove();
+          } else if (style == null) {
+            rating.attributes.remove('style');
+          } else {
+            rating.attributes['style'] = style;
+          }
+          final network = _WatchedNetwork(document.outerHtml);
+          final result =
+              await network.getGalleries('https://e-hentai.org/watched');
+          expect(result.success, isTrue, reason: '${fixture.key}: $style');
+          expect(result.data.galleries, hasLength(1),
+              reason: '${fixture.key}: $style');
+          final gallery = result.data.galleries.single;
+          expect(gallery.title, 'Title');
+          expect(gallery.link, _listingLink);
+          expect(gallery.coverPath, 'https://img.invalid/cover.jpg');
+          expect(
+              gallery.stars, style?.startsWith('display:') == true ? 3.5 : 0.5);
+        }
+      }
+    } finally {
+      SingleInstanceCookieJar.instance = previousCookieJar;
+    }
+  });
+
+  test('EH details remain readable without optional rating markup', () async {
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    SingleInstanceCookieJar.instance = _UnusedCookieJar();
+    try {
+      for (final style in [
+        null,
+        '',
+        'missing-element',
+        'display:block; background-position: -32px -21px;'
+      ]) {
+        final document = parse(_galleryFixture);
+        final rating = document.getElementById('rating_image')!;
+        if (style == 'missing-element') {
+          rating.remove();
+          document.getElementById('rating_label')!.remove();
+        } else if (style == null) {
+          rating.attributes.remove('style');
+        } else {
+          rating.attributes['style'] = style;
+        }
+        final network = _WatchedNetwork(document.outerHtml);
+        final result = await network.getGalleryInfo(_listingLink);
+        expect(result.success, isTrue, reason: result.errorMessage);
+        expect(result.data.title, 'Title');
+        expect(result.data.subTitle, 'Original title');
+        expect(result.data.maxPage, '12');
+        expect(result.data.coverPath, 'https://img.invalid/cover.jpg');
+        expect(result.data.auth!['gid'], '123');
+        expect(result.data.stars,
+            style?.startsWith('display:') == true ? 2.5 : 0.5);
+        expect(result.data.rating,
+            style == 'missing-element' ? isNull : 'Average: 5');
       }
     } finally {
       SingleInstanceCookieJar.instance = previousCookieJar;
