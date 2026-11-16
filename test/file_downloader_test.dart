@@ -9,8 +9,6 @@ import 'package:pica_comic/network/download_progress.dart';
 import 'file_downloader_regression.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
   for (final scenario in fileDownloadCases) {
     test(scenario, () async {
       final overrides = HttpOverrides.current;
