@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -347,6 +348,90 @@ void main() {
     final shrunkLease = await shrunk.timeout(const Duration(seconds: 1));
     expect(shrunkCompleted, isTrue);
     shrunkLease.release();
+  });
+
+  test(
+      'reconfiguring pacing applies longer intervals without shortening old ones',
+      () async {
+    var now = DateTime(2026, 1, 1);
+    final policy = SourceNetworkPolicy(now: () => now);
+    final request = RequestOptions(
+      path: 'https://fixture.test/pacing',
+      extra: {'sourceKey': 'fixture'},
+    );
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+    );
+
+    var lease = await policy.beforeRequest(request);
+    lease.release();
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(
+        maxConcurrent: 1,
+        minInterval: Duration(seconds: 1),
+      ),
+    );
+    final longerCancel = Completer<void>();
+    var longerCompleted = false;
+    final longer = policy
+        .beforeRequest(
+      request,
+      cancelFuture: longerCancel.future,
+    )
+        .then((lease) {
+      longerCompleted = true;
+      lease.release();
+      return lease;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(longerCompleted, isFalse);
+    longerCancel.complete();
+    await expectLater(
+      longer,
+      throwsA(isA<DioException>().having(
+        (error) => error.type,
+        'type',
+        DioExceptionType.cancel,
+      )),
+    );
+
+    now = now.add(const Duration(seconds: 1));
+    lease = await policy.beforeRequest(request);
+    lease.release();
+
+    policy.configure(
+      'fixture',
+      const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+    );
+    final shorterCancel = Completer<void>();
+    var shorterCompleted = false;
+    final shorter = policy
+        .beforeRequest(
+      request,
+      cancelFuture: shorterCancel.future,
+    )
+        .then((lease) {
+      shorterCompleted = true;
+      lease.release();
+      return lease;
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(shorterCompleted, isFalse);
+    shorterCancel.complete();
+    await expectLater(
+      shorter,
+      throwsA(isA<DioException>().having(
+        (error) => error.type,
+        'type',
+        DioExceptionType.cancel,
+      )),
+    );
+
+    now = now.add(const Duration(seconds: 1));
+    lease = await policy.beforeRequest(request);
+    lease.release();
   });
 
   test('a circuit opened for one source does not block another source',

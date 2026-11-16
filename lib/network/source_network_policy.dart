@@ -143,6 +143,14 @@ class SourceNetworkPolicy {
       if (bucket.config.maxConcurrent != config.maxConcurrent) {
         bucket.limiter.resize(config.maxConcurrent);
       }
+      if (bucket.config.minInterval != config.minInterval) {
+        // Preserve an already promised pacing delay while making a longer
+        // newly configured interval effective for the next request.
+        final minimumNextAllowed = _now().add(config.minInterval);
+        if (bucket.nextAllowed.isBefore(minimumNextAllowed)) {
+          bucket.nextAllowed = minimumNextAllowed;
+        }
+      }
       bucket.config = config;
     }
   }
