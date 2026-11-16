@@ -25,6 +25,19 @@ void main() {
           ),
         ),
         SourceNetworkErrorKind.timeout);
+    expect(
+      policy.classify(
+        DioException(
+          requestOptions: RequestOptions(path: 'https://source.test'),
+          error: SourceNetworkException(
+            kind: SourceNetworkErrorKind.responseTooLarge,
+            sourceKey: 'source.test',
+            message: 'fixture response limit',
+          ),
+        ),
+      ),
+      SourceNetworkErrorKind.responseTooLarge,
+    );
   });
 
   test('retries only idempotent requests and caps response size', () async {

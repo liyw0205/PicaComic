@@ -10,6 +10,7 @@ import 'package:pica_comic/foundation/runtime_metrics.dart';
 
 import 'http_client.dart';
 import 'network_logging.dart';
+import 'source_network_policy.dart';
 
 class NativeCurlHttpClient {
   static const _channel =
@@ -17,6 +18,7 @@ class NativeCurlHttpClient {
 
   static Future<bool>? _availableFuture;
   static int _requestSequence = 0;
+  static const _nativeResponseHardLimit = 64 * 1024 * 1024;
 
   static Future<bool> get isAvailable {
     if (!App.isAndroid) return Future.value(false);
@@ -80,10 +82,13 @@ class NativeCurlHttpClient {
     RequestOptions options,
     Uint8List? body, {
     Future<void>? cancelFuture,
+    int maxResponseBytes = _nativeResponseHardLimit,
   }) async {
     final proxy = _curlProxy(proxyHttpOverrides!.proxyConfig!);
     return _fetchWithProxy(options, body, proxy,
-        attempts: 1, cancelFuture: cancelFuture);
+        attempts: 1,
+        cancelFuture: cancelFuture,
+        maxResponseBytes: maxResponseBytes);
   }
 
   static Future<ResponseBody> _fetchWithProxy(
@@ -92,6 +97,7 @@ class NativeCurlHttpClient {
     String proxy, {
     int attempts = 3,
     Future<void>? cancelFuture,
+    int maxResponseBytes = _nativeResponseHardLimit,
   }) async {
     final metric = RuntimeMetrics.start('network.native_curl');
     final requestId =
@@ -106,6 +112,7 @@ class NativeCurlHttpClient {
       "headers": _headersToStringMap(options.headers),
       "body": body,
       "timeoutMs": _timeoutMs(options),
+      "maxResponseBytes": maxResponseBytes.clamp(1, _nativeResponseHardLimit),
       "attempts":
           const {'GET', 'HEAD'}.contains(options.method.toUpperCase()) &&
                   body == null
@@ -142,6 +149,18 @@ class NativeCurlHttpClient {
           requestOptions: options,
           error: "native curl returned empty result",
           type: DioExceptionType.connectionError,
+        );
+      }
+
+      final responseTooLarge = result["responseTooLarge"];
+      if (responseTooLarge == true || responseTooLarge == 1) {
+        throw DioException(
+          requestOptions: options,
+          error: SourceNetworkException(
+            kind: SourceNetworkErrorKind.responseTooLarge,
+            sourceKey: SourceNetworkPolicy.instance.keyFor(options),
+            message: "Native response exceeds source limit",
+          ),
         );
       }
 

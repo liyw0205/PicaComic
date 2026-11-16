@@ -11,10 +11,14 @@
 
 #ifdef PICA_USE_LIBCURL
 
+#define PICA_NATIVE_RESPONSE_HARD_LIMIT (64 * 1024 * 1024)
+
 typedef struct {
     char *data;
     size_t length;
     size_t capacity;
+    size_t max_length;
+    int too_large;
 } Buffer;
 
 typedef struct {
@@ -72,11 +76,16 @@ static void buffer_free(Buffer *buffer) {
     buffer->data = NULL;
     buffer->length = 0;
     buffer->capacity = 0;
+    buffer->too_large = 0;
 }
 
 static int buffer_append(Buffer *buffer, const char *data, size_t length) {
     if (length == 0) return 1;
-    if (buffer->length + length > 64 * 1024 * 1024) return 0;
+    if (buffer->length > buffer->max_length ||
+        length > buffer->max_length - buffer->length) {
+        buffer->too_large = 1;
+        return 0;
+    }
     if (buffer->length + length + 1 > buffer->capacity) {
         size_t new_capacity = buffer->capacity == 0 ? 8192 : buffer->capacity;
         while (new_capacity < buffer->length + length + 1) {
@@ -292,6 +301,7 @@ static struct curl_slist *headers_from_java_map(JNIEnv *env, jobject headers) {
 static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
                             jstring url_value, jstring proxy_value, jobject headers_value,
                             jbyteArray body_value, jint timeout_ms, jint attempts,
+                            jint max_response_bytes,
                             jobject cancelled) {
     (void)clazz;
     jobject result = new_hash_map(env);
@@ -316,6 +326,10 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
     CURLcode code = CURLE_OK;
     long status = 0;
     Buffer body = {0};
+    body.max_length = max_response_bytes <= 0 ||
+                              max_response_bytes > PICA_NATIVE_RESPONSE_HARD_LIMIT
+                          ? PICA_NATIVE_RESPONSE_HARD_LIMIT
+                          : (size_t)max_response_bytes;
     HeaderList response_headers = {0};
     char error_buffer[CURL_ERROR_SIZE] = {0};
     int used_attempts = 0;
@@ -418,6 +432,9 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
         (*env)->DeleteLocalRef(env, jheaders);
         if (jbody != NULL) (*env)->DeleteLocalRef(env, jbody);
     } else {
+        if (body.too_large) {
+            put_int(env, result, "responseTooLarge", 1);
+        }
         const char *message = error_buffer[0] == '\0' ? curl_easy_strerror(code) : error_buffer;
         put_string(env, result, "error", message);
     }
@@ -453,6 +470,7 @@ static jobject new_hash_map(JNIEnv *env) {
 static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
                             jstring url_value, jstring proxy_value, jobject headers_value,
                             jbyteArray body_value, jint timeout_ms, jint attempts,
+                            jint max_response_bytes,
                             jobject cancelled) {
     (void)clazz;
     (void)method_value;
@@ -462,6 +480,7 @@ static jobject fetch_native(JNIEnv *env, jclass clazz, jstring method_value,
     (void)body_value;
     (void)timeout_ms;
     (void)attempts;
+    (void)max_response_bytes;
     (void)cancelled;
     return new_hash_map(env);
 }
@@ -497,7 +516,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         },
         {
             "fetchNative",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;[BIILjava/util/concurrent/atomic/AtomicBoolean;)Ljava/util/Map;",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;[BIIILjava/util/concurrent/atomic/AtomicBoolean;)Ljava/util/Map;",
             (void *)fetch_native,
         },
     };

@@ -36,6 +36,7 @@ object NativeCurl {
         body: ByteArray?,
         timeoutMs: Int,
         attempts: Int,
+        maxResponseBytes: Int,
         cancelled: AtomicBoolean,
     ): Map<String, Any?>
 
@@ -63,6 +64,7 @@ object NativeCurl {
             arguments["body"] as? ByteArray,
             arguments["timeoutMs"] as? Int ?: 15000,
             arguments["attempts"] as? Int ?: 3,
+            arguments["maxResponseBytes"] as? Int ?: 64 * 1024 * 1024,
             cancelled,
             )
         } finally {

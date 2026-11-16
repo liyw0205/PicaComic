@@ -351,6 +351,32 @@ void main() {
     expect(metric.bytes, 2);
   });
 
+  test(
+      'native response budget is forwarded and classified before Dart buffering',
+      () async {
+    proxyHttpOverrides = ProxyHttpOverrides(
+        null, AppProxyConfig(scheme: 'http', host: 'localhost', port: 8080));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      expect(args['maxResponseBytes'], 1024);
+      return {'responseTooLarge': true, 'curlCode': 23};
+    });
+
+    await expectLater(
+      NativeCurlHttpClient.fetch(
+        RequestOptions(path: 'https://example.org'),
+        null,
+        maxResponseBytes: 1024,
+      ),
+      throwsA(isA<DioException>().having(
+        (error) => (error.error as SourceNetworkException).kind,
+        'kind',
+        SourceNetworkErrorKind.responseTooLarge,
+      )),
+    );
+  });
+
   test('native certificate errors retain their error category', () async {
     proxyHttpOverrides = ProxyHttpOverrides(
         null, AppProxyConfig(scheme: 'http', host: 'localhost', port: 8080));

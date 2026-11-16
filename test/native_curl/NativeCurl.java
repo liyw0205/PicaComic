@@ -19,7 +19,8 @@ public final class NativeCurl {
     private static native boolean availableNative();
     private static native Map<String, Object> fetchNative(
         String method, String url, String proxy, Map<String, String> headers,
-        byte[] body, int timeout, int attempts, AtomicBoolean cancelled);
+        byte[] body, int timeout, int attempts, int maxResponseBytes,
+        AtomicBoolean cancelled);
 
     private static void check(boolean ok, String message) {
         if (!ok) throw new AssertionError(message);
@@ -88,6 +89,13 @@ public final class NativeCurl {
                 exchange.close();
             }
         });
+        http.createContext("/large", exchange -> {
+            byte[] response = new byte[4096];
+            exchange.sendResponseHeaders(200, response.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
         https.createContext("/", exchange -> {
             tlsCalls.incrementAndGet();
             exchange.sendResponseHeaders(200, -1);
@@ -98,13 +106,14 @@ public final class NativeCurl {
         String base = "http://127.0.0.1:" + http.getAddress().getPort();
         try {
             var head = fetchNative("HEAD", base + "/head", null, Map.of(),
-                null, 3000, 3, new AtomicBoolean());
+                null, 3000, 3, 64 * 1024 * 1024, new AtomicBoolean());
             check((int) head.get("curlCode") == 0, "HEAD failed: " + head);
             check(((byte[]) head.get("body")).length == 0, "HEAD read a body");
             check(headCalls.get() == 1, "HEAD was retried unnecessarily");
 
             var post = fetchNative("POST", base + "/post", null, Map.of(),
-                "payload".getBytes(StandardCharsets.UTF_8), 3000, 3, new AtomicBoolean());
+                "payload".getBytes(StandardCharsets.UTF_8), 3000, 3,
+                64 * 1024 * 1024, new AtomicBoolean());
             check(postCalls.get() == 1 && (int) post.get("attempts") == 1
                     && postBodyValid.get() && (int) post.get("curlCode") == 0
                     && (int) post.get("statusCode") == 200
@@ -113,20 +122,20 @@ public final class NativeCurl {
                 "POST body or response was invalid, or request was replayed: " + post);
 
             var retry = fetchNative("GET", base + "/retry", null, Map.of(),
-                null, 3000, 3, new AtomicBoolean());
+                null, 3000, 3, 64 * 1024 * 1024, new AtomicBoolean());
             check(retryCalls.get() == 2 && (int) retry.get("statusCode") == 200,
                 "Transient GET did not recover: " + retry);
 
             var rejected = fetchNative("GET", "https://127.0.0.1:"
                 + https.getAddress().getPort(), null, Map.of(), null,
-                3000, 3, new AtomicBoolean());
+                3000, 3, 64 * 1024 * 1024, new AtomicBoolean());
             check((int) rejected.get("curlCode") != 0 && tlsCalls.get() == 0,
                 "Untrusted certificate was accepted: " + rejected);
             check((int) rejected.get("attempts") == 1,
                 "Certificate error was retried: " + rejected);
 
             var preCancelled = fetchNative("GET", base + "/head", null, Map.of(),
-                null, 3000, 3, new AtomicBoolean(true));
+                null, 3000, 3, 64 * 1024 * 1024, new AtomicBoolean(true));
             check((int) preCancelled.get("curlCode") == 42 && headCalls.get() == 1,
                 "Pre-cancelled request reached the server");
 
@@ -137,12 +146,18 @@ public final class NativeCurl {
             });
             cancelling.start();
             var stopped = fetchNative("GET", base + "/stream", null, Map.of(),
-                null, 3000, 3, cancel);
+                null, 3000, 3, 64 * 1024 * 1024, cancel);
             cancelling.join();
             check((int) stopped.get("curlCode") == 42
                 && (int) stopped.get("attempts") == 1,
                 "Transfer continued or retried after cancellation: " + stopped);
-            System.out.println("Native curl: 6 regression checks passed");
+            var limited = fetchNative("GET", base + "/large", null, Map.of(),
+                null, 3000, 1, 1024, new AtomicBoolean());
+            check(limited.get("responseTooLarge") instanceof Number
+                && ((Number) limited.get("responseTooLarge")).intValue() == 1
+                && (int) limited.get("curlCode") != 0,
+                "Native response limit was not enforced while streaming: " + limited);
+            System.out.println("Native curl: 7 regression checks passed");
         } finally {
             http.stop(0);
             https.stop(0);

@@ -280,7 +280,10 @@ class AppHttpAdapter implements HttpClientAdapter {
       final body = await NativeCurlHttpClient.readBody(requestStream);
       try {
         return checkCookie(await NativeCurlHttpClient.fetch(options, body,
-            cancelFuture: cancelFuture));
+            cancelFuture: cancelFuture,
+            maxResponseBytes: SourceNetworkPolicy.instance
+                .configFor(SourceNetworkPolicy.instance.keyFor(options))
+                .maxResponseBytes));
       } catch (e) {
         LogManager.addLog(LogLevel.error, "Network",
             "Native curl failed\n${options.method} ${safeNetworkUrl(options.uri.toString())}\n${e.runtimeType}");

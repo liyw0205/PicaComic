@@ -262,6 +262,8 @@ class SourceNetworkPolicy {
   SourceNetworkErrorKind classify(Object error, {int? statusCode}) {
     if (error is SourceNetworkException) return error.kind;
     if (error is DioException) {
+      final nested = error.error;
+      if (nested is SourceNetworkException) return nested.kind;
       if (error.type == DioExceptionType.cancel) {
         return SourceNetworkErrorKind.cancelled;
       }
