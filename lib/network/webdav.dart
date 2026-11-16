@@ -182,6 +182,24 @@ class Webdav {
   static SyncTransport Function(List<String>) transportFactory =
       WebdavSyncTransport.new;
 
+  /// A secure-storage plugin may acknowledge a write before its platform
+  /// backend has actually persisted the value. Verify the result before
+  /// removing the legacy copy or reporting a successful settings update.
+  static Future<void> _setSecret(
+      SecretStore store, String key, String? value) async {
+    if (value == null) {
+      await store.delete(key);
+      if (await store.read(key) != null) {
+        throw StateError('Secure credential deletion could not be verified');
+      }
+      return;
+    }
+    await store.write(key, value);
+    if (await store.read(key) != value) {
+      throw StateError('Secure credential write could not be verified');
+    }
+  }
+
   static List<String>? _parseConfig(String raw) {
     final values = raw.split(';');
     return values.length == 4 && values[0].isNotEmpty ? values : null;
@@ -221,6 +239,15 @@ class Webdav {
               '${safeNetworkError(error)}\n$stack');
       throw _SecretStoreReadError(error);
     }
+    // A legacy setting with credentials is a pending migration, not an
+    // explicit anonymous configuration. If the corresponding secure values
+    // disappeared, fail closed instead of silently sending an unauthenticated
+    // request while the old plaintext copy is still present for retry.
+    if ((values[1].isNotEmpty && (username == null || username.isEmpty)) ||
+        (values[2].isNotEmpty && (password == null || password.isEmpty))) {
+      throw _SecretStoreReadError(
+          StateError('Migrated WebDAV credentials are unavailable'));
+    }
     return [values[0], username ?? '', password ?? '', values[3]];
   }
 
@@ -257,16 +284,10 @@ class Webdav {
       previousUsername = await store.read(webdavUsernameSecret);
       previousPassword = await store.read(webdavPasswordSecret);
       previousSecretsRead = true;
-      if (values[1].isEmpty) {
-        await store.delete(webdavUsernameSecret);
-      } else {
-        await store.write(webdavUsernameSecret, values[1]);
-      }
-      if (values[2].isEmpty) {
-        await store.delete(webdavPasswordSecret);
-      } else {
-        await store.write(webdavPasswordSecret, values[2]);
-      }
+      await _setSecret(
+          store, webdavUsernameSecret, values[1].isEmpty ? null : values[1]);
+      await _setSecret(
+          store, webdavPasswordSecret, values[2].isEmpty ? null : values[2]);
       appdata.settings[45] = '${values[0]};;;${values[3]}';
       await appdata.updateSettings(false);
       return true;
@@ -274,16 +295,8 @@ class Webdav {
       appdata.settings[45] = previousSetting;
       if (previousSecretsRead) {
         try {
-          if (previousUsername == null) {
-            await store.delete(webdavUsernameSecret);
-          } else {
-            await store.write(webdavUsernameSecret, previousUsername);
-          }
-          if (previousPassword == null) {
-            await store.delete(webdavPasswordSecret);
-          } else {
-            await store.write(webdavPasswordSecret, previousPassword);
-          }
+          await _setSecret(store, webdavUsernameSecret, previousUsername);
+          await _setSecret(store, webdavPasswordSecret, previousPassword);
         } catch (_) {
           // The legacy setting remains authoritative when a secure-store
           // rollback is unavailable; retry migration on a later startup.
@@ -313,16 +326,10 @@ class Webdav {
       previousUsername = await store.read(webdavUsernameSecret);
       previousPassword = await store.read(webdavPasswordSecret);
       previousSecretsRead = true;
-      if (username.isEmpty) {
-        await store.delete(webdavUsernameSecret);
-      } else {
-        await store.write(webdavUsernameSecret, username);
-      }
-      if (password.isEmpty) {
-        await store.delete(webdavPasswordSecret);
-      } else {
-        await store.write(webdavPasswordSecret, password);
-      }
+      await _setSecret(
+          store, webdavUsernameSecret, username.isEmpty ? null : username);
+      await _setSecret(
+          store, webdavPasswordSecret, password.isEmpty ? null : password);
       appdata.settings[45] = url.isEmpty ? '' : '$url;;;$path';
       await appdata.updateSettings(sync);
       return true;
@@ -330,16 +337,8 @@ class Webdav {
       appdata.settings[45] = previousSetting;
       if (previousSecretsRead) {
         try {
-          if (previousUsername == null) {
-            await store.delete(webdavUsernameSecret);
-          } else {
-            await store.write(webdavUsernameSecret, previousUsername);
-          }
-          if (previousPassword == null) {
-            await store.delete(webdavPasswordSecret);
-          } else {
-            await store.write(webdavPasswordSecret, previousPassword);
-          }
+          await _setSecret(store, webdavUsernameSecret, previousUsername);
+          await _setSecret(store, webdavPasswordSecret, previousPassword);
         } catch (_) {
           // Keep the old public setting even if a best-effort secret rollback
           // is unavailable; the next startup can still use its legacy values.

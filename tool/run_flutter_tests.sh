@@ -10,4 +10,28 @@ if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-exec flutter test --no-pub --concurrency="$jobs" --fail-fast "$@"
+flutter_args=("$@")
+
+# Local iteration can select the affected suites without changing the full
+# tag gate. Values are whitespace-separated paths; duplicate paths are removed
+# so a shell-expanded list cannot run the same suite twice.
+if [[ -n "${FLUTTER_TEST_FILES:-}" ]]; then
+  read -r -a requested_files <<<"$FLUTTER_TEST_FILES"
+  declare -A seen_files=()
+  for file in "${requested_files[@]}"; do
+    if [[ "$file" != test/*.dart || ! -f "$file" ]]; then
+      echo "FLUTTER_TEST_FILES contains a missing or non-test Dart file: $file" >&2
+      exit 2
+    fi
+    if [[ -z "${seen_files[$file]+x}" ]]; then
+      flutter_args+=("$file")
+      seen_files["$file"]=1
+    fi
+  done
+fi
+
+if [[ -n "${FLUTTER_TEST_NAME:-}" ]]; then
+  flutter_args+=(--name "$FLUTTER_TEST_NAME")
+fi
+
+exec flutter test --no-pub --concurrency="$jobs" --fail-fast "${flutter_args[@]}"

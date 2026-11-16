@@ -21,6 +21,19 @@ class _UnavailableSecretStore implements SecretStore {
   Future<void> delete(String key) async {}
 }
 
+/// Simulates a platform adapter which reports successful writes but loses the
+/// value before it can be read back. Migration must treat that as a failure.
+class _NonDurableSecretStore implements SecretStore {
+  @override
+  Future<String?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, String value) async {}
+
+  @override
+  Future<void> delete(String key) async {}
+}
+
 class _EmptySyncTransport implements SyncTransport {
   bool closed = false;
 
@@ -167,74 +180,62 @@ void main() {
     expect(await store.read(webdavPasswordSecret), 'old-password');
   });
 
-  test('credential read failure never falls back to anonymous WebDAV',
+  test('legacy migration verifies storage and never downgrades to anonymous',
       () async {
     final previousFactory = Webdav.transportFactory;
-    final previousSetting = appdata.settings[45];
+    final previous = appdata.settings[45];
     var transportCreated = false;
     try {
-      appdata.settings[45] = 'https://dav.example;;;/pica';
-      SecretStoreRegistry.configure(_UnavailableSecretStore());
+      appdata.settings[45] =
+          'https://dav.example;legacy-user;legacy-password;/pica';
+      final store = _NonDurableSecretStore();
+      SecretStoreRegistry.configure(store);
       Webdav.transportFactory = (_) {
         transportCreated = true;
         return _EmptySyncTransport();
       };
 
+      expect(await Webdav.migrateLegacyConfig(), isFalse);
+      expect(appdata.settings[45],
+          'https://dav.example;legacy-user;legacy-password;/pica');
       expect(await Webdav.downloadData(), isFalse);
       expect(transportCreated, isFalse);
       expect(Webdav.lastResult.status, SyncStatus.failed);
     } finally {
-      appdata.settings[45] = previousSetting;
+      appdata.settings[45] = previous;
       Webdav.transportFactory = previousFactory;
       SecretStoreRegistry.configure(MemorySecretStore());
     }
   });
 
-  test('legacy credentials never bypass unavailable secret storage', () async {
+  test('unavailable secure storage fails closed for every settings path',
+      () async {
     final previousFactory = Webdav.transportFactory;
     final previousSetting = appdata.settings[45];
-    var transportCreated = false;
+    var transportCreated = 0;
     try {
+      SecretStoreRegistry.configure(_UnavailableSecretStore());
+      Webdav.transportFactory = (_) {
+        transportCreated++;
+        return _EmptySyncTransport();
+      };
+
+      // Both configured forms must fail before a transport is created. Keep
+      // these in one state-machine test because they share the same failure
+      // boundary and global storage override.
       appdata.settings[45] = 'https://dav.example;legacy-user;secret;/pica';
-      SecretStoreRegistry.configure(_UnavailableSecretStore());
-      Webdav.transportFactory = (_) {
-        transportCreated = true;
-        return _EmptySyncTransport();
-      };
-
       expect(await Webdav.downloadData(), isFalse);
-      expect(transportCreated, isFalse);
       expect(Webdav.lastResult.status, SyncStatus.failed);
-    } finally {
-      appdata.settings[45] = previousSetting;
-      Webdav.transportFactory = previousFactory;
-      SecretStoreRegistry.configure(MemorySecretStore());
-    }
-  });
-
-  test('settings config fails closed when secure storage is unavailable',
-      () async {
-    final previousFactory = Webdav.transportFactory;
-    final previousSetting = appdata.settings[45];
-    var transportCreated = false;
-    try {
       appdata.settings[45] = 'https://dav.example;;;/pica';
-      SecretStoreRegistry.configure(_UnavailableSecretStore());
-      Webdav.transportFactory = (_) {
-        transportCreated = true;
-        return _EmptySyncTransport();
-      };
+      expect(await Webdav.downloadData(), isFalse);
+      expect(Webdav.lastResult.status, SyncStatus.failed);
 
       // The settings page falls back to four empty fields when this is null.
       // It must not receive an endpoint that it could turn into an explicit
       // anonymous one-shot request.
       final config = await Webdav.configForSettings();
       expect(config, isNull);
-      final fields = config ?? const ['', '', '', ''];
-      if (fields[0].isNotEmpty) {
-        await Webdav.downloadData(fields.join(';'));
-      }
-      expect(transportCreated, isFalse);
+      expect(transportCreated, 0);
     } finally {
       appdata.settings[45] = previousSetting;
       Webdav.transportFactory = previousFactory;
