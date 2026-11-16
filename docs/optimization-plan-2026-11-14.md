@@ -860,3 +860,15 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试门禁 | `7f782c99` | 保持 `tool/run_flutter_tests.sh` 的串行、fail-fast、定向筛选和 tag 性能开关；新增断言只增加到既有 suite，日常不重复启动进程 | 目标 `dart analyze`、analyzer baseline、异步边界、格式和 `git diff --check` 通过；本地 Flutter runner 仍受 Termux 缺少 `impellerc` 阻塞，待标准 tag workflow 完成最终回归 |
 
 版本提交 `7f782c99` 将版本递增到 `4.2.62+4262`；文档收口提交为 `a7f2b4d0`，annotated tag `v4.2.62` 已指向该提交。标准 workflow `43811172395` build 用时约 9m35s、publish 用时 17s，Flutter regression、native curl、版本/tag 校验、Android 多 ABI、metadata、签名和 Release publish 全部成功；Release 已上传通用 APK、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。普通 `master` push 仍不触发 Android workflow，只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
+## 43. 2026-11-16 测试 suite 去重与 v4.2.63 发布准备
+
+本轮继续压缩日常测试的重复启动成本，同时保持 tag workflow 的全量回归门禁：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| 图片生命周期测试 | `7684acfb` | 将 `stream_image_provider_cancellation_test.dart`、`image_task_owner_test.dart` 的两个纯 stream 用例并入 `reader_image_owner_test.dart`；断言和测试名保持不变，减少两个独立 Flutter suite | 合并 suite 目标 `dart analyze` 通过；标准 tag runner 仍全量发现并执行 |
+| 数据备份测试 | `7684acfb` | 将单用例 `data_backup_copy_test.dart` 并入已有 `data_restore_transaction_test.dart`，统一 A1 备份/恢复 fixture，减少一个独立 suite | 合并 suite 目标 `dart analyze` 通过；不减少备份复制覆盖 |
+| 测试 runner | `7684acfb` | `tool/run_flutter_tests.sh` 对显式参数和 `FLUTTER_TEST_FILES` 使用同一去重集合，避免同一 `test/*.dart` 被传入两次；tag 全量调用路径不变 | `bash -n`、显式参数与环境参数重叠追踪、非法路径返回码和 analyzer baseline、异步边界、格式、差异检查通过 |
+
+版本提交 `7684acfb` 将版本递增到 `4.2.63+4263`；普通 `master` push 仍只推送分支，不触发 Android workflow，后续仅移动 `v4.2.63` annotated tag 触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且不纳入提交。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，标准 tag workflow 作为最终回归依据。
