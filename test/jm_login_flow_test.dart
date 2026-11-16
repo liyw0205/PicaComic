@@ -72,7 +72,12 @@ class _Adapter implements HttpClientAdapter {
   Future<ResponseBody> fetch(RequestOptions options,
       Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
     cancelToken = options.cancelToken;
-    return await respond(options);
+    return await Future.any([
+      Future.sync(() => respond(options)),
+      if (cancelFuture != null)
+        cancelFuture.then<ResponseBody>((_) => throw DioException(
+            requestOptions: options, type: DioExceptionType.cancel)),
+    ]);
   }
 
   @override
