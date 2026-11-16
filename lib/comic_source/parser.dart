@@ -647,11 +647,15 @@ class ComicSourceParser {
     if (!_checkExists("comic.onImageLoad")) {
       return null;
     }
-    return (imageKey, comicId, ep) {
-      return JsEngine().runCode("""
+    return (imageKey, comicId, ep) async {
+      final result = await JsEngine().runCode("""
           ComicSource.sources.$_key.comic.onImageLoad(
             ${jsonEncode(imageKey)}, ${jsonEncode(comicId)}, ${jsonEncode(ep)})
-        """) as Map<String, dynamic>;
+        """);
+      if (result is! Map) {
+        throw "function onImageLoad return invalid data";
+      }
+      return Map<String, dynamic>.from(result);
     };
   }
 

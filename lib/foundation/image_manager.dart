@@ -829,7 +829,7 @@ class ImageManager {
       if (source.getImageLoadingConfig == null) {
         config = {};
       } else {
-        config = source.getImageLoadingConfig!(url, comicId, epId);
+        config = await source.getImageLoadingConfig!(url, comicId, epId);
       }
 
       caching = await CacheManager().openWrite(cacheKey);

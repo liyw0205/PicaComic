@@ -425,7 +425,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
     try {
       var dio = logDio();
       var res = await dio.get<String>(
-          "https://raw.githubusercontent.com/wgh136/pica_configs/master/index.json");
+          "https://raw.githubusercontent.com/liyw0205/pica_configs/master/index.json");
       if (res.statusCode != 200 || res.data == null) {
         throw StateError("Network error");
       }
@@ -492,7 +492,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
   Future<void> _addSource(int index) async {
     try {
       await widget.onAdd(
-          "https://raw.githubusercontent.com/wgh136/pica_configs/master/${json![index]["fileName"]}");
+          "https://raw.githubusercontent.com/liyw0205/pica_configs/master/${json![index]["fileName"]}");
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) showToast(message: e.toString());

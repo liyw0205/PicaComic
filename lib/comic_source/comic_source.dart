@@ -49,8 +49,8 @@ typedef CommentsLoader = Future<Res<List<Comment>>> Function(
 typedef SendCommentFunc = Future<Res<bool>> Function(
     String id, String? subId, String content, String? replyTo);
 
-typedef GetImageLoadingConfigFunc = Map<String, dynamic> Function(
-    String imageKey, String comicId, String epId)?;
+typedef GetImageLoadingConfigFunc = FutureOr<Map<String, dynamic>> Function(
+    String imageKey, String comicId, String epId);
 typedef GetThumbnailLoadingConfigFunc = Map<String, dynamic> Function(
     String imageKey)?;
 
@@ -159,8 +159,7 @@ class ComicSource {
   /// Load comic pages.
   final LoadComicPagesFunc? loadComicPages;
 
-  final Map<String, dynamic> Function(
-      String imageKey, String comicId, String epId)? getImageLoadingConfig;
+  final GetImageLoadingConfigFunc? getImageLoadingConfig;
 
   final Map<String, dynamic> Function(String imageKey)?
       getThumbnailLoadingConfig;
