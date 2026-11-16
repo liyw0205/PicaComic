@@ -36,7 +36,7 @@ void main(List<String> args) {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
-      final startup = await init();
+      final startup = await init(waitForOptional: false);
       FlutterError.onError = (details) {
         LogManager.addLog(
           LogLevel.error,
@@ -50,13 +50,23 @@ void main(List<String> args) {
         StartupGate(
           initialResult: startup,
           retry: () async {
-            final result = await init();
-            if (result.ready) notFirstUse = appdata.firstUse[3] == '1';
+            final result = await init(waitForOptional: false);
+            if (result.ready) {
+              notFirstUse = appdata.firstUse[3] == '1';
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                unawaited(runDeferredStartup());
+              });
+            }
             return result;
           },
           applicationBuilder: () => const MyApp(),
         ),
       );
+      if (startup.ready) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(runDeferredStartup());
+        });
+      }
       if (App.isDesktop) {
         await windowManager.ensureInitialized();
         windowManager.waitUntilReadyToShow().then((_) async {

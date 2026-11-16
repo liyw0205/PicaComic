@@ -48,6 +48,53 @@ void main() {
     expect(events, ['integration:true', 'database:false']);
   });
 
+  test('nonblocking startup returns before optional work completes', () async {
+    final optional = Completer<void>();
+    final calls = <String>[];
+    final startup = StartupCoordinator([
+      StartupStep('logging', () async {
+        calls.add('logging-start');
+        await optional.future;
+        calls.add('logging-done');
+      }, essential: false, deferUntilReady: true),
+      StartupStep('database', () async => calls.add('database')),
+    ]);
+
+    final result = await startup.run(waitForOptional: false);
+
+    expect(result.ready, true);
+    expect(calls, ['database']);
+    final deferred = startup.runDeferred();
+    expect(identical(deferred, startup.runDeferred()), true);
+    expect(calls, ['database', 'logging-start']);
+    optional.complete();
+    await deferred;
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['database', 'logging-start', 'logging-done']);
+  });
+
+  test('non-deferred optional work keeps startup ordering', () async {
+    final migration = Completer<void>();
+    final calls = <String>[];
+    final startup = StartupCoordinator([
+      StartupStep('migration', () async {
+        calls.add('migration-start');
+        await migration.future;
+        calls.add('migration-done');
+      }, essential: false),
+      StartupStep('database', () async => calls.add('database')),
+    ]);
+
+    final resultFuture = startup.run(waitForOptional: false);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['migration-start']);
+
+    migration.complete();
+    final result = await resultFuture;
+    expect(result.ready, true);
+    expect(calls, ['migration-start', 'migration-done', 'database']);
+  });
+
   test('concurrent retry requests share one attempt', () async {
     final blocker = Completer<void>();
     var calls = 0;

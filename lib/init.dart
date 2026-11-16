@@ -88,7 +88,8 @@ final _startup = StartupCoordinator([
   StartupStep('background jobs', () async {
     if (App.isMobile) await Workmanager().initialize(onStart);
   }, essential: false),
-  const StartupStep('cache cleanup', startClearCache, essential: false),
+  const StartupStep('cache cleanup', startClearCache,
+      essential: false, deferUntilReady: true),
 ], onStepFinished: (stage, elapsed, failure) {
   RuntimeMetrics.record(
     'startup.${stage.replaceAll(RegExp(r'[^A-Za-z0-9_.:-]'), '_')}',
@@ -103,7 +104,10 @@ final _startup = StartupCoordinator([
   );
 });
 
-Future<StartupResult> init() => _startup.run();
+Future<StartupResult> init({bool waitForOptional = true}) =>
+    _startup.run(waitForOptional: waitForOptional);
+
+Future<void> runDeferredStartup() => _startup.runDeferred();
 
 /// Reads only the validated download setting needed to authorize recovery of
 /// an external download directory. This runs before the normal settings step,
