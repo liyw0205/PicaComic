@@ -812,6 +812,19 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 
 普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍受 `impellerc` 缺失阻塞，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
 
+## 40. 2026-11-16 启动延后维护与 v4.2.60 发布
+
+本轮继续优化首帧前的工作边界，同时避免把启动步骤并发化后引入迁移竞态：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A8 启动阶段 | `4d91f470` | `StartupStep` 增加显式 `deferUntilReady`；仅缓存清理允许在首帧后通过 `runDeferredStartup()` 执行。日志、凭据迁移、旧数据迁移、代理、后台任务和深链仍保持原有顺序；重复重试与延后调用共享 in-flight Future，不重复初始化 | `test/startup_test.dart` 合并覆盖延后任务不提前启动、首帧后执行、并发调用复用，以及非延后 optional 仍保持依赖顺序；目标分析、analyzer baseline、异步边界、格式和差异检查通过 |
+| 测试流程 | `4d91f470` | 将启动延后语义直接并入既有启动 suite，避免新增独立 runner；本地可定向执行单个启动 suite，tag 门禁仍只执行一次完整串行 Flutter 回归并显式开启性能基准 | 标准 tag workflow `43799340358` 的 Flutter regression、native curl、版本/tag 校验全部通过 |
+
+版本提交 `af8bd3b9` 将版本递增到 `4.2.60+4260`，annotated tag `v4.2.60` 指向该提交。标准 workflow build 从 03:37:55 至 03:50:56，约 13m01s；publish 成功。Release 已上传 `PicaComic-4.2.60.apk`、三种 ABI APK、`SHA256SUMS` 和 `apk-metadata.json`。
+
+普通 `master` push 仍只推送分支，不触发 Android workflow；只有 `v*` tag 创建或更新才触发发布。提交作者统一为 `liyw0205 <2650115317@qq.com>`。Termux 本地 Flutter 定向 runner 仍因缺少 `impellerc` 无法执行，不能替代标准 CI；用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
 ## 39. 2026-11-16 图片收藏搜索去重与 v4.2.59 发布
 
 本轮继续处理页面层重复查询，先收敛图片收藏搜索，不改动历史页和数据库查询语义：
