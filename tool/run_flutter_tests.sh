@@ -20,14 +20,24 @@ if [[ "$run_performance" == 1 ]]; then
   export PICA_RUN_PERF_TESTS=1
 fi
 
-flutter_args=("$@")
+declare -A seen_files=()
+deduped_args=()
+for arg in "$@"; do
+  if [[ "$arg" == test/*.dart && -f "$arg" ]]; then
+    if [[ -n "${seen_files[$arg]+x}" ]]; then
+      continue
+    fi
+    seen_files["$arg"]=1
+  fi
+  deduped_args+=("$arg")
+done
+flutter_args=("${deduped_args[@]}")
 
 # Local iteration can select the affected suites without changing the full
 # tag gate. Values are whitespace-separated paths; duplicate paths are removed
-# so a shell-expanded list cannot run the same suite twice.
+# across both explicit arguments and the environment list.
 if [[ -n "${FLUTTER_TEST_FILES:-}" ]]; then
   read -r -a requested_files <<<"$FLUTTER_TEST_FILES"
-  declare -A seen_files=()
   for file in "${requested_files[@]}"; do
     if [[ "$file" != test/*.dart || ! -f "$file" ]]; then
       echo "FLUTTER_TEST_FILES contains a missing or non-test Dart file: $file" >&2

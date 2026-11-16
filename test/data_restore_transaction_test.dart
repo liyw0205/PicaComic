@@ -814,4 +814,18 @@ void main() {
         throwsA(isA<FormatException>()));
     expect(tamperedOutput.existsSync(), isFalse);
   });
+
+  test('copyBackupEntity copies nested backup files asynchronously', () async {
+    final source = Directory('${root.path}/source');
+    await Directory('${source.path}/nested').create(recursive: true);
+    await File('${source.path}/root.txt').writeAsString('root', flush: true);
+    await File('${source.path}/nested/child.txt')
+        .writeAsString('child', flush: true);
+
+    final destination = '${root.path}/destination';
+    await copyBackupEntity(source.path, destination);
+
+    expect(await File('$destination/root.txt').readAsString(), 'root');
+    expect(await File('$destination/nested/child.txt').readAsString(), 'child');
+  });
 }
