@@ -787,3 +787,14 @@ A1/A18 本轮继续完成源码和专项测试复核，没有发现比现有 jou
 | 测试流程 | `048a7da1` | 新边界直接扩展已有 pacing/队列 fixture，日常可用 `FLUTTER_TEST_FILES` 定向执行；tag workflow 仍只运行一次完整串行 Flutter 回归，不降低发布覆盖，也不为每个异常分支重复启动 runner | 标准 tag workflow `43789031234` 负责最终全量门禁；本机 Termux 定向 runner 仍受 `impellerc` 缺失阻塞 |
 
 版本提交 `83943454` 将版本递增到 `4.2.56+4256`，annotated tag `v4.2.56` 指向该提交。普通 `master` 提交已推送但不触发 Android workflow；仅创建或更新 `v*` tag 才触发发布，workflow 校验 tag、版本字段和本次构建 SHA 一致后发布。上述提交作者统一为 `liyw0205 <2650115317@qq.com>`。用户原有未跟踪的 `.ai-memory/` 和 `tool/proxy_probe.sh.bak` 继续保留且未纳入提交。
+
+## 37. 2026-11-16 A7 native 响应预算与 v4.2.57 发布
+
+本轮继续处理图片/来源网络的资源上界，并复用现有 native curl 回归，避免为 JNI 边界另起 Flutter 测试流程：
+
+| 功能组 | 提交 | 修复/优化内容 | 回归/验证 |
+| --- | --- | --- | --- |
+| A7 图片与原生网络资源 | `7c6557cc` | 将来源 `maxResponseBytes` 传入 Dart native channel、Kotlin JNI 和 C 写回调；native 层在响应缓存超过来源预算时立即中断，保留 64 MiB 硬上限，并将超限映射为 `responseTooLarge`，避免先构造完整 C buffer/JNI `byte[]`/Dart bytes 再拒绝 | `test/native_curl/NativeCurl.java` 合并超限流式 fixture，native curl 回归由 6 项增至 7 项；`test/network_retry_test.dart` 验证预算参数和错误分类；目标分析、baseline、异步边界、格式和 `git diff --check` 通过 |
+| 测试流程 | `7c6557cc` | A7 边界复用已有 native curl 与网络 retry suite；tag workflow 仍一次性执行完整串行 Flutter/native 门禁，不为每个平台边界重复启动 runner | 本机 native curl 7 项全部通过；标准 tag workflow `43791053238` 负责最终 Flutter、Android 和 Release 验收 |
+
+版本提交 `71685412` 将版本递增到 `4.2.57+4257`，annotated tag `v4.2.57` 指向该提交。普通 `master` push 仍不触发 Android workflow；仅创建或更新 `v*` tag 才触发发布，workflow 校验 tag、版本字段与构建 SHA 一致。上述提交作者统一为 `liyw0205 <2650115317@qq.com>`。
