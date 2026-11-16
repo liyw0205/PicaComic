@@ -1,5 +1,6 @@
 {
   "zh_TW": {
+    "在标签搜索结果里打开画廊, 再点标签会和搜索里的标签一起搜索, 最多 @n 个": "在標籤搜尋結果裡打開畫廊, 再點標籤會和搜尋裡的標籤一起搜尋, 最多 @n 個",
     "有可用更新": "有可用更新",
     "下载管理器": "下載管理器",
     "继续未完成的下载?": "繼續未完成的下載?",
@@ -574,6 +575,7 @@
     "请勿反馈相关问题": "請勿回饋相關問題"
   },
   "en_US": {
+    "在标签搜索结果里打开画廊, 再点标签会和搜索里的标签一起搜索, 最多 @n 个": "When a gallery is opened from a tag search, tapping its tags searches them together with the tags of that search (up to @n)",
     "有可用更新": "Updates available",
     "下载管理器": "Download manager",
     "继续未完成的下载?": "Continue unfinished download?",

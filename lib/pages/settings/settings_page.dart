@@ -34,6 +34,8 @@ import '../../foundation/local_favorites.dart';
 import '../../network/cookie_jar.dart';
 import '../../network/download.dart';
 import '../../network/eh_network/eh_main_network.dart';
+import '../../network/eh_network/tag_settings.dart';
+import '../../network/eh_network/tag_stack.dart';
 import '../../network/http_client.dart';
 import '../../network/http_proxy.dart';
 import '../../network/jm_network/jm_network.dart';
