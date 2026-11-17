@@ -119,7 +119,7 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   Future<Res<HtComicInfo>> loadData() => HtmangaNetwork().getComicInfo(id);
 
   @override
-  int? get pages => data?.chapters == null ? data?.pages : null;
+  int? get pages => data?.chapters?.isNotEmpty != true ? data?.pages : null;
 
   @override
   void read(History? history) {
@@ -177,7 +177,7 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
 
   @override
   ThumbnailsData? get thumbnailsCreator {
-    if (data!.chapters != null) return null;
+    if (data!.chapters?.isNotEmpty == true) return null;
     return ThumbnailsData(
         data!.thumbnails,
         (page) => HtmangaNetwork().getThumbnails(data!.id, page),

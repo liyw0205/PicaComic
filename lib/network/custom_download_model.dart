@@ -18,7 +18,8 @@ class CustomDownloadedItem extends DownloadedItem {
   final Map<String, String>? chapters;
 
   @override
-  List<String> get eps => chapters?.values.toList() ?? ["EP 1"];
+  List<String> get eps =>
+      chapters?.isNotEmpty == true ? chapters!.values.toList() : ["EP 1"];
 
   final String comicId;
 
@@ -46,7 +47,7 @@ class CustomDownloadedItem extends DownloadedItem {
   CustomDownloadedItem(
       this.comicSize,
       this.downloadedEps,
-      this.chapters,
+      Map<String, String>? chapters,
       this.id,
       this.name,
       this.subTitle,
@@ -54,7 +55,8 @@ class CustomDownloadedItem extends DownloadedItem {
       this.sourceKey,
       this.sourceName,
       this.cover,
-      this.comicId);
+      this.comicId)
+      : chapters = chapters?.isEmpty == true ? null : chapters;
 
   @override
   Map<String, dynamic> toJson() => {
@@ -74,8 +76,10 @@ class CustomDownloadedItem extends DownloadedItem {
   CustomDownloadedItem.fromJson(Map<String, dynamic> json)
       : comicSize = json["comicSize"],
         downloadedEps = List<int>.from(json["downloadedEps"]),
-        chapters = (json["chapters"] as Map?)
-            ?.map((key, value) => MapEntry(key.toString(), value.toString())),
+        chapters = (json["chapters"] as Map?)?.isNotEmpty == true
+            ? (json["chapters"] as Map)
+                .map((key, value) => MapEntry(key.toString(), value.toString()))
+            : null,
         id = json["id"],
         name = json["name"],
         subTitle = json["subTitle"],
@@ -102,7 +106,7 @@ class CustomDownloadingItem extends DownloadingItem {
   String get cover => comic.cover;
 
   @override
-  bool get haveEps => comic.chapters != null;
+  bool get haveEps => comic.chapters?.isNotEmpty == true;
 
   Stream<DownloadProgress> _getImage(String url) async* {
     if (source.getImageLoadingConfig != null) {
@@ -144,7 +148,7 @@ class CustomDownloadingItem extends DownloadingItem {
   @override
   Future<Map<int, List<String>>> getLinks() async {
     var links = <int, List<String>>{};
-    if (comic.chapters != null) {
+    if (comic.chapters?.isNotEmpty == true) {
       var futures = <Future>[];
       for (var i in _downloadEps) {
         futures.add(getOneEp(i, links));

@@ -354,6 +354,22 @@ void main() {
     final restoredSingleEpisode =
         ComicInfoData.fromJson(jsonDecode(jsonEncode(singleEpisode.toJson())));
     expect(restoredSingleEpisode.chapters, isNull);
+    final emptyChaptersJson = Map<String, dynamic>.from(singleEpisode.toJson())
+      ..['chapters'] = <String, String>{};
+    final restoredEmptyChapters = ComicInfoData.fromJson(emptyChaptersJson);
+    expect(restoredEmptyChapters.chapters, isNull);
+
+    final emptySeriesJson = Map<String, dynamic>.from(series.toJson())
+      ..['chapters'] = <String, String>{};
+    final restoredEmptySeries = HtComicInfo.fromJson(emptySeriesJson);
+    expect(restoredEmptySeries.chapters, isNull);
+    final emptyDownloaded = DownloadedHtComic(restoredEmptySeries, 1);
+    expect(emptyDownloaded.eps, ['EP 1']);
+    expect(emptyDownloaded.downloadedEps, [0]);
+    final emptyDownloading =
+        DownloadingHtComic(restoredEmptySeries, null, null, null, 'Ht405320');
+    expect(emptyDownloading.haveEps, isFalse);
+
     final legacyDownloaded = CustomDownloadedItem.fromJson({
       'comicSize': null,
       'downloadedEps': <int>[0],
@@ -368,6 +384,26 @@ void main() {
       'comicId': 'single-episode',
     });
     expect(legacyDownloaded.chapters, isNull);
+    final emptyDownloadedSnapshot = CustomDownloadedItem.fromJson({
+      ...legacyDownloaded.toJson(),
+      'chapters': <String, String>{},
+    });
+    expect(emptyDownloadedSnapshot.chapters, isNull);
+    expect(emptyDownloadedSnapshot.eps, ['EP 1']);
+    final emptyDownloadedItem = CustomDownloadedItem(
+      1,
+      [0],
+      <String, String>{},
+      'Other-single-episode',
+      'single episode',
+      '',
+      const [],
+      'fixture_source',
+      'Fixture source',
+      'https://fixture.test/cover.jpg',
+      'single-episode',
+    );
+    expect(emptyDownloadedItem.chapters, isNull);
 
     expect(
       HtmangaNetwork.parseImageList(

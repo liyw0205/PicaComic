@@ -533,7 +533,7 @@ class ComicInfoData with HistoryMixin {
       "cover": cover,
       "description": description,
       "tags": tags,
-      "chapters": chapters,
+      "chapters": chapters?.isNotEmpty == true ? chapters : null,
       "sourceKey": sourceKey,
       "comicId": comicId,
       "isFavorite": isFavorite,
@@ -555,8 +555,10 @@ class ComicInfoData with HistoryMixin {
         cover = json["cover"],
         description = json["description"],
         tags = _generateMap(json["tags"]),
-        chapters = (json["chapters"] as Map?)
-            ?.map((key, value) => MapEntry(key.toString(), value.toString())),
+        chapters = (json["chapters"] as Map?)?.isNotEmpty == true
+            ? (json["chapters"] as Map)
+                .map((key, value) => MapEntry(key.toString(), value.toString()))
+            : null,
         sourceKey = json["sourceKey"],
         comicId = json["comicId"],
         thumbnails = null,

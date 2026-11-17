@@ -97,7 +97,9 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
     final comic = pageLogic?.data;
     if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
     final downloadId = DownloadManager().generateId(sourceKey, id);
-    final eps = comic.chapters?.values.toList();
+    final eps = comic.chapters?.isNotEmpty == true
+        ? comic.chapters!.values.toList()
+        : null;
     for (var i in DownloadManager().downloading) {
       if (i.id == downloadId) {
         showToast(message: "下载中".tl);

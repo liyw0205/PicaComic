@@ -354,7 +354,8 @@ class NhentaiReadingData extends ReadingData {
 }
 
 class CustomReadingData extends ReadingData {
-  CustomReadingData(this.id, this.title, this.source, this.eps);
+  CustomReadingData(this.id, this.title, this.source, Map<String, String>? eps)
+      : eps = eps?.isEmpty == true ? null : eps;
 
   final ComicSource? source;
 
@@ -400,7 +401,7 @@ class CustomReadingData extends ReadingData {
 
   @override
   String buildImageKey(int ep, int page, String url) =>
-      "$sourceKey$id${eps!.keys.elementAtOrNull(ep - 1) ?? id}$url";
+      "$sourceKey$id${eps?.keys.elementAtOrNull(ep - 1) ?? id}$url";
 
   @override
   FavoriteType get favoriteType => FavoriteType(source!.intKey);

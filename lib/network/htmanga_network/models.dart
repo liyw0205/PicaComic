@@ -85,7 +85,7 @@ class HtComicInfo with HistoryMixin {
         "uploader": uploader,
         "avatar": avatar,
         "uploadNum": uploadNum,
-        "chapters": chapters,
+        "chapters": chapters?.isNotEmpty == true ? chapters : null,
       };
 
   HtComicInfo.fromJson(Map<String, dynamic> json)
@@ -100,8 +100,10 @@ class HtComicInfo with HistoryMixin {
         avatar = json["avatar"],
         uploadNum = json["uploadNum"],
         thumbnails = [],
-        chapters = (json["chapters"] as Map?)
-            ?.map((key, value) => MapEntry(key.toString(), value.toString()));
+        chapters = (json["chapters"] as Map?)?.isNotEmpty == true
+            ? (json["chapters"] as Map)
+                .map((key, value) => MapEntry(key.toString(), value.toString()))
+            : null;
 
   @override
   String get cover => coverPath;

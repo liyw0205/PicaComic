@@ -9,7 +9,7 @@ import '../../tools/io_tools.dart';
 class DownloadedHtComic extends DownloadedItem {
   DownloadedHtComic(this.comic, this.size, [List<int>? downloadedEps])
       : _downloadedEps = downloadedEps ??
-            (comic.chapters == null
+            (comic.chapters?.isNotEmpty != true
                 ? [0]
                 : List<int>.generate(comic.chapters!.length, (index) => index));
 
@@ -26,7 +26,9 @@ class DownloadedHtComic extends DownloadedItem {
   List<int> get downloadedEps => _downloadedEps;
 
   @override
-  List<String> get eps => comic.chapters?.values.toList() ?? ["EP 1"];
+  List<String> get eps => comic.chapters?.isNotEmpty == true
+      ? comic.chapters!.values.toList()
+      : ["EP 1"];
 
   @override
   String get id => "Ht${comic.id}";
@@ -51,7 +53,7 @@ class DownloadedHtComic extends DownloadedItem {
       : comic = HtComicInfo.fromJson(json["comic"]),
         size = json["size"],
         _downloadedEps = (json["downloadedEps"] as List?)?.cast<int>() ??
-            (json["comic"]["chapters"] == null
+            ((json["comic"]["chapters"] as Map?)?.isNotEmpty != true
                 ? [0]
                 : List<int>.generate((json["comic"]["chapters"] as Map).length,
                     (index) => index));
@@ -129,7 +131,7 @@ class DownloadingHtComic extends DownloadingItem {
     return DownloadedHtComic(
       comic,
       await getFolderSize(Directory(path)),
-      comic.chapters == null
+      comic.chapters?.isNotEmpty != true
           ? [0]
           : List<int>.generate(comic.chapters!.length, (index) => index),
     );

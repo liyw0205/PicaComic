@@ -142,7 +142,7 @@ Future<CbzExportResult> exportCbzComics(
       final output = File('${work.path}/${_cbzFileName(comic.name)}');
       final hasChapters = comic is DownloadedComic ||
           comic is DownloadedJmComic ||
-          comic is CustomDownloadedItem && comic.chapters != null;
+          comic is CustomDownloadedItem && comic.chapters?.isNotEmpty == true;
       await createCbzFromComicWithIsolate(
         metadata: cbzMetadataFor(comic),
         comicPath: comicPath?.call(comic) ??

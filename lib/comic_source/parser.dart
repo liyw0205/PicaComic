@@ -434,13 +434,16 @@ class ComicSourceParser {
         var tags = <String, List<String>>{};
         (res["tags"] as Map<String, dynamic>?)
             ?.forEach((key, value) => tags[key] = List.from(value ?? const []));
+        final rawChapters = res["chapters"] as Map?;
         return Res(ComicInfoData(
           res["title"],
           res["subTitle"],
           res["cover"],
           res["description"],
           tags,
-          res["chapters"] == null ? null : Map.from(res["chapters"]),
+          rawChapters == null || rawChapters.isEmpty
+              ? null
+              : Map.from(rawChapters),
           ListOrNull.from(res["thumbnails"]),
           // TODO: implement thumbnailLoader
           null,

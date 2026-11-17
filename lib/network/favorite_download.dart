@@ -141,8 +141,10 @@ class FavoriteDownloading extends DownloadingItem {
       default:
         final comicSource = comic.type.comicSource;
         final comicInfoData = await comicSource.loadComicInfo!(comic.target);
-        final downloadedEp = List.generate(
-            comicInfoData.data.chapters?.length ?? 0, (index) => index);
+        final chapters = comicInfoData.data.chapters;
+        final downloadedEp = chapters?.isNotEmpty == true
+            ? List.generate(chapters!.length, (index) => index)
+            : [0];
         return CustomDownloadingItem(comicInfoData.data, downloadedEp, onFinish,
             onError, updateInfo, id);
     }
