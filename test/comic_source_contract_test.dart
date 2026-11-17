@@ -11,7 +11,6 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
-import 'package:pica_comic/foundation/def.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
@@ -445,7 +444,7 @@ void main() {
     final oldProxyOverrides = proxyHttpOverrides;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final paths = <String>[];
-    final detailHtml = '''
+    const detailHtml = '''
       <div class="userwrap">
         <h2>Fixture detail</h2>
         <div class="asTB">
