@@ -770,11 +770,8 @@ void main() {
     expect(transport.directory, '/pica/backups/');
   });
 
-  test('production transport round-trips sync objects and enforces ETag CAS',
+  test('production transport round-trips objects with and without ETags',
       () async {
-    final fixture =
-        await _LoopbackWebdav.start(directory: '/pica', includeEtags: true);
-    final transport = WebdavSyncTransport([fixture.baseUrl, '', '', '/pica']);
     final archiveBytes = List<int>.generate(257, (index) => (index * 37) % 256);
     final archive = File('${root.path}/loopback-revision.picadata');
     final downloaded = File('${root.path}/loopback-downloaded.picadata');
@@ -785,70 +782,78 @@ void main() {
       sha256: sha256.convert(archiveBytes).toString(),
     );
 
-    try {
-      await archive.writeAsBytes(archiveBytes);
-      expect(await transport.list(), isEmpty);
+    for (final includeEtags in <bool>[true, false]) {
+      final fixture = await _LoopbackWebdav.start(
+          directory: '/pica', includeEtags: includeEtags);
+      final transport = WebdavSyncTransport([fixture.baseUrl, '', '', '/pica']);
+      try {
+        await archive.writeAsBytes(archiveBytes);
+        expect(await transport.list(), isEmpty);
 
-      final descriptor = encodeSyncRevision(revision);
-      await transport.writeText(revision.descriptorName, descriptor);
-      expect(await transport.readText(revision.descriptorName), descriptor);
+        final descriptor = encodeSyncRevision(revision);
+        await transport.writeText(revision.descriptorName, descriptor);
+        expect(await transport.readText(revision.descriptorName), descriptor);
 
-      await transport.upload(archive.path, revision.archiveName);
-      await transport.download(revision.archiveName, downloaded.path);
-      final downloadedBytes = await downloaded.readAsBytes();
-      expect(downloadedBytes, archiveBytes);
-      expect(sha256.convert(downloadedBytes).toString(), revision.sha256);
+        await transport.upload(archive.path, revision.archiveName);
+        await transport.download(revision.archiveName, downloaded.path);
+        final downloadedBytes = await downloaded.readAsBytes();
+        expect(downloadedBytes, archiveBytes);
+        expect(sha256.convert(downloadedBytes).toString(), revision.sha256);
 
-      final absentPointer = await transport.pointer();
-      expect(absentPointer.etag, '*');
-      expect(absentPointer.known, isTrue);
-      expect(
-          await transport.compareAndSetPointer(
-              absentPointer, '{"protocol":2,"heads":["loopback-revision"]}'),
-          isTrue);
+        final absentPointer = await transport.pointer();
+        expect(absentPointer.etag, '*');
+        expect(absentPointer.known, isTrue);
+        expect(
+            await transport.compareAndSetPointer(
+                absentPointer, '{"protocol":2,"heads":["loopback-revision"]}'),
+            isTrue);
 
-      final currentPointer = await transport.pointer();
-      expect(currentPointer.etag, '"1"');
-      expect(
-          await transport.compareAndSetPointer(
-              currentPointer, '{"protocol":2}'),
-          isTrue);
-      expect(
-          await transport.compareAndSetPointer(
-              currentPointer, '{"protocol":2}'),
-          isFalse);
-      expect(await transport.readText('sync-head.json'), '{"protocol":2}');
+        final currentPointer = await transport.pointer();
+        expect(currentPointer.known, isTrue);
+        expect(currentPointer.etag, includeEtags ? '"1"' : isNull);
+        expect(
+            await transport.compareAndSetPointer(
+                currentPointer, '{"protocol":2}'),
+            isTrue);
+        // Without ETags, compareAndSetPointer is intentionally unconditional;
+        // Webdav's immutable revision graph detects races at the sync layer.
+        expect(
+            await transport.compareAndSetPointer(
+                currentPointer, '{"protocol":2}'),
+            includeEtags ? isFalse : isTrue);
+        expect(await transport.readText('sync-head.json'), '{"protocol":2}');
 
-      expect(
-          await transport.list(),
-          containsAll([
-            revision.descriptorName,
-            revision.archiveName,
-            'sync-head.json',
-          ]));
-      expect(fixture.errors, isEmpty);
-      expect(
-          fixture.requests
-              .where((request) => request.method == 'PROPFIND')
-              .map((request) => request.path),
-          contains('/pica/'));
-      expect(
-          fixture.requests.any((request) =>
-              request.method == 'PUT' &&
-              request.path == '/pica/sync-head.json' &&
-              request.ifNoneMatch == '*'),
-          isTrue);
-      expect(
-          fixture.requests.where((request) =>
-              request.method == 'PUT' &&
-              request.path == '/pica/sync-head.json' &&
-              request.ifMatch == '"1"'),
-          hasLength(2));
-    } finally {
-      transport.close();
-      await fixture.close();
-      if (archive.existsSync()) await archive.delete();
-      if (downloaded.existsSync()) await downloaded.delete();
+        expect(
+            await transport.list(),
+            containsAll([
+              revision.descriptorName,
+              revision.archiveName,
+              'sync-head.json',
+            ]));
+        expect(fixture.errors, isEmpty);
+        expect(
+            fixture.requests
+                .where((request) => request.method == 'PROPFIND')
+                .map((request) => request.path),
+            contains('/pica/'));
+        expect(
+            fixture.requests.any((request) =>
+                request.method == 'PUT' &&
+                request.path == '/pica/sync-head.json' &&
+                request.ifNoneMatch == '*'),
+            isTrue);
+        expect(
+            fixture.requests.where((request) =>
+                request.method == 'PUT' &&
+                request.path == '/pica/sync-head.json' &&
+                request.ifMatch == '"1"'),
+            hasLength(includeEtags ? 2 : 0));
+      } finally {
+        transport.close();
+        await fixture.close();
+        if (archive.existsSync()) await archive.delete();
+        if (downloaded.existsSync()) await downloaded.delete();
+      }
     }
   });
 
