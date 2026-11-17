@@ -77,6 +77,42 @@ class _GalleryAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _HtmlSearchFallbackAdapter implements HttpClientAdapter {
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    if (options.uri.path == '/api/v2/search') {
+      return ResponseBody.fromString(
+        '{"error":"fixture API unavailable"}',
+        503,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+    final page = int.parse(options.uri.queryParameters['page'] ?? '1');
+    return ResponseBody.fromString(
+      '<div class="gallery">'
+      '<a href="/g/${100 + page}/"><img src="thumb.jpg"></a>'
+      '<div class="caption">Page $page</div>'
+      '</div>'
+      '<section class="pagination"><a class="last" '
+      'href="/search/?q=artist%3A123&amp;page=12&amp;sort=popular">Last</a>'
+      '</section>',
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -138,6 +174,61 @@ void main() {
     await nhentai.categoryComicsData!.load('yaoi', '/tag/yaoi', [''], 1);
     expect(adapter.requests.last.uri.queryParameters['query'],
         'tag:"yaoi" language:chinese');
+  });
+
+  test('HTML category fallback preserves query, sort and page count', () async {
+    final network = NhentaiNetwork();
+    final savedCookieJar = network.cookieJar;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedSources = ComicSource.sources;
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final adapter = _HtmlSearchFallbackAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    network.cookieJar = _UnusedCookieJar();
+    network.dio = dio;
+    ComicSource.sources = [
+      ComicSource.named(name: 'nhentai', key: 'nhentai', filePath: 'test'),
+    ];
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    appdata.settings[69] = '0';
+    appdata.settings[91] = '0';
+    addTearDown(() {
+      network.cookieJar = savedCookieJar;
+      appdata.settings = savedSettings;
+      ComicSource.sources = savedSources;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close();
+    });
+
+    final result = await network.getCategoryComics(
+        '/tag/full-color', 2, NhentaiSort.popularAll);
+    expect(result.success, isTrue);
+    expect(result.data.single.id, '102');
+    expect(result.subData, 12);
+    expect(adapter.requests, hasLength(2));
+    expect(adapter.requests[0].uri.path, '/api/v2/search');
+    expect(adapter.requests[0].uri.queryParameters, {
+      'query': 'tag:"full color"',
+      'page': '2',
+      'sort': 'popular',
+    });
+    expect(adapter.requests[1].uri.path, '/search/');
+    expect(adapter.requests[1].uri.queryParameters, {
+      'q': 'tag:"full color"',
+      'page': '2',
+      'sort': 'popular',
+    });
+
+    final numeric = await network.getCategoryComics(
+        '/tag/artist-123', 2, NhentaiSort.popularAll);
+    expect(numeric.success, isTrue);
+    expect(numeric.subData, 12,
+        reason: 'query digits must not be mistaken for the last page');
+    expect(adapter.requests.last.uri.path, '/search/');
+    expect(adapter.requests.last.uri.queryParameters['q'], 'tag:"artist 123"');
   });
 
   test('API gallery page count is separate from listing pagination', () async {

@@ -17,7 +17,9 @@ import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
 import '../network_logging.dart';
+import 'tag_query.dart';
 import 'tag_settings.dart';
+import 'tag_stack.dart';
 import 'models.dart';
 import 'package:html/parser.dart';
 
@@ -746,16 +748,21 @@ class NhentaiNetwork {
   }
 
   String _categoryPathToQuery(String path) {
-    final parts = path.split("/").where((part) => part.isNotEmpty).toList();
-    if (parts.length < 2) {
-      return "";
+    final terms = nhentaiTermsFromParam(path);
+    if (terms == null) return "";
+    return NhentaiTagQuery(terms: terms).toQuery();
+  }
+
+  int _lastHtmlPage(Document document, int currentPage) {
+    var lastPage = currentPage;
+    for (final link
+        in document.querySelectorAll("section.pagination a[href]")) {
+      final href = link.attributes["href"];
+      final page =
+          int.tryParse(Uri.tryParse(href ?? "")?.queryParameters["page"] ?? "");
+      if (page != null && page > lastPage) lastPage = page;
     }
-    final type = parts.first;
-    final name = parts.sublist(1).join("/");
-    if (type.isEmpty || name.isEmpty) {
-      return "";
-    }
-    return "$type:$name";
+    return lastPage;
   }
 
   List<T> removeNullValue<T extends Object>(List<T?> list) {
@@ -907,13 +914,8 @@ class NhentaiNetwork {
     }
   }
 
-  Future<Res<List<NhentaiComicBrief>>> search(String keyword, int page,
-      [NhentaiSort sort = NhentaiSort.recent]) async {
-    if (appdata.searchHistory.contains(keyword)) {
-      appdata.searchHistory.remove(keyword);
-    }
-    appdata.searchHistory.add(keyword);
-    await appdata.writeHistory();
+  Future<Res<List<NhentaiComicBrief>>> _search(
+      String keyword, int page, NhentaiSort sort) async {
     keyword = NhentaiTagSettings.searchQuery(
         keyword, int.tryParse(appdata.settings[69]) ?? 0);
     final queryParameters = {
@@ -938,42 +940,48 @@ class NhentaiNetwork {
       );
     }
 
-    var res = await get(
-        "$baseUrl/search?q=${Uri.encodeComponent(keyword)}&page=$page${sort.value}");
-    if (res.error) {
-      return Res.fromErrorRes(res);
-    }
+    final fallbackUrl = Uri.parse("$baseUrl/search/").replace(queryParameters: {
+      "q": keyword,
+      "page": page.toString(),
+      if (sort.value.isNotEmpty) "sort": sort.value.substring("&sort=".length),
+    }).toString();
+    var res = await get(fallbackUrl);
+    if (res.error) return Res.fromErrorRes(res);
     try {
       var document = parse(res.data);
 
       var comicDoms = document.querySelectorAll("div.gallery");
-
-      var lastPagination = document
-          .querySelector("section.pagination > a.last")
-          ?.attributes["href"]
-          ?.nums;
+      final lastPage = _lastHtmlPage(document, page);
 
       Future.microtask(() {
         try {
           StateController.find<PreSearchController>().update();
         } catch (e) {
-          //
+          // The search page may not be mounted during a background refresh.
         }
       });
 
-      if (comicDoms.isEmpty) {
-        return const Res([], subData: 0);
-      }
+      if (comicDoms.isEmpty) return const Res([], subData: 0);
 
       return Res(
           removeNullValue(List.generate(
               comicDoms.length, (index) => parseComic(comicDoms[index]))),
-          subData: lastPagination == null ? 1 : int.parse(lastPagination));
+          subData: lastPage);
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
       return Res(null, errorMessage: "Failed to Parse Data: $e");
     }
+  }
+
+  Future<Res<List<NhentaiComicBrief>>> search(String keyword, int page,
+      [NhentaiSort sort = NhentaiSort.recent]) async {
+    if (appdata.searchHistory.contains(keyword)) {
+      appdata.searchHistory.remove(keyword);
+    }
+    appdata.searchHistory.add(keyword);
+    await appdata.writeHistory();
+    return _search(keyword, page, sort);
   }
 
   Future<Res<NhentaiComic>> getComicInfo(String id) async {
@@ -1213,27 +1221,7 @@ class NhentaiNetwork {
       String path, int page, NhentaiSort sort) async {
     final query = _categoryPathToQuery(path);
     if (query.isNotEmpty) {
-      final queryParameters = {
-        "query": query,
-        "page": page.toString(),
-      };
-      final sortValue = _sortApiValue(sort);
-      if (sortValue.isNotEmpty) {
-        queryParameters["sort"] = sortValue;
-      }
-      final apiUrl = Uri.parse("$baseUrl/api/v2/search")
-          .replace(
-            queryParameters: queryParameters,
-          )
-          .toString();
-      final apiRes = await _apiGet(apiUrl);
-      final apiItems = _findApiList(apiRes.dataOrNull);
-      if (apiRes.success && apiItems != null) {
-        return Res(
-          _parseApiComicList(apiRes.data),
-          subData: _apiPageCount(apiRes.data),
-        );
-      }
+      return _search(query, page, sort);
     }
 
     var param = switch (sort) {
