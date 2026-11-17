@@ -17,6 +17,7 @@ import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
 import '../network_logging.dart';
+import 'page_parser.dart';
 import 'tag_query.dart';
 import 'tag_settings.dart';
 import 'tag_stack.dart';
@@ -299,26 +300,18 @@ class NhentaiNetwork {
     return data;
   }
 
-  NhentaiComicBrief parseComic(Element comicDom) {
+  NhentaiComicBrief parseComic(Element comicDom,
+      [Map<String, Set<String>>? tagIdsById]) {
     var img = comicDom.querySelector("a > img")!.attributes["src"]!;
     var name = comicDom.querySelector("div.caption")!.text;
     var id = comicDom.querySelector("a")!.attributes["href"]!.nums;
-    var lang = "Unknown";
-    var tags = comicDom.attributes["data-tags"] ?? "";
-    final tagIds = tags.split(" ").where((tag) => tag.isNotEmpty).toSet();
-    if (tagIds.contains("12227")) {
-      lang = "English";
-    } else if (tagIds.contains("6346")) {
-      lang = "日本語";
-    } else if (tagIds.contains("29963")) {
-      lang = "中文";
-    }
-    var tagsRes = <String>[];
-    for (var tag in tags.split(" ")) {
-      if (nhentaiTags[tag] != null) {
-        tagsRes.add(nhentaiTags[tag]!);
-      }
-    }
+    final tagIds =
+        nhentaiCardTagIds(comicDom, tagIdsById?[id] ?? const <String>{});
+    final lang = nhentaiLanguage(tagIds);
+    final tagsRes = <String>[
+      for (final tag in tagIds)
+        if (nhentaiTags[tag] case final String name) name,
+    ];
     final pages = int.tryParse(comicDom.attributes["data-pages"] ?? "");
     return NhentaiComicBrief(name, img, id, lang, tagsRes, pages);
   }
@@ -807,6 +800,7 @@ class NhentaiNetwork {
     }
     try {
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
       List<Element> popularDoms;
       if (language == null && url == baseUrl) {
         popularDoms = document.querySelectorAll(
@@ -820,7 +814,8 @@ class NhentaiNetwork {
           : document.querySelectorAll("div.gallery");
       final comics = removeNullValue(List.generate(
           latest.length - popularDoms.length,
-          (index) => parseComic(latest[index + popularDoms.length])));
+          (index) =>
+              parseComic(latest[index + popularDoms.length], tagIdsById)));
       final lastPage = int.tryParse(document
               .querySelector("section.pagination > a.last")
               ?.attributes["href"]
@@ -828,8 +823,8 @@ class NhentaiNetwork {
           "");
 
       return Res(NhentaiHomePageData(
-        removeNullValue(List.generate(
-            popularDoms.length, (index) => parseComic(popularDoms[index]))),
+        removeNullValue(List.generate(popularDoms.length,
+            (index) => parseComic(popularDoms[index], tagIdsById))),
         comics,
         page: page ?? 1,
         totalPages: lastPage ??
@@ -885,11 +880,12 @@ class NhentaiNetwork {
     }
     try {
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
 
       var latest = document.querySelectorAll("div.gallery");
 
-      final comics = removeNullValue(
-          List.generate(latest.length, (index) => parseComic(latest[index])));
+      final comics = removeNullValue(List.generate(
+          latest.length, (index) => parseComic(latest[index], tagIdsById)));
       final lastPage = int.tryParse(document
               .querySelector("section.pagination > a.last")
               ?.attributes["href"]
@@ -949,6 +945,7 @@ class NhentaiNetwork {
     if (res.error) return Res.fromErrorRes(res);
     try {
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
 
       var comicDoms = document.querySelectorAll("div.gallery");
       final lastPage = _lastHtmlPage(document, page);
@@ -964,8 +961,8 @@ class NhentaiNetwork {
       if (comicDoms.isEmpty) return const Res([], subData: 0);
 
       return Res(
-          removeNullValue(List.generate(
-              comicDoms.length, (index) => parseComic(comicDoms[index]))),
+          removeNullValue(List.generate(comicDoms.length,
+              (index) => parseComic(comicDoms[index], tagIdsById))),
           subData: lastPage);
     } catch (e, s) {
       LogManager.addLog(
@@ -1018,6 +1015,7 @@ class NhentaiNetwork {
       }
 
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
 
       id = id == "" ? document.querySelector("h3#gallery_id")!.text.nums : id;
 
@@ -1057,7 +1055,7 @@ class NhentaiNetwork {
 
       var recommendations = <NhentaiComicBrief>[];
       for (var comic in document.querySelectorAll("div.gallery")) {
-        var c = parseComic(comic);
+        var c = parseComic(comic, tagIdsById);
         recommendations.add(c);
       }
       String token = "";
@@ -1175,6 +1173,7 @@ class NhentaiNetwork {
     }
     try {
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
       var comics = document.querySelectorAll("div.gallery");
       var lastPagination = document
           .querySelector("section.pagination > a.last")
@@ -1182,7 +1181,7 @@ class NhentaiNetwork {
           ?.nums;
       return Res(
           removeNullValue(List.generate(
-              comics.length, (index) => parseComic(comics[index]))),
+              comics.length, (index) => parseComic(comics[index], tagIdsById))),
           subData: lastPagination == null ? 1 : int.parse(lastPagination));
     } catch (e, s) {
       LogManager.addLog(
@@ -1237,6 +1236,7 @@ class NhentaiNetwork {
     }
     try {
       var document = parse(res.data);
+      final tagIdsById = nhentaiTagIdsFromFetchedData(document);
 
       var comicDoms = document.querySelectorAll("div.gallery");
 
@@ -1258,8 +1258,8 @@ class NhentaiNetwork {
       }
 
       return Res(
-          removeNullValue(List.generate(
-              comicDoms.length, (index) => parseComic(comicDoms[index]))),
+          removeNullValue(List.generate(comicDoms.length,
+              (index) => parseComic(comicDoms[index], tagIdsById))),
           subData: lastPagination == null ? 1 : int.parse(lastPagination));
     } catch (e, s) {
       LogManager.addLog(

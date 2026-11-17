@@ -13,6 +13,7 @@ import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/nhentai_network/page_parser.dart';
 import 'package:pica_comic/network/nhentai_network/tag_query.dart';
 import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -94,7 +95,18 @@ class _HtmlSearchFallbackAdapter implements HttpClientAdapter {
       );
     }
     final page = int.parse(options.uri.queryParameters['page'] ?? '1');
+    final embedded = jsonEncode({
+      'body': jsonEncode({
+        'result': [
+          {
+            'id': 100 + page,
+            'tag_ids': [29963, 20905],
+          },
+        ],
+      }),
+    });
     return ResponseBody.fromString(
+      '<script data-sveltekit-fetched>$embedded</script>'
       '<div class="gallery">'
       '<a href="/g/${100 + page}/"><img src="thumb.jpg"></a>'
       '<div class="caption">Page $page</div>'
@@ -207,6 +219,8 @@ void main() {
         '/tag/full-color', 2, NhentaiSort.popularAll);
     expect(result.success, isTrue);
     expect(result.data.single.id, '102');
+    expect(result.data.single.lang, '中文');
+    expect(result.data.single.tags, contains('full color'));
     expect(result.subData, 12);
     expect(adapter.requests, hasLength(2));
     expect(adapter.requests[0].uri.path, '/api/v2/search');
@@ -229,6 +243,34 @@ void main() {
         reason: 'query digits must not be mistaken for the last page');
     expect(adapter.requests.last.uri.path, '/search/');
     expect(adapter.requests.last.uri.queryParameters['q'], 'tag:"artist 123"');
+  });
+
+  test('embedded HTML gallery metadata restores tags without data-tags', () {
+    final document = html.parse(
+      '<script data-sveltekit-fetched>${jsonEncode({
+            'body': jsonEncode({
+              'result': [
+                {
+                  'id': 42,
+                  'tag_ids': [29963, 20905, '8378']
+                },
+              ],
+            }),
+          })}</script>'
+      '<div class="gallery">'
+      '<a href="/g/42/"><img src="thumb.jpg"></a>'
+      '<div class="caption">Fixture</div>'
+      '</div>',
+    );
+    final metadata = nhentaiTagIdsFromFetchedData(document);
+    final comic = NhentaiNetwork()
+        .parseComic(document.querySelector('.gallery')!, metadata);
+
+    expect(metadata, {
+      '42': {'29963', '20905', '8378'},
+    });
+    expect(comic.lang, '中文');
+    expect(comic.tags, containsAll(['full color', 'glasses']));
   });
 
   test('API gallery page count is separate from listing pagination', () async {
