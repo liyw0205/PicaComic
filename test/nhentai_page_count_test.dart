@@ -162,6 +162,58 @@ class _HtmlDetailFallbackAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _RedirectAdapter implements HttpClientAdapter {
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    switch (options.uri.path) {
+      case '/favorites/':
+        return ResponseBody.fromString('', 308, headers: {
+          'location': ['/user/favorites?page=1'],
+        });
+      case '/user/favorites' when options.uri.queryParameters['ready'] != '1':
+        return ResponseBody.fromString('', 301, headers: {
+          'Location': ['https://nhentai.net/user/favorites?page=1&ready=1'],
+        });
+      case '/loop':
+        return ResponseBody.fromString('', 308, headers: {
+          'Location': ['/loop'],
+        });
+      default:
+        return ResponseBody.fromString('<html>ready</html>', 200, headers: {
+          Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+        });
+    }
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _FavoritesPathAdapter implements HttpClientAdapter {
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    if (options.uri.path == '/api/v2/favorites') {
+      return ResponseBody.fromString('{}', 200, headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType]
+      });
+    }
+    return ResponseBody.fromString('<html><body></body></html>', 200, headers: {
+      Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+    });
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -364,6 +416,95 @@ void main() {
 
     final missing = html.parse('<main>gallery</main>');
     expect(nhentaiFavoriteState(missing, '42'), isFalse);
+  });
+
+  test('HTML requests follow 301/308 redirects with a loop bound', () async {
+    final network = NhentaiNetwork();
+    final savedCookieJar = network.cookieJar;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final adapter = _RedirectAdapter();
+    final dio = Dio(BaseOptions(
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 400))
+      ..httpClientAdapter = adapter;
+    network.cookieJar = _UnusedCookieJar();
+    network.dio = dio;
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    appdata.settings[91] = '0';
+    proxyHttpOverrides = null;
+    addTearDown(() {
+      network.cookieJar = savedCookieJar;
+      appdata.settings = savedSettings;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close(force: true);
+    });
+
+    final result = await network.get('https://nhentai.net/favorites/?page=1');
+    expect(result.success, isTrue);
+    expect(result.data, '<html>ready</html>');
+    expect(adapter.requests.map((request) => request.uri.toString()), [
+      'https://nhentai.net/favorites/?page=1',
+      'https://nhentai.net/user/favorites?page=1',
+      'https://nhentai.net/user/favorites?page=1&ready=1',
+    ]);
+
+    adapter.requests.clear();
+    final loop = await network.get('https://nhentai.net/loop');
+    expect(loop.success, isTrue);
+    expect(adapter.requests, hasLength(6));
+  });
+
+  test('favorites HTML fallback uses the migrated user path', () async {
+    final previousCookieJar = SingleInstanceCookieJar.instance;
+    final temp = await Directory.systemTemp.createTemp('pica-nh-favorites-');
+    final cookieJarPath = '${temp.path}/cookies.db';
+    SingleInstanceCookieJar.instance = null;
+    final testCookieJar = SingleInstanceCookieJar(cookieJarPath);
+    testCookieJar.saveFromResponse(Uri.parse('https://nhentai.net'), [
+      Cookie('access_token', 'fixture-token')
+        ..domain = '.nhentai.net'
+        ..path = '/',
+    ]);
+
+    final network = NhentaiNetwork();
+    final savedNetworkCookieJar = network.cookieJar;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final adapter = _FavoritesPathAdapter();
+    final dio = Dio(BaseOptions(
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 400))
+      ..httpClientAdapter = adapter;
+    network.cookieJar = testCookieJar;
+    network.dio = dio;
+    network.logged = true;
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    appdata.settings[91] = '0';
+    proxyHttpOverrides = null;
+    addTearDown(() async {
+      network.cookieJar = savedNetworkCookieJar;
+      appdata.settings = savedSettings;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close(force: true);
+      testCookieJar.dispose();
+      SingleInstanceCookieJar.instance = previousCookieJar;
+      await temp.delete(recursive: true);
+    });
+
+    final result = await network.getFavorites(1);
+    expect(result.success, isTrue, reason: result.errorMessage);
+    expect(adapter.requests.map((request) => request.uri.path), [
+      '/api/v2/favorites',
+      '/user/favorites',
+    ]);
+    expect(adapter.requests.last.uri.queryParameters['page'], '1');
   });
 
   test('HTML detail fallback exposes embedded favorite state', () async {

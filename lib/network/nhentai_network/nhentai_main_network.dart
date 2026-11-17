@@ -65,7 +65,7 @@ class NhentaiNetwork {
         "Accept-Language": "zh-CN,zh-TW;q=0.9,zh;q=0.8,en-US;q=0.7,en;q=0.6",
         "Referer": "$baseUrl/",
       },
-      validateStatus: (i) => i == 200 || i == 302,
+      validateStatus: (i) => i != null && i >= 200 && i < 400,
     ));
     dio.interceptors.add(CookieManagerSql(cookieJar!));
     dio.interceptors.add(_NhentaiAuthInterceptor(this));
@@ -220,16 +220,23 @@ class NhentaiNetwork {
     return res.success ? const Res(true) : Res.fromErrorRes(res);
   }
 
-  Future<Res<String>> get(String url) async {
+  Future<Res<String>> get(String url, [int redirects = 0]) async {
     await _ensureReady();
     try {
       var res =
           await dio.get<String>(url, options: Options(followRedirects: false));
-      if (res.statusCode == 302) {
-        var path = res.headers["Location"]?.first ??
+      if ((res.statusCode == 301 ||
+              res.statusCode == 302 ||
+              res.statusCode == 307 ||
+              res.statusCode == 308) &&
+          redirects < 5) {
+        var location = res.headers["Location"]?.first ??
             res.headers["location"]?.first ??
             "";
-        return get(Uri.parse(url).replace(path: path).toString());
+        if (location.isNotEmpty) {
+          return get(
+              Uri.parse(url).resolve(location).toString(), redirects + 1);
+        }
       }
       return Res(res.data);
     } catch (e) {
@@ -1164,7 +1171,7 @@ class NhentaiNetwork {
       return Res.fromErrorRes(apiRes);
     }
 
-    var res = await get("$baseUrl/favorites/?page=$page");
+    var res = await get("$baseUrl/user/favorites?page=$page");
     if (res.error) {
       return Res.fromErrorRes(res);
     }
