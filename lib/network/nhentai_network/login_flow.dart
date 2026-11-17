@@ -54,7 +54,12 @@ class NhentaiLoginFlow {
     _probing = true;
     try {
       final cookies = Map<String, String>.from(await readCookies());
-      final storage = await readStorage();
+      Map<String, String> storage;
+      try {
+        storage = await readStorage();
+      } catch (_) {
+        storage = const {};
+      }
       // Native cookies take precedence. Only known auth keys may be recovered
       // from browser storage; CSRF tokens and preferences are not sessions.
       bool usable(String? value) {

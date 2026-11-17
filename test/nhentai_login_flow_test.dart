@@ -120,4 +120,18 @@ void main() {
     );
     expect(await flow.result, isTrue);
   });
+
+  test('native session succeeds when browser storage is unavailable', () async {
+    final flow = NhentaiLoginFlow();
+    var persisted = false;
+    await flow.probe(
+      readCookies: () async => {'sessionid': 'native-session'},
+      readStorage: () async => throw StateError('storage unavailable'),
+      readUserAgent: () async => null,
+      persist: (_, __) => persisted = true,
+      close: () {},
+    );
+    expect(persisted, isTrue);
+    expect(await flow.result, isTrue);
+  });
 }

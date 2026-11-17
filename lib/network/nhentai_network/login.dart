@@ -352,8 +352,13 @@ Future<void> nhLogin(void Function() onFinished) async {
     try {
       await flow.probe(
         readCookies: getCookies,
-        readStorage: () async =>
-            decodeNhentaiStorage(await evaluateJavascript()),
+        readStorage: () async {
+          try {
+            return decodeNhentaiStorage(await evaluateJavascript());
+          } catch (_) {
+            return <String, String>{};
+          }
+        },
         readUserAgent: getUA,
         persist: (cookies, ua) {
           if (ua != null && ua.isNotEmpty) {
