@@ -82,6 +82,9 @@ class HtmangaNetwork {
       .map((value) => value.trim())
       .firstWhere((value) => value.isNotEmpty, orElse: () => '');
 
+  static bool isDetailPage(String html) =>
+      parse(html).querySelector('div.userwrap > h2') != null;
+
   /// Reads the chapter links used by the current WNACG series detail page.
   ///
   /// Older single-gallery pages do not contain any of these nodes and return
@@ -358,6 +361,10 @@ class HtmangaNetwork {
     for (final url in detailUrls(id)) {
       final candidate = await get(url, cache: false);
       if (!candidate.error) {
+        if (!isDetailPage(candidate.data)) {
+          lastError = 'WNACG detail page marker not found';
+          continue;
+        }
         res = candidate;
         break;
       }

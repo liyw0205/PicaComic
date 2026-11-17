@@ -273,6 +273,14 @@ void main() {
         'https://www.wnacg.com/photos-index-aid-405320.html',
       ],
     );
+    // A 200 response is not sufficient: a WNACG error page can still use
+    // the successful transport status and must allow the URL fallback.
+    expect(
+      HtmangaNetwork.isDetailPage(
+          '<div class="userwrap"><h2>fixture detail</h2></div>'),
+      isTrue,
+    );
+    expect(HtmangaNetwork.isDetailPage('<div>fixture error</div>'), isFalse);
     for (final info in [
       '2026-01-01, 12頁',
       '12页，2026-01-01',
