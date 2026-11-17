@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/foundation/runtime_memory.dart';
 import 'package:pica_comic/foundation/runtime_metrics.dart';
@@ -76,6 +77,26 @@ void _registerRuntimeMetricTests() {
     expect(summary, contains('custom'));
     expect(summary, isNot(contains('secret')));
     expect(summary, isNot(contains('example.test')));
+  });
+
+  test('WebDAV diagnostics count bounded categories without error text', () {
+    final request = RequestOptions(path: '/sync?token=secret');
+    RuntimeMetrics.recordWebdavFailure(DioException(
+      requestOptions: request,
+      response: Response<dynamic>(requestOptions: request, statusCode: 429),
+      message: 'password=secret',
+    ));
+    RuntimeMetrics.recordWebdavFailure(StateError('credential=secret'));
+    RuntimeMetrics.recordWebdavConflict();
+
+    final summary = RuntimeMetrics.diagnosticSummary();
+    final webdav = summary['webdav']! as Map<String, Object?>;
+    final failures = webdav['failuresByKind']! as Map<String, int>;
+    expect(failures['rateLimited'], 1);
+    expect(failures['other'], 1);
+    expect(webdav['remoteConflicts'], 1);
+    expect(summary.toString(), isNot(contains('secret')));
+    expect(failures.keys, isNot(contains('unknown')));
   });
 
   test('timer retains only the normalized operation label', () {

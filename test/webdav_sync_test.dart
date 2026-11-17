@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
@@ -19,12 +20,14 @@ import 'package:sqlite3/sqlite3.dart';
 class _FakeSyncTransport implements SyncTransport {
   _FakeSyncTransport({
     this.failList = false,
+    this.listError,
     this.failDownloads = false,
     this.failClose = false,
     this.pointerValue = const SyncPointer(null),
   });
 
   final bool failList;
+  final Object? listError;
   final bool failDownloads;
   final bool failClose;
   final SyncPointer pointerValue;
@@ -57,6 +60,7 @@ class _FakeSyncTransport implements SyncTransport {
 
   @override
   Future<List<String>> list() async {
+    if (listError != null) throw listError!;
     if (failList) throw StateError('injected list failure');
     return List<String>.from(names);
   }
@@ -451,6 +455,33 @@ void main() {
     }
   });
 
+  test('upload failure records the WebDAV category without exception text',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final request = RequestOptions(path: '/dav?token=secret');
+    final transport = _FakeSyncTransport(
+      listError: DioException(
+        requestOptions: request,
+        response: Response<dynamic>(requestOptions: request, statusCode: 429),
+        message: 'password=secret',
+      ),
+    );
+    try {
+      Webdav.transportFactory = (_) => transport;
+
+      expect(
+          await Webdav.uploadData('https://dav.example;;;throttled'), isFalse);
+      expect(transport.closed, isTrue);
+      final summary = RuntimeMetrics.diagnosticSummary();
+      final webdav = summary['webdav']! as Map<String, Object?>;
+      final failures = webdav['failuresByKind']! as Map<String, int>;
+      expect(failures['rateLimited'], 1);
+      expect(summary.toString(), isNot(contains('secret')));
+    } finally {
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
   test('malformed explicit upload config fails instead of becoming a no-op',
       () async {
     final previousFactory = Webdav.transportFactory;
@@ -564,6 +595,9 @@ void main() {
       final metric = RuntimeMetrics.snapshot()['sync.download']!;
       expect(metric.failure, 1);
       expect(metric.active, 0);
+      final webdav =
+          RuntimeMetrics.diagnosticSummary()['webdav']! as Map<String, Object?>;
+      expect(webdav['remoteConflicts'], 1);
     } finally {
       appdata.settings[45] = previousSetting;
       Webdav.transportFactory = previousFactory;

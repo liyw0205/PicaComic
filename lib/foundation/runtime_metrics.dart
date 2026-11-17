@@ -25,8 +25,10 @@ class RuntimeMetricSnapshot {
   final int failure;
   final int cancelled;
   final int bytes;
+
   /// Number of timers that have started and not finished at snapshot time.
   final int active;
+
   /// Highest simultaneous timer count observed for this operation.
   final int peakActive;
   final int? p50Milliseconds;
@@ -68,6 +70,21 @@ class RuntimeMetrics {
   static const int maxMetricBuckets = 128;
   static const int maxSamplesPerMetric = 256;
   static final Map<String, _MetricBucket> _buckets = <String, _MetricBucket>{};
+  static final Map<String, int> _webdavFailureCounts = {
+    for (final kind in SourceNetworkErrorKind.values)
+      if (kind != SourceNetworkErrorKind.unknown) kind.name: 0,
+    'other': 0,
+  };
+  static int _webdavRemoteConflicts = 0;
+
+  static void recordWebdavFailure(Object error) {
+    final kind = SourceNetworkPolicy.instance.classify(error);
+    final category =
+        kind == SourceNetworkErrorKind.unknown ? 'other' : kind.name;
+    _webdavFailureCounts[category] = _webdavFailureCounts[category]! + 1;
+  }
+
+  static void recordWebdavConflict() => _webdavRemoteConflicts++;
 
   static RuntimeMetricTimer start(String operation) {
     final normalizedOperation = _normaliseOperation(operation);
@@ -148,6 +165,11 @@ class RuntimeMetrics {
             entry.key: entry.value.toJson(),
         },
         'sourceNetwork': SourceNetworkPolicy.instance.diagnosticSummary(),
+        'webdav': {
+          'failuresByKind': Map<String, int>.unmodifiable(
+              Map<String, int>.from(_webdavFailureCounts)),
+          'remoteConflicts': _webdavRemoteConflicts,
+        },
       };
 
   /// Collects the bounded runtime counters and one opt-in platform memory
@@ -159,7 +181,13 @@ class RuntimeMetrics {
     return summary;
   }
 
-  static void reset() => _buckets.clear();
+  static void reset() {
+    _buckets.clear();
+    for (final category in _webdavFailureCounts.keys) {
+      _webdavFailureCounts[category] = 0;
+    }
+    _webdavRemoteConflicts = 0;
+  }
 
   static String _normaliseOperation(String operation) {
     final trimmed = operation.trim();

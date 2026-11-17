@@ -517,6 +517,9 @@ class Webdav {
               ? SyncStatus.conflict
               : SyncStatus.success,
           heads: heads);
+      if (lastResult.status == SyncStatus.conflict) {
+        RuntimeMetrics.recordWebdavConflict();
+      }
 
       await appdata.updateSettings(false);
       settingsCommitted = true;
@@ -530,6 +533,7 @@ class Webdav {
       }
       return true;
     } catch (e, s) {
+      RuntimeMetrics.recordWebdavFailure(e);
       appdata.settings[46] = previousVersion;
       if (settingsCommitted) {
         try {
@@ -573,6 +577,7 @@ class Webdav {
           final state = await _state(configs);
           final heads = revisionHeads(await _revisions(transport));
           if (heads.length > 1) {
+            RuntimeMetrics.recordWebdavConflict();
             lastResult = SyncResult(SyncStatus.conflict, heads: heads);
             return false;
           }
@@ -608,6 +613,7 @@ class Webdav {
           succeeded = true;
           return true;
         } catch (e, s) {
+          RuntimeMetrics.recordWebdavFailure(e);
           lastResult = const SyncResult(SyncStatus.failed);
           Log.error(
               'Sync', 'Failed to download data.\n${safeNetworkError(e)}\n$s');
@@ -684,6 +690,7 @@ class Webdav {
           succeeded = result && lastResult.succeeded;
           return result;
         } catch (e, s) {
+          RuntimeMetrics.recordWebdavFailure(e);
           lastResult = const SyncResult(SyncStatus.failed);
           Log.error('Sync', '${safeNetworkError(e)}\n$s');
           return false;
@@ -705,6 +712,7 @@ class Webdav {
     try {
       configs = await _config(null);
     } catch (error, stack) {
+      RuntimeMetrics.recordWebdavFailure(error);
       lastResult = const SyncResult(SyncStatus.failed);
       Log.error(
           'Sync',
