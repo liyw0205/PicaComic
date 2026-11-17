@@ -43,12 +43,12 @@ class _HitomiSearchResultsState
   }
 
   @override
-  Widget buildLoading() => SliverFillRemaining(
-      hasScrollBody: false, child: super.buildLoading());
+  Widget buildLoading() =>
+      SliverFillRemaining(hasScrollBody: false, child: super.buildLoading());
 
   @override
-  Widget buildError() => SliverFillRemaining(
-      hasScrollBody: false, child: super.buildError());
+  Widget buildError() =>
+      SliverFillRemaining(hasScrollBody: false, child: super.buildError());
 
   @override
   Widget buildContent(BuildContext context, List<int> data) {
@@ -76,11 +76,12 @@ class _HitomiSearchResultsState
 
 class HitomiComicTileDynamicLoading extends StatefulWidget {
   const HitomiComicTileDynamicLoading(this.id,
-      {Key? key, this.addonMenuOptions})
+      {Key? key, this.addonMenuOptions, this.loadComicInfoBrief})
       : super(key: key);
   final int id;
 
   final List<ComicTileMenuOption>? addonMenuOptions;
+  final Future<Res<HitomiComicBrief>> Function(String)? loadComicInfoBrief;
 
   @override
   State<HitomiComicTileDynamicLoading> createState() =>
@@ -107,6 +108,8 @@ class _HitomiComicTileDynamicLoadingState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.id == widget.id) return;
     _requestGeneration++;
+    _loading = false;
+    _error = null;
     comic = null;
     _loadComic();
   }
@@ -130,19 +133,24 @@ class _HitomiComicTileDynamicLoadingState
   void _loadComic() {
     final cached = _cachedComic();
     if (cached != null) {
-      comic = cached;
-      _error = null;
-      _loading = false;
+      setState(() {
+        comic = cached;
+        _error = null;
+        _loading = false;
+      });
       return;
     }
     if (_loading) return;
-    _loading = true;
-    _error = null;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     final generation = ++_requestGeneration;
     final id = widget.id.toString();
     unawaited(() async {
       try {
-        final result = await HiNetwork().getComicInfoBrief(id);
+        final result = await (widget.loadComicInfoBrief?.call(id) ??
+            HiNetwork().getComicInfoBrief(id));
         if (!mounted ||
             generation != _requestGeneration ||
             id != widget.id.toString()) {
