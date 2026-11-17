@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,11 +52,210 @@ class _ControlledReadingData extends _ReadingData {
   Future<Res<List<String>>> loadEp(int ep) => loadEpResult;
 }
 
+class _ContinuousReadingData extends _ReadingData {
+  _ContinuousReadingData(this.providers) : super(providers.first);
+
+  final List<ImageProvider> providers;
+
+  @override
+  ImageProvider createImageProvider(int ep, int page, String url,
+          {ImageTaskScope? taskScope}) =>
+      providers[page];
+}
+
+class _ReusableImageProvider extends ImageProvider<_ReusableImageProvider> {
+  _ReusableImageProvider(this.result);
+
+  Completer<ImageInfo> result;
+
+  @override
+  Future<_ReusableImageProvider> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+          _ReusableImageProvider key, ImageDecoderCallback decode) =>
+      OneFrameImageStreamCompleter(result.future.then(
+          (info) => ImageInfo(image: info.image.clone(), scale: info.scale)));
+}
+
 void main() {
   tearDown(() {
+    ComicImage.clear();
     PaintingBinding.instance.imageCache
       ..clear()
       ..clearLiveImages();
+  });
+
+  testWidgets(
+      'continuous reader keeps unloaded pages during backward scrolling',
+      (tester) async {
+    final oldMode = appdata.settings[9];
+    final oldPreload = appdata.settings[28];
+    appdata.settings[9] = '4';
+    appdata.settings[28] = '0';
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      appdata.settings[9] = oldMode;
+      appdata.settings[28] = oldPreload;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.red, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(100, 150));
+    picture.dispose();
+    addTearDown(info.dispose);
+    final tallRecorder = ui.PictureRecorder();
+    ui.Canvas(tallRecorder).drawColor(Colors.green, BlendMode.src);
+    final tallPicture = tallRecorder.endRecording();
+    final tallInfo = ImageInfo(image: tallPicture.toImageSync(100, 800));
+    tallPicture.dispose();
+    addTearDown(tallInfo.dispose);
+    final results = List.generate(15, (_) => Completer<ImageInfo>());
+    for (final index in [0, 1, 10, 11, 12, 13, 14]) {
+      results[index].complete(info);
+    }
+    final imageProviders = <_ReusableImageProvider>[
+      for (final result in results) _ReusableImageProvider(result),
+    ];
+    final data = _ContinuousReadingData(imageProviders);
+    final page = ComicReadingPage(data, 1, 1);
+    final registered = StateController.find<ComicReadingPageLogic>();
+    registered.releaseImageTasks();
+    registered.pageController.dispose();
+    registered.scrollController.dispose();
+    StateController.remove<ComicReadingPageLogic>();
+    final logic = ComicReadingPageLogic(1, data, 11, () {})
+      ..urls = List.generate(15, (index) => 'page-$index');
+    addTearDown(() async {
+      logic.releaseImageTasks();
+      await logic.readerImages.waitForIdle();
+      logic.pageController.dispose();
+      logic.scrollController.dispose();
+      logic.clearPhotoViewControllers();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: StateBuilder<ComicReadingPageLogic>(
+        init: logic,
+        builder: (value) => Builder(
+          builder: (context) => Stack(children: [
+            page.buildComicView(value, context, data.id),
+          ]),
+        ),
+      ),
+    ));
+    for (var frame = 0; frame < 8; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    logic.jumpToPage(11);
+    for (var frame = 0; frame < 12; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(logic.index, 11);
+    }
+    expect(results.take(2).every((result) => result.isCompleted), isTrue);
+    expect(
+      results.skip(2).take(8).every((result) => !result.isCompleted),
+      isTrue,
+    );
+    expect(
+      results.skip(10).every((result) => result.isCompleted),
+      isTrue,
+    );
+    expect(logic.readerImages.pageHeight(10, 400), 600);
+    for (var index = 2; index < 10; index++) {
+      expect(logic.readerImages.pageHeight(index, 400), 480);
+    }
+
+    final gesture = await tester.startGesture(const Offset(200, 250));
+    final dragging = <int>[];
+    for (var step = 0; step < 10; step++) {
+      await gesture.moveBy(const Offset(0, 70));
+      await tester.pump(const Duration(milliseconds: 16));
+      dragging.add(logic.index);
+    }
+    await gesture.up();
+    final pageBeforeImageArrives = logic.index;
+    expect(pageBeforeImageArrives, 9);
+    results[9].complete(tallInfo);
+    for (var frame = 0; frame < 12; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(logic.index, inInclusiveRange(8, 10));
+    expect(logic.readerImages.pageHeight(9, 400), 3200);
+    final pages = <int>[];
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      pages.add(logic.index);
+    }
+    expect(dragging, everyElement(inInclusiveRange(9, 11)),
+        reason: '$dragging');
+    expect(pages, everyElement(inInclusiveRange(9, 12)), reason: '$pages');
+    expect(pages.skip(10).toSet(), hasLength(1), reason: '$pages');
+    logic.jumpToPage(1);
+    for (var frame = 0; frame < 8; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(logic.readerImages.contains(10), isFalse);
+    expect(logic.readerImages.pageHeight(10, 400), 600);
+    logic.jumpToPage(11);
+    for (var frame = 0; frame < 12; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(logic.index, 11);
+    }
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('long page keeps its ratio while reloading and after an error',
+      (tester) async {
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.blue, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(100, 400));
+    picture.dispose();
+    addTearDown(info.dispose);
+    final provider = _ReusableImageProvider(Completer<ImageInfo>());
+    Widget view(double width) => MaterialApp(
+          home: SingleChildScrollView(
+            child: Center(
+              child: ComicImage(
+                image: provider,
+                width: width,
+                height: width * 1.2,
+              ),
+            ),
+          ),
+        );
+    await tester.pumpWidget(view(200));
+    expect(tester.getSize(find.byType(ComicImage)).height, 240);
+    provider.result.complete(info);
+    await tester.pump();
+    expect(tester.getSize(find.byType(ComicImage)).height, 800);
+
+    await tester.pumpWidget(const SizedBox());
+    await provider.evict();
+    provider.result = Completer<ImageInfo>();
+    await tester.pumpWidget(view(200));
+    expect(tester.getSize(find.byType(ComicImage)).height, 800);
+    provider.result.completeError(StateError('reload failed'));
+    await tester.pump();
+    expect(find.text('Retry'), findsOneWidget);
+    expect(tester.getSize(find.byType(ComicImage)).height, 800);
+    await tester.pumpWidget(view(100));
+    expect(tester.getSize(find.byType(ComicImage)).height, 400);
+
+    await provider.evict();
+    provider.result = Completer<ImageInfo>();
+    await tester.tap(find.text('Retry'));
+    provider.result.complete(info);
+    await tester.pump();
+    expect(find.text('Retry'), findsNothing);
+    expect(tester.getSize(find.byType(ComicImage)).height, 400);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('failed precache clears its marker so a later build can retry',

@@ -50,13 +50,20 @@ extension ImageExt on ComicReadingPage {
             imageWidth = height / 1.2;
           }
 
-          if (!logic.readerImages.contains(index)) return const SizedBox();
+          final imageHeight = logic.readerImages.pageHeight(index, imageWidth);
+          // Releasing an image request must not collapse its place in the list.
+          if (!logic.readerImages.contains(index)) {
+            return SizedBox(width: imageWidth, height: imageHeight);
+          }
+          final generation = logic.readerImages.generation;
           ImageProvider image = createImageProvider(type, logic, index, target);
           return ComicImage(
             filterQuality: FilterQuality.medium,
             image: image,
             width: imageWidth,
-            height: imageWidth * 1.2,
+            height: imageHeight,
+            onImageSize: (size) =>
+                logic.readerImages.recordImageSize(index, size, generation),
             fit: BoxFit.cover,
           );
         },

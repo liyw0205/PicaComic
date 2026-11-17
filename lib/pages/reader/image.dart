@@ -10,6 +10,7 @@ class ComicImage extends StatefulWidget {
     this.excludeFromSemantics = false,
     this.width,
     this.height,
+    this.onImageSize,
     this.color,
     this.opacity,
     this.colorBlendMode,
@@ -37,6 +38,8 @@ class ComicImage extends StatefulWidget {
   final double? width;
 
   final double? height;
+
+  final ValueChanged<Size>? onImageSize;
 
   final bool gaplessPlayback;
 
@@ -179,6 +182,10 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       imageInfo.dispose();
       return;
     }
+    final size = Size(
+        imageInfo.image.width.toDouble(), imageInfo.image.height.toDouble());
+    _cache[widget.image.hashCode] = size;
+    widget.onImageSize?.call(size);
     setState(() {
       _replaceImage(info: imageInfo);
       _loadingProgress = null;
@@ -269,10 +276,16 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final width = widget.width ?? MediaQuery.of(context).size.width;
+    final size = _cache[widget.image.hashCode];
+    final height =
+        size == null ? widget.height : width * size.height / size.width;
+
     if (_lastException != null) {
       // display error and retry button on screen
       return SizedBox(
-        height: 300,
+        width: width,
+        height: height ?? 300,
         child: Center(
           child: SizedBox(
             height: 300,
@@ -318,24 +331,12 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       );
     }
 
-    var width = widget.width ?? MediaQuery.of(context).size.width;
-    double? height;
-
-    Size? cacheSize = _cache[widget.image.hashCode];
-    if (cacheSize != null) {
-      height = cacheSize.height * (width / cacheSize.width);
-      height = height.ceilToDouble();
-    }
-
     var brightness = Theme.of(context).brightness;
     if (appdata.appSettings.useDarkBackground) {
       brightness = Brightness.dark;
     }
 
     if (_imageInfo != null) {
-      // Record the height and the width of the image
-      _cache[widget.image.hashCode] = Size(_imageInfo!.image.width.toDouble(),
-          _imageInfo!.image.height.toDouble());
       // build image
       Widget result = RawImage(
         // Do not clone the image, because RawImage is a stateless wrapper.

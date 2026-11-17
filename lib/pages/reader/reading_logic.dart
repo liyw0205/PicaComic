@@ -153,8 +153,10 @@ class ComicReadingPageLogic extends StateController {
         index = newIndex;
         update();
       } else {
-        readerImages.updateWindow(visible.first,
-            visibleCount: visible.last - visible.first + 1);
+        if (readerImages.updateWindow(visible.first,
+            visibleCount: visible.last - visible.first + 1)) {
+          update();
+        }
       }
     });
   }

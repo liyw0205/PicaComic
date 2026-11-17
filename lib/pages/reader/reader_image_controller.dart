@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 
@@ -15,6 +16,7 @@ class ReaderImageController {
   final _active = <_ReaderImage>{};
   final _pendingReleases = <Future<void>>{};
   final _queue = <int>[];
+  final _imageSizes = <int, Size>{};
   var _retained = <int>{};
   List<bool> requested = [];
   int generation = 0;
@@ -28,6 +30,16 @@ class ReaderImageController {
   int get activePreloads => _active.length;
 
   bool contains(int index) => _retained.contains(index);
+
+  double pageHeight(int index, double width) {
+    final size = _imageSizes[index];
+    return size == null ? width * 1.2 : width * size.height / size.width;
+  }
+
+  void recordImageSize(int index, Size size, int requestGeneration) {
+    if (_disposed || generation != requestGeneration) return;
+    _imageSizes[index] = size;
+  }
 
   void configure({
     required BuildContext context,
@@ -49,8 +61,8 @@ class ReaderImageController {
     updateWindow(firstVisible);
   }
 
-  void updateWindow(int firstVisible, {int? visibleCount}) {
-    if (_disposed || requested.isEmpty) return;
+  bool updateWindow(int firstVisible, {int? visibleCount}) {
+    if (_disposed || requested.isEmpty) return false;
     if (visibleCount != null) _visibleCount = visibleCount;
     _firstVisible = firstVisible.clamp(0, requested.length - 1);
     final visibleEnd =
@@ -61,7 +73,9 @@ class ReaderImageController {
     final end = (visibleEnd +
             (_preloadCount > _visibleCount ? _preloadCount : _visibleCount))
         .clamp(0, requested.length);
-    _retained = {for (var i = start; i < end; i++) i};
+    final retained = {for (var i = start; i < end; i++) i};
+    final changed = !setEquals(_retained, retained);
+    _retained = retained;
     for (final index in _images.keys.toList()) {
       if (!_retained.contains(index)) {
         final image = _images.remove(index)!;
@@ -77,6 +91,7 @@ class ReaderImageController {
           if (!requested[i]) i,
       ]);
     _drain();
+    return changed;
   }
 
   ImageProvider imageFor(int index) {
@@ -163,6 +178,7 @@ class ReaderImageController {
     _images.clear();
     _active.clear();
     _queue.clear();
+    _imageSizes.clear();
     _retained.clear();
     requested = [];
     _context = null;
