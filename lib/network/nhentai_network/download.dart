@@ -40,8 +40,13 @@ class NhentaiDownloadedComic extends DownloadedItem {
   DownloadType get type => DownloadType.nhentai;
 
   @override
-  Map<String, dynamic> toJson() =>
-      {'comicID': comicID, 'title': title, 'size': size, 'cover': cover};
+  Map<String, dynamic> toJson() => {
+        'comicID': comicID,
+        'title': title,
+        'size': size,
+        'cover': cover,
+        'tags': tags,
+      };
 
   NhentaiDownloadedComic.fromJson(Map<String, dynamic> json)
       : comicID = json["comicID"],

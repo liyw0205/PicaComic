@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
@@ -84,6 +85,74 @@ void main() {
     }
     db.dispose();
   }
+
+  test('NH downloaded tags survive JSON round trips and legacy records', () {
+    final original = NhentaiDownloadedComic('nhentai123', 'Fixture', 1.5,
+        'cover.jpg', ['tag one', 'tag & two', 'tag one']);
+    var restored = original;
+    for (var round = 0; round < 3; round++) {
+      restored = NhentaiDownloadedComic.fromJson(
+          jsonDecode(jsonEncode(restored.toJson())));
+      expect(restored.tags, original.tags);
+      expect(restored.id, original.id);
+      expect(restored.name, original.name);
+      expect(restored.comicSize, original.comicSize);
+      expect(restored.cover, original.cover);
+    }
+    for (final legacyTags in [
+      <String, dynamic>{},
+      {'tags': null},
+      {'tags': []}
+    ]) {
+      final legacy = <String, dynamic>{
+        'comicID': original.id,
+        'title': original.name,
+        'size': null,
+        'cover': original.cover,
+        ...legacyTags,
+      };
+      final item = NhentaiDownloadedComic.fromJson(legacy);
+      expect(item.tags, isEmpty);
+      expect(
+          NhentaiDownloadedComic.fromJson(jsonDecode(jsonEncode(item.toJson())))
+              .tags,
+          isEmpty);
+    }
+  });
+
+  test('NH tags survive database migration and reopening', () async {
+    final fixtures = {
+      'nhentai123': ['tag one', 'tag & two'],
+      'nhentai456': <String>[],
+    };
+    for (final entry in fixtures.entries) {
+      final comicDirectory = Directory('${directory.path}/${entry.key}');
+      await comicDirectory.create();
+      await File('${comicDirectory.path}/info.json').writeAsString(jsonEncode({
+        'comicID': entry.key,
+        'title': 'Fixture ${entry.key}',
+        'size': 1.5,
+        'cover': 'cover.jpg',
+        if (entry.value.isNotEmpty) 'tags': entry.value,
+      }));
+    }
+
+    // Legacy import uses the same database writer as download completion.
+    await manager.init();
+    await manager.dispose();
+    await manager.init();
+
+    expect(manager.total, fixtures.length);
+    for (final entry in fixtures.entries) {
+      final restored = await manager.getComicOrNull(entry.key);
+      expect(restored, isA<NhentaiDownloadedComic>());
+      expect(restored!.tags, entry.value);
+      expect(restored.name, 'Fixture ${entry.key}');
+      expect(restored.comicSize, 1.5);
+      expect(manager.getAll().singleWhere((item) => item.id == entry.key).tags,
+          entry.value);
+    }
+  });
 
   test('legacy queue snapshots are upgraded with a committed marker', () async {
     await getQueueFile().writeAsString(jsonEncode({'downloading': []}));
