@@ -13,6 +13,14 @@ import 'package:pica_comic/pages/hitomi/hitomi_search.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/translations.dart';
 
+Future<void> _finishSearchTransition(WidgetTester tester) async {
+  // Start the route ticker before advancing time; the loading spinner prevents
+  // pumpAndSettle from finishing while a search response is still pending.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pump();
+}
+
 void main() {
   AppTranslation.translations = const {};
   test('defaults apply to initial, repeated and empty searches', () {
@@ -178,13 +186,13 @@ void main() {
       await tester.pump();
       expect(calls, [('title', HitomiSearchSort.dateAdded)]);
       await tester.tap(find.byIcon(Icons.more_horiz));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _finishSearchTransition(tester);
       expect(find.text('切换源'), findsOneWidget);
       await tester.tap(find.text('搜索选项'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _finishSearchTransition(tester);
       await tester.tap(find.text('本年热门'));
       await tester.tap(find.text('确认'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _finishSearchTransition(tester);
       expect(calls.last, ('title', HitomiSearchSort.year));
       pending.complete(const Res.error('fixture offline'));
       await tester.pumpAndSettle();
@@ -232,7 +240,7 @@ void main() {
       ));
       await tester.pump();
       await tester.tap(find.byIcon(Icons.tune));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _finishSearchTransition(tester);
       await tester.tap(find.text('随机'));
       await tester.tap(find.text('确认'));
       await tester.pumpAndSettle();
