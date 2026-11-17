@@ -62,6 +62,39 @@ String nhentaiLanguage(Set<String> tags) {
   return 'Unknown';
 }
 
+/// Read the favorite state from a detail page without trusting a missing
+/// button to mean that the gallery is favorited.
+bool nhentaiFavoriteState(Document document, String id) {
+  for (final script in document.querySelectorAll(
+    'script[data-sveltekit-fetched]',
+  )) {
+    try {
+      final path = Uri.tryParse(script.attributes['data-url'] ?? '')?.path;
+      if (path != '/api/v2/galleries/$id' && path != '/api/v2/galleries/$id/') {
+        continue;
+      }
+      final payload = nhentaiFetchedPayload(script);
+      if (payload is Map && payload['is_favorited'] is bool) {
+        return payload['is_favorited'] as bool;
+      }
+    } catch (_) {
+      // Fall back to the rendered button for older pages.
+    }
+  }
+
+  final button = document.querySelector('button#favorite');
+  final pressed = button?.attributes['aria-pressed'];
+  if (pressed == 'true' || pressed == 'false') return pressed == 'true';
+
+  final label = (button?.querySelector('span.text')?.text ?? button?.text ?? '')
+      .trim()
+      .toLowerCase();
+  return label == 'unfavorite' ||
+      label == 'unfavourite' ||
+      label == 'remove from favorites' ||
+      label == 'remove from favourites';
+}
+
 String? _numericId(dynamic value) {
   if (value is! int && value is! String) return null;
   final id = value.toString().trim();

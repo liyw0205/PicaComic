@@ -125,6 +125,43 @@ class _HtmlSearchFallbackAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _HtmlDetailFallbackAdapter implements HttpClientAdapter {
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    if (options.uri.path.startsWith('/api/v2/')) {
+      return ResponseBody.fromString(
+        '{"error":"fixture API unavailable"}',
+        503,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+    final embedded = jsonEncode({
+      'body': jsonEncode({'is_favorited': true}),
+    });
+    return ResponseBody.fromString(
+      '<script data-sveltekit-fetched '
+      'data-url="https://nhentai.net/api/v2/galleries/42">$embedded</script>'
+      '<div id="cover"><a><img src="cover.jpg"></a></div>'
+      '<h1 class="title"><span>Fixture gallery</span></h1>'
+      '<button id="favorite" aria-pressed="false">'
+      '<span class="text">Favorite</span></button>',
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -300,6 +337,66 @@ void main() {
     expect(comic.lang, '中文');
     expect(comic.tags.where((tag) => tag == 'glasses'), hasLength(1));
     expect(comic.tags.where((tag) => tag == 'full color'), hasLength(1));
+  });
+
+  test('HTML detail favorite state uses embedded data and explicit controls',
+      () {
+    final embedded = html.parse('''
+      <script data-sveltekit-fetched
+          data-url="https://nhentai.net/api/v2/galleries/42">
+        ${jsonEncode({
+          'body': jsonEncode({'is_favorited': true}),
+        })}
+      </script>
+      <button id="favorite" aria-pressed="false"><span class="text">Favorite</span></button>
+    ''');
+    expect(nhentaiFavoriteState(embedded, '42'), isTrue);
+
+    final pressed = html.parse(
+      '<button id="favorite" aria-pressed="true">Favorite</button>',
+    );
+    expect(nhentaiFavoriteState(pressed, '42'), isTrue);
+
+    final unpressed = html.parse(
+      '<button id="favorite" aria-pressed="false">Unfavorite</button>',
+    );
+    expect(nhentaiFavoriteState(unpressed, '42'), isFalse);
+
+    final missing = html.parse('<main>gallery</main>');
+    expect(nhentaiFavoriteState(missing, '42'), isFalse);
+  });
+
+  test('HTML detail fallback exposes embedded favorite state', () async {
+    final network = NhentaiNetwork();
+    final savedCookieJar = network.cookieJar;
+    final savedLogged = network.logged;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final adapter = _HtmlDetailFallbackAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    network.cookieJar = _UnusedCookieJar();
+    network.dio = dio;
+    network.logged = true;
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    proxyHttpOverrides = null;
+    addTearDown(() {
+      network.cookieJar = savedCookieJar;
+      network.logged = savedLogged;
+      appdata.settings = savedSettings;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close();
+    });
+
+    final result = await network.getComicInfo('42');
+    expect(result.success, isTrue, reason: result.errorMessage);
+    expect(result.data.favorite, isTrue);
+    expect(adapter.requests.map((request) => request.uri.path), [
+      '/api/v2/galleries/42',
+      '/g/42/',
+    ]);
   });
 
   test('API gallery page count is separate from listing pagination', () async {

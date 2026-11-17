@@ -1043,10 +1043,7 @@ class NhentaiNetwork {
         }
       }
 
-      bool favorite =
-          document.querySelector("button#favorite > span.text")?.text !=
-                  "Favorite" &&
-              logged;
+      final favorite = logged && nhentaiFavoriteState(document, id);
 
       var thumbnails = <String>[];
       for (var t in document.querySelectorAll("a.gallerythumb > img")) {
