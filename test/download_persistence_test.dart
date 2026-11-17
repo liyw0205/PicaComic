@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/download.dart';
+import 'package:pica_comic/network/eh_network/eh_download_model.dart';
+import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -152,6 +154,86 @@ void main() {
       expect(manager.getAll().singleWhere((item) => item.id == entry.key).tags,
           entry.value);
     }
+  });
+
+  Gallery galleryFixture(String id, Map<String, List<String>> tags) => Gallery(
+        'Gallery $id',
+        'Manga',
+        '2026-01-01 00:00:00',
+        'Uploader',
+        4.5,
+        null,
+        'cover.jpg',
+        tags,
+        [],
+        null,
+        false,
+        'https://e-hentai.org/g/$id/fixture/',
+        '15',
+        20,
+        [],
+        'jpg',
+        100,
+        null,
+      );
+
+  test('EH gallery tag categories survive JSON round trips', () {
+    for (final tags in [
+      <String, List<String>>{
+        'artist': ['Artist One', 'Artist & Two'],
+        'language': ['chinese', 'translated'],
+        'parody': ['Series: One', 'Series: One'],
+        'other': [],
+      },
+      <String, List<String>>{},
+      <String, List<String>>{'key': ['legacy unclassified tag']},
+    ]) {
+      final original = galleryFixture('123', tags);
+      var restored = original;
+      for (var round = 0; round < 3; round++) {
+        restored = Gallery.fromJson(jsonDecode(jsonEncode(restored.toJson())));
+        expect(restored.tags, tags);
+        expect(restored.toBrief().tags, original.toBrief().tags);
+        expect(restored.toJson(), original.toJson());
+      }
+    }
+  });
+
+  test('EH tags survive database migration and queue reopening', () async {
+    final tags = <String, List<String>>{
+      'artist': ['Artist One', 'Artist & Two'],
+      'language': ['chinese'],
+      'parody': ['Series One'],
+    };
+    final gallery = galleryFixture('123', tags);
+    final comicDirectory = Directory('${directory.path}/123');
+    await comicDirectory.create();
+    await File('${comicDirectory.path}/info.json')
+        .writeAsString(jsonEncode(DownloadedGallery(gallery, 1.5).toJson()));
+
+    await manager.init();
+    await manager.dispose();
+    await getQueueFile().writeAsString(jsonEncode(committedQueue([
+      {
+        ...fixtureTask('456'),
+        'type': 1,
+        'gallery': galleryFixture('456', tags).toJson(),
+        'downloadType': 0,
+      },
+    ])));
+    await manager.init();
+
+    final restored = await manager.getComicOrNull('123') as DownloadedGallery;
+    expect(restored.gallery.tags, tags);
+    expect(restored.gallery.toBrief().tags, gallery.toBrief().tags);
+    expect(restored.tags, tags.values.expand((values) => values).toList());
+    expect(restored.subTitle, 'Uploader');
+    expect(restored.comicSize, 1.5);
+    expect((manager.getAll().single as DownloadedGallery).gallery.tags, tags);
+    final queued = manager.downloading.single as EhDownloadingItem;
+    expect(queued.gallery.tags, tags);
+    expect(queued.gallery.link, 'https://e-hentai.org/g/456/fixture/');
+    expect(queued.toMap()['gallery']['tags'], tags);
   });
 
   test('legacy queue snapshots are upgraded with a committed marker', () async {
