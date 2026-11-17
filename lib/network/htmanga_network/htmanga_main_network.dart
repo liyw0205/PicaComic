@@ -69,6 +69,29 @@ class HtmangaNetwork {
     return parts.firstOrNull ?? '';
   }
 
+  static String firstNonEmptyText(Iterable<String> values) => values
+      .map((value) => value.trim())
+      .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+  static List<String> parseImageList(String script) {
+    final normalized = script.replaceAll(r'\/', '/');
+    final imageUrls = RegExp(
+      r'''url\s*:[^"']*\\?["']((?:https?:)?//[^"'\s\\]+)''',
+    )
+        .allMatches(normalized)
+        .map((match) => resolveUrl(match[1]!))
+        .where((url) => url.isNotEmpty)
+        .toSet();
+    if (imageUrls.isNotEmpty) return imageUrls.toList(growable: false);
+
+    return RegExp(r'''(?:(?:https?:)?//)[^"'\s<>]+''')
+        .allMatches(normalized)
+        .map((match) => resolveUrl(match[0]!))
+        .where((url) => url.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+  }
+
   void logout() {
     SingleInstanceCookieJar.instance?.deleteUri(Uri.parse(baseUrl));
   }
@@ -316,7 +339,9 @@ class HtmangaNetwork {
         var link = resolveUrl(tag.attributes["href"] ?? '');
         tags[tag.text] = link;
       }
-      var description = document.querySelector("div.asTBcell.uwconn > p")!.text;
+      var description = firstNonEmptyText(document
+          .querySelectorAll("div.asTBcell.uwconn > p")
+          .map((paragraph) => paragraph.text));
       var uploader =
           document.querySelector("div.asTBcell.uwuinfo > a > p")!.text;
       var avatar = document
@@ -361,13 +386,7 @@ class HtmangaNetwork {
       return Res(null, errorMessage: res.errorMessage);
     }
     try {
-      final urls = RegExp(r'''(?:(?:https?:)?//)[^"'\s<>]+''')
-          .allMatches(res.data)
-          .map((match) => resolveUrl(match[0]!))
-          .where((url) => url.isNotEmpty)
-          .toSet();
-      final images = urls.toList(growable: false);
-      return Res(images);
+      return Res(parseImageList(res.data));
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");

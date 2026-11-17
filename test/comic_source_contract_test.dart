@@ -272,6 +272,28 @@ void main() {
       expect(HtmangaNetwork.parsePages(info), 12);
       expect(HtmangaNetwork.parseTime(info), '2026-01-01');
     }
+
+    expect(
+      HtmangaNetwork.parseImageList(
+        r'''document.writeln("var imglist = [{ url: fast_img_host+\"//img.example/data/01.jpg?verify=token&sig=abc\", caption: \"[01]\"}];");''',
+      ),
+      ['https://img.example/data/01.jpg?verify=token&sig=abc'],
+    );
+    expect(
+      HtmangaNetwork.parseImageList(
+        'var imglist = [{url: "//img.example/data/[02].jpg"}];',
+      ),
+      ['https://img.example/data/[02].jpg'],
+    );
+    expect(
+      HtmangaNetwork.parseImageList('//img.example/data/03.jpg'),
+      ['https://img.example/data/03.jpg'],
+    );
+    expect(
+      HtmangaNetwork.firstNonEmptyText(['', '  \n ', '简介：样本内容']),
+      '简介：样本内容',
+    );
+    expect(HtmangaNetwork.firstNonEmptyText(const []), '');
   });
 
   test('built-in source definitions are valid without opening the network', () {
