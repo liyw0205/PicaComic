@@ -314,7 +314,7 @@ class DownloadPage extends StatelessWidget {
     if (comics.isEmpty) {
       return;
     }
-    bool res;
+    ComicExportResult res;
     if (comics.length > 1) {
       res = await exportComics(comics);
     } else {
@@ -322,7 +322,7 @@ class DownloadPage extends StatelessWidget {
           comics.first.id, comics.first.name, comics.first.eps);
     }
     App.globalBack();
-    if (!res) {
+    if (res == ComicExportResult.failed) {
       showToast(message: "导出失败".tl);
     }
   }
@@ -554,9 +554,7 @@ class DownloadPage extends StatelessWidget {
                     var res = await exportComic(logic.comics[index].id,
                         logic.comics[index].name, logic.comics[index].eps);
                     App.globalBack();
-                    if (res) {
-                      //忽视
-                    } else {
+                    if (res == ComicExportResult.failed) {
                       showToast(message: "导出失败".tl);
                     }
                   });

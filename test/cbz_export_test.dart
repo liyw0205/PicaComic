@@ -13,6 +13,7 @@ import 'package:pica_comic/network/jm_network/jm_models.dart';
 import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:pica_comic/tools/cbz.dart';
 import 'package:pica_comic/tools/cbz_export.dart';
+import 'package:pica_comic/tools/io_tools.dart';
 import 'package:xml/xml.dart';
 
 void main() {
@@ -56,7 +57,8 @@ void main() {
           .list(recursive: true)
           .where((entry) =>
               entry.path.contains('.pica-cbz-') ||
-              entry.path.contains('cbz-export-'))
+              entry.path.contains('cbz-export-') ||
+              entry.path.contains('zip-export-'))
           .toList(),
       isEmpty,
     );
@@ -362,6 +364,79 @@ void main() {
     expect(cancelled.cancelled, isTrue);
     expect(dialogs, 1);
     await expectNoTemporaryFiles();
+  });
+
+  test(
+      'ZIP export saves closed single and batch archives without touching downloads',
+      () async {
+    final first = await page('zip-first/1/0.png', 'first');
+    final second = await page('zip-second/0.png', 'second');
+    final original = File('${root.path}/Title.zip');
+    await original.writeAsString('previous export');
+    final comics = [
+      ExportComicData(
+          'first', root.path, 'Title', ['Chapter One'], 'zip-first'),
+      ExportComicData('second', root.path, 'Second', null, 'zip-second'),
+    ];
+    for (final selected in [comics.take(1).toList(), comics]) {
+      final result = await exportComicArchives(selected, temporaryRoot: root,
+          saveFile: (path) async {
+        final archive = readArchive(File(path));
+        expect(archive.files.map((entry) => entry.name), [
+          'Title/Chapter One/0.png',
+          if (selected.length == 2) 'Second/0.png',
+        ]);
+        expect(archive.findFile('Title/Chapter One/0.png')!.content,
+            await first.readAsBytes());
+        if (selected.length == 2) {
+          expect(archive.findFile('Second/0.png')!.content,
+              await second.readAsBytes());
+        }
+        return true;
+      });
+      expect(result, ComicExportResult.saved);
+      expect(await original.readAsString(), 'previous export');
+      await expectNoTemporaryFiles();
+    }
+  });
+
+  test('ZIP export distinguishes cancel and failure and cleans every exit',
+      () async {
+    await page('zip-comic/0.png');
+    final comic =
+        ExportComicData('first', root.path, 'Title', null, 'zip-comic');
+    for (final cancel in [true, false]) {
+      var dialogs = 0;
+      final result = await exportComicArchives([comic], temporaryRoot: root,
+          saveFile: (_) async {
+        dialogs++;
+        if (cancel) return false;
+        throw const FileSystemException('save failed');
+      });
+      expect(dialogs, 1);
+      expect(result,
+          cancel ? ComicExportResult.cancelled : ComicExportResult.failed);
+      await expectNoTemporaryFiles();
+    }
+    var dialogs = 0;
+    for (final selected in [
+      <ExportComicData>[],
+      [ExportComicData('missing', root.path, 'Missing', null, 'missing')],
+      [
+        comic,
+        ExportComicData('missing', root.path, 'Missing', null, 'missing')
+      ],
+    ]) {
+      expect(
+          await exportComicArchives(selected, temporaryRoot: root,
+              saveFile: (_) async {
+            dialogs++;
+            return true;
+          }),
+          ComicExportResult.failed);
+      await expectNoTemporaryFiles();
+    }
+    expect(dialogs, 0);
   });
 
   test('Hitomi downloaded metadata survives restart with legacy defaults', () {

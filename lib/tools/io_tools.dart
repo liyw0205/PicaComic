@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/tools/data_backup.dart';
 
@@ -33,86 +32,77 @@ Future<double> getFolderSize(Directory path) async {
   return total;
 }
 
-Future<bool> exportComic(String id, String name,
+enum ComicExportResult { saved, cancelled, failed }
+
+Future<ComicExportResult> exportComic(String id, String name,
     [List<String>? epNames]) async {
   try {
-    name = sanitizeFileName(name);
-    var data = ExportComicData(
-      id,
-      downloadManager.path!,
-      name,
-      epNames,
-      downloadManager.getDirectory(id),
-    );
-    var res = await compute(runningExportComic, data);
-    if (!res) {
-      return false;
-    }
-
-    if (App.isMobile) {
-      var params =
-          SaveFileDialogParams(sourceFilePath: '${data.path}$pathSep$name.zip');
-      await FlutterFileDialog.saveFile(params: params);
-    } else {
-      final FileSaveLocation? result =
-          await getSaveLocation(suggestedName: '$name.zip');
-
-      if (result != null) {
-        const String mimeType = 'application/zip';
-        final XFile textFile =
-            XFile('${data.path}$pathSep$name.zip', mimeType: mimeType);
-        await textFile.saveTo(result.path);
-      }
-    }
-
-    var file = File('${data.path}$pathSep$name.zip');
-    file.delete();
-    return true;
-  } catch (e) {
-    return false;
+    return await exportComicArchives([
+      ExportComicData(id, downloadManager.path!, name, epNames,
+          downloadManager.getDirectory(id)),
+    ]);
+  } catch (e, s) {
+    LogManager.addLog(LogLevel.error, 'IO', '${safeNetworkError(e)}\n$s');
+    return ComicExportResult.failed;
   }
 }
 
-Future<bool> exportComics(List<DownloadedItem> comics) async {
+Future<ComicExportResult> exportComics(List<DownloadedItem> comics) async {
+  if (comics.isEmpty) return ComicExportResult.failed;
   try {
-    var exportDatas = <ExportComicData>[];
-    for (var comic in comics) {
-      var id = comic.id;
-      var name = sanitizeFileName(comic.name);
-      var path = downloadManager.path;
-      var epNames = comic.eps;
-      exportDatas.add(ExportComicData(
-        id,
-        path!,
-        name,
-        epNames,
-        downloadManager.getDirectory(id),
-      ));
-    }
-    await Isolate.run(() => runningExportComics(exportDatas));
-    if (App.isMobile) {
-      var params = SaveFileDialogParams(
-          sourceFilePath: '${downloadManager.path}/comics.zip');
-      await FlutterFileDialog.saveFile(params: params);
-    } else {
-      final FileSaveLocation? result =
-          await getSaveLocation(suggestedName: 'comics.zip');
+    return await exportComicArchives([
+      for (final comic in comics)
+        ExportComicData(comic.id, downloadManager.path!, comic.name, comic.eps,
+            downloadManager.getDirectory(comic.id)),
+    ]);
+  } catch (e, s) {
+    LogManager.addLog(LogLevel.error, 'IO', '${safeNetworkError(e)}\n$s');
+    return ComicExportResult.failed;
+  }
+}
 
-      if (result != null) {
-        const String mimeType = 'application/zip';
-        final XFile textFile =
-            XFile('${downloadManager.path}/comics.zip', mimeType: mimeType);
-        await textFile.saveTo(result.path);
+Future<ComicExportResult> exportComicArchives(
+  List<ExportComicData> comics, {
+  Future<bool> Function(String path)? saveFile,
+  Directory? temporaryRoot,
+}) async {
+  if (comics.isEmpty) return ComicExportResult.failed;
+  Directory? work;
+  try {
+    work = await (temporaryRoot ?? Directory(App.cachePath))
+        .createTemp('zip-export-');
+    final name =
+        comics.length == 1 ? sanitizeFileName(comics.single.name) : 'comics';
+    final output = '${work.path}/$name.zip';
+    await compute(_writeComicArchive, (comics: comics, output: output));
+    return await (saveFile ?? _saveComicArchive)(output)
+        ? ComicExportResult.saved
+        : ComicExportResult.cancelled;
+  } catch (e, s) {
+    LogManager.addLog(LogLevel.error, 'IO', '${safeNetworkError(e)}\n$s');
+    return ComicExportResult.failed;
+  } finally {
+    if (work != null) {
+      try {
+        await work.delete(recursive: true);
+      } catch (e, s) {
+        LogManager.addLog(LogLevel.warning, 'IO',
+            'Failed to clean exported archive: ${safeNetworkError(e)}\n$s');
       }
     }
-    var file = File('${downloadManager.path}/comics.zip');
-    if (file.existsSync()) {
-      file.delete();
-    }
-    return true;
-  } catch (e) {
-    return false;
   }
+}
+
+Future<bool> _saveComicArchive(String path) async {
+  if (App.isMobile) {
+    return await FlutterFileDialog.saveFile(
+            params: SaveFileDialogParams(sourceFilePath: path)) !=
+        null;
+  }
+  final result = await getSaveLocation(suggestedName: File(path).name);
+  if (result == null) return false;
+  await XFile(path, mimeType: 'application/zip').saveTo(result.path);
+  return true;
 }
 
 Future<bool> exportPdf(String pdfPath) async {
@@ -159,77 +149,34 @@ class ExportComicData {
   ExportComicData(this.id, this.path, this.name, this.epNames, this.directory);
 }
 
-Future<bool> runningExportComic(ExportComicData data) async {
-  final fileName = '${data.path}/${data.name}.zip';
+void _writeComicArchive(
+    ({List<ExportComicData> comics, String output}) request) {
+  final zipFile = ZipFile.open(request.output);
   try {
-    final path = Directory("${data.path}/${data.directory}");
-    var zipFile = ZipFile.open(fileName);
-    String? currentDirName;
-
-    void walk(String path) {
-      for (var entry in Directory(path).listSync()) {
-        if (entry is Directory) {
-          var index = int.parse(entry.name) - 1;
-          currentDirName = sanitizeFileName(
-              data.epNames?.elementAtOrNull(index) ?? "Chapter ${index + 1}");
-          walk(entry.path);
-        } else {
-          var filePathInZip = sanitizeFileName(data.name);
-          if (currentDirName != null) {
-            filePathInZip += "/$currentDirName";
-          }
-          filePathInZip += "/${entry.name}";
-          zipFile.addFile(filePathInZip, entry.path);
-        }
-      }
-    }
-
-    walk(path.path);
-    zipFile.close();
-    return true;
-  } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
-    return false;
-  }
-}
-
-Future<bool> runningExportComics(List<ExportComicData> datas) async {
-  try {
-    var result = "${datas.first.path}/comics.zip";
-    if (File(result).existsSync()) {
-      File(result).deleteSync();
-    }
-    var zipFile = ZipFile.open(result);
-    for (var data in datas) {
+    var files = 0;
+    for (final data in request.comics) {
       final directory = Directory('${data.path}/${data.directory}');
-
-      String? currentDirName;
-
-      void walk(String path) {
-        for (var entry in Directory(path).listSync()) {
+      void walk(Directory path, String prefix) {
+        for (final entry in path.listSync(followLinks: false)) {
           if (entry is Directory) {
-            var index = int.parse(entry.name) - 1;
-            currentDirName = sanitizeFileName(
+            final index = int.parse(entry.name) - 1;
+            final chapter = sanitizeFileName(
                 data.epNames?.elementAtOrNull(index) ?? "Chapter ${index + 1}");
-            walk(entry.path);
+            walk(entry, '$prefix/$chapter');
+          } else if (entry is File) {
+            zipFile.addFile('$prefix/${entry.name}', entry.path);
+            files++;
           } else {
-            var filePathInZip = sanitizeFileName(data.name);
-            if (currentDirName != null) {
-              filePathInZip += "/$currentDirName";
-            }
-            filePathInZip += "/${entry.name}";
-            zipFile.addFile(filePathInZip, entry.path);
+            throw FileSystemException('Unsupported archive entry', entry.path);
           }
         }
       }
 
-      walk(directory.path);
+      walk(directory, sanitizeFileName(data.name));
     }
+    if (files == 0) throw StateError('No files to export');
+  } finally {
     zipFile.close();
-    return true;
-  } catch (e, s) {
-    LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");
-    return false;
   }
 }
 
