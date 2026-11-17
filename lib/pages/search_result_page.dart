@@ -278,6 +278,45 @@ class _SearchResultPageState extends State<SearchResultPage> {
       onChanged: onChanged,
       trailing: trailing,
     );
+    final header = SliverPersistentHeader(
+      pinned: _showFab && SmoothScrollProvider.isMouseScroll,
+      floating: !SmoothScrollProvider.isMouseScroll,
+      delegate: _SliverAppBarDelegate(
+        minHeight: headerHeight,
+        maxHeight: headerHeight,
+        child: stackedTerms == null
+            ? searchBar
+            : Material(
+                color: context.colorScheme.surface,
+                child: Column(
+                  children: [
+                    SizedBox(height: 60, child: searchBar),
+                    EhTagStackBar(
+                      terms: stackedTerms,
+                      onRemove: removeStackedTerm,
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+    final resultsKey = ValueKey(
+      '$query${effectiveOptions.toString()}$sourceKey${sourceKey == 'nhentai' ? NhentaiTagSettings.changes.value : ''}',
+    );
+    final results = searchData.customResultsBuilder == null
+        ? _SearchPageComicList(
+            keyword: keyword,
+            languageIndex: languageIndex,
+            sourceKey: sourceKey,
+            key: resultsKey,
+            header: header,
+            options: effectiveOptions,
+          )
+        : KeyedSubtree(
+            key: resultsKey,
+            child: searchData.customResultsBuilder!(
+                query, effectiveOptions, header),
+          );
 
     return Scaffold(
       floatingActionButton: _showFab
@@ -313,37 +352,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
           terms: sourceKey == 'nhentai' && NhentaiTagSettings.stackEnabled
               ? nhentaiTermsFromKeyword(keyword) ?? const []
               : const [],
-          child: _SearchPageComicList(
-            keyword: keyword,
-            languageIndex: languageIndex,
-            sourceKey: sourceKey,
-            key: Key(
-              '$query${effectiveOptions.toString()}$sourceKey${sourceKey == 'nhentai' ? NhentaiTagSettings.changes.value : ''}',
-            ),
-            header: SliverPersistentHeader(
-              pinned: _showFab && SmoothScrollProvider.isMouseScroll,
-              floating: !SmoothScrollProvider.isMouseScroll,
-              delegate: _SliverAppBarDelegate(
-                minHeight: headerHeight,
-                maxHeight: headerHeight,
-                child: stackedTerms == null
-                    ? searchBar
-                    : Material(
-                        color: context.colorScheme.surface,
-                        child: Column(
-                          children: [
-                            SizedBox(height: 60, child: searchBar),
-                            EhTagStackBar(
-                              terms: stackedTerms,
-                              onRemove: removeStackedTerm,
-                            ),
-                          ],
-                        ),
-                      ),
-              ),
-            ),
-            options: effectiveOptions,
-          ),
+          child: results,
         ),
       ),
     );
@@ -371,6 +380,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
         ),
       ],
     ).then((value) {
+      if (!mounted) return;
       if (value == 0) {
         changeSource();
       } else if (value == 1) {
@@ -409,7 +419,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
               Button.filled(
                 child: Text("确认".tl),
                 onPressed: () {
-                  if (sourceKey != null) {
+                  if (sourceKey != null && mounted) {
                     context.pop();
                     var searchData =
                         ComicSource.find(sourceKey!)!.searchPageData!;
@@ -447,6 +457,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
         current: options,
         sourceKey: sourceKey,
         onChanged: (options) {
+          if (!mounted) return;
           setState(() {
             this.options = options;
           });
@@ -480,7 +491,9 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(SliverPersistentHeaderDelegate oldDelegate) {
-    return maxHeight != oldDelegate.maxExtent ||
+    return oldDelegate is! _SliverAppBarDelegate ||
+        child != oldDelegate.child ||
+        maxHeight != oldDelegate.maxExtent ||
         minHeight != oldDelegate.minExtent;
   }
 }
@@ -727,7 +740,7 @@ class _SearchOptionsState extends State<_SearchOptions> {
   @override
   void initState() {
     data = ComicSource.find(widget.sourceKey)!.searchPageData!;
-    options = widget.current;
+    options = List<String>.of(widget.current);
     if (data.searchOptions != null &&
         options.length != data.searchOptions!.length) {
       options = data.searchOptions!.map((e) => e.defaultValue).toList();

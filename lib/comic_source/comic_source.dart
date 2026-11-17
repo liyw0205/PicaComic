@@ -421,6 +421,10 @@ class SearchPageData {
   final Widget Function(String keyword, List<String> options)?
       overrideSearchResultBuilder;
 
+  /// Builds a scrollable results body using the shared search header sliver.
+  final Widget Function(String keyword, List<String> options, Widget header)?
+      customResultsBuilder;
+
   final SearchFunction? loadPage;
 
   final bool enableLanguageFilter;
@@ -431,6 +435,7 @@ class SearchPageData {
       : enableLanguageFilter = false,
         customOptionsBuilder = null,
         overrideSearchResultBuilder = null,
+        customResultsBuilder = null,
         enableTagsSuggestions = false;
 
   const SearchPageData.named({
@@ -439,6 +444,7 @@ class SearchPageData {
     this.enableLanguageFilter = false,
     this.customOptionsBuilder,
     this.overrideSearchResultBuilder,
+    this.customResultsBuilder,
     this.enableTagsSuggestions = false,
   });
 }

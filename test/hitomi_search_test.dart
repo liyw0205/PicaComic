@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/hitomi_network/search.dart';
+import 'package:pica_comic/network/hitomi_network/search_sort.dart';
 import 'package:pica_comic/network/http_client.dart';
 
 class _RangeAdapter implements HttpClientAdapter {
@@ -14,11 +15,13 @@ class _RangeAdapter implements HttpClientAdapter {
   List<int> bytes;
   Map<String, List<String>> headers;
   var calls = 0;
+  final urls = <Uri>[];
 
   @override
   Future<ResponseBody> fetch(RequestOptions options,
       Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
     calls++;
+    urls.add(options.uri);
     return ResponseBody.fromBytes(bytes, statusCode, headers: headers);
   }
 
@@ -58,9 +61,11 @@ Uint8List _nodeBytes({
 }
 
 class _Search extends HitomiSearch {
-  _Search(super.keyword, this.ids);
+  _Search(super.keyword, this.ids,
+      {super.sort, super.client, this.useNetworkNozomi = false});
 
   final Map<String, List<int>> ids;
+  final bool useNetworkNozomi;
   String? requestedArea;
   String? requestedTag;
   String? requestedLanguage;
@@ -77,6 +82,9 @@ class _Search extends HitomiSearch {
     requestedArea = area;
     requestedTag = tag;
     requestedLanguage = language;
+    if (useNetworkNozomi) {
+      return super.getGalleryIdsFromNozomi(area, tag, language);
+    }
     return [10, 5];
   }
 }
@@ -118,6 +126,89 @@ void main() {
       HttpOverrides.global = overrides;
       proxyHttpOverrides = proxy;
     });
+  });
+
+  test('ranking preserves server order after keyword, language and exclusions',
+      () async {
+    final bytes = ByteData(24);
+    for (final (index, id) in [5, 99, 10, 5, 8, 3].indexed) {
+      bytes.setInt32(index * 4, id, Endian.big);
+    }
+    final adapter = _RangeAdapter(200, bytes.buffer.asUint8List(), {});
+    final client = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => client.close(force: true));
+    for (final sort in HitomiSearchSort.values.where((sort) =>
+        sort != HitomiSearchSort.dateAdded && sort != HitomiSearchSort.random)) {
+      final search = _Search('title language:chinese -blocked', {
+        'title': [10, 8, 5, 3, 1],
+        'language:chinese': [10, 8, 5, 3],
+        'blocked': [8],
+      }, sort: sort, client: client, useNetworkNozomi: true);
+      expect((await search.search()).data, [5, 10, 3], reason: sort.name);
+      final area = sort == HitomiSearchSort.published ? 'date' : 'popular';
+      expect(adapter.urls.last.path, '/n/$area/${sort.name}-chinese.nozomi');
+    }
+    expect(adapter.calls, 5);
+  });
+
+  test('ranking handles empty, language-free and single-tag results', () async {
+    final bytes = ByteData(12)
+      ..setInt32(0, 5, Endian.big)
+      ..setInt32(4, 99, Endian.big)
+      ..setInt32(8, 10, Endian.big);
+    final adapter = _RangeAdapter(200, bytes.buffer.asUint8List(), {});
+    final client = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => client.close(force: true));
+    final empty = _Search('absent', {'absent': []},
+        sort: HitomiSearchSort.year, client: client, useNetworkNozomi: true);
+    expect((await empty.search()).data, isEmpty);
+    expect(adapter.calls, 0);
+    final all = _Search('title', {'title': [10, 5]},
+        sort: HitomiSearchSort.year, client: client, useNetworkNozomi: true);
+    expect((await all.search()).data, [5, 10]);
+    expect(adapter.urls.last.path, '/n/popular/year-all.nozomi');
+    final tag = _Search('female:test language:english', {},
+        sort: HitomiSearchSort.published,
+        client: client,
+        useNetworkNozomi: true);
+    expect((await tag.search()).data, [5, 99, 10]);
+    expect(adapter.urls.map((url) => url.path), [
+      '/n/popular/year-all.nozomi',
+      '/n/tag/female:test-english.nozomi',
+      '/n/date/published-english.nozomi',
+    ]);
+  });
+
+  test('ranking failures never return a successful default order', () async {
+    final adapter = _RangeAdapter(503, [], {});
+    final client = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => client.close(force: true));
+    final search = _Search('title', {'title': [10, 5]},
+        sort: HitomiSearchSort.year, client: client, useNetworkNozomi: true);
+    await expectLater(search.search(), throwsA(isA<DioException>()));
+    adapter.statusCode = 200;
+    adapter.bytes = [0, 0, 1];
+    await expectLater(search.search(), throwsFormatException);
+  });
+
+  test('default and random sorting preserve the filtered IDs and input lists',
+      () async {
+    final ids = List.generate(24, (index) => 24 - index);
+    final original = List<int>.of(ids);
+    final normal = _Search('title', {'title': ids});
+    expect((await normal.search()).data, original);
+    final random = _Search('title', {'title': ids}, sort: HitomiSearchSort.random);
+    final snapshots = <String>{};
+    for (var i = 0; i < 6; i++) {
+      final result = (await random.search()).data;
+      expect(result, unorderedEquals(original));
+      snapshots.add(result.join(','));
+    }
+    expect(snapshots.length, greaterThan(1));
+    expect(ids, original);
+    expect(random.requestedArea, isNull);
+    expect(HitomiSearchSort.fromOption('unknown'), HitomiSearchSort.dateAdded);
+    expect(HitomiSearchSort.fromOption(null), HitomiSearchSort.dateAdded);
   });
 
   test('excluding a larger ID does not index beyond the list', () async {

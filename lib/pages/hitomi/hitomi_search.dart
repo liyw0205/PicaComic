@@ -1,126 +1,77 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/log.dart';
+import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
+import 'package:pica_comic/network/hitomi_network/search_sort.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:shimmer_animation/shimmer_animation.dart';
 
-import '../../foundation/app.dart';
 import '../../network/res.dart';
 
-class SearchPageComicList extends StatefulWidget {
-  const SearchPageComicList(
-      {super.key, required this.keyword, required this.head});
+class HitomiSearchResults extends StatefulWidget {
+  const HitomiSearchResults({
+    super.key,
+    required this.keyword,
+    required this.sort,
+    required this.header,
+    this.loadResults,
+  });
 
   final String keyword;
-
-  final Widget head;
+  final HitomiSearchSort sort;
+  final Widget header;
+  final Future<Res<List<int>>> Function(String, HitomiSearchSort)? loadResults;
 
   @override
-  State<SearchPageComicList> createState() => _SearchPageComicListState();
+  State<HitomiSearchResults> createState() => _HitomiSearchResultsState();
 }
 
-class _SearchPageComicListState
-    extends LoadingState<SearchPageComicList, List<int>> {
+class _HitomiSearchResultsState
+    extends LoadingState<HitomiSearchResults, List<int>> {
+  @override
+  Widget buildFrame(BuildContext context, Widget child) {
+    return SafeArea(
+      top: UiMode.m1(context),
+      bottom: false,
+      child: SmoothCustomScrollView(slivers: [widget.header, child]),
+    );
+  }
+
+  @override
+  Widget buildLoading() => SliverFillRemaining(
+      hasScrollBody: false, child: super.buildLoading());
+
+  @override
+  Widget buildError() => SliverFillRemaining(
+      hasScrollBody: false, child: super.buildError());
+
   @override
   Widget buildContent(BuildContext context, List<int> data) {
-    return SmoothCustomScrollView(
-      slivers: [
-        widget.head,
-        SliverGrid(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => HitomiComicTileDynamicLoading(data[index]),
-            childCount: data.length,
-          ),
-          gridDelegate: SliverGridDelegateWithComics(),
-        ),
-      ],
-    );
-  }
-
-  @override
-  Future<Res<List<int>>> loadData() {
-    return HiNetwork().search(widget.keyword);
-  }
-}
-
-class HitomiSearchPage extends StatefulWidget {
-  const HitomiSearchPage(this.keyword, {Key? key}) : super(key: key);
-  final String keyword;
-
-  @override
-  State<HitomiSearchPage> createState() => _HitomiSearchPageState();
-}
-
-class _HitomiSearchPageState extends State<HitomiSearchPage> {
-  late String keyword;
-  var controller = TextEditingController();
-
-  @override
-  void initState() {
-    keyword = widget.keyword;
-    super.initState();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    controller.text = keyword;
-    return SearchPageComicList(
-      keyword: keyword,
-      key: Key(keyword),
-      head: SliverPersistentHeader(
-        floating: true,
-        delegate: _SliverAppBarDelegate(
-          minHeight: 60,
-          maxHeight: 0,
-          child: FloatingSearchBar(
-            onSearch: (s) {
-              App.back(context);
-              if (s == "") return;
-              setState(() {
-                keyword = s;
-              });
-            },
-            controller: controller,
-          ),
-        ),
+    if (data.isEmpty) {
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: Center(child: Text('没有找到漫画'.tl)),
+      );
+    }
+    return SliverGrid(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) => HitomiComicTileDynamicLoading(data[index],
+            key: ValueKey(data[index])),
+        childCount: data.length,
       ),
-    ).paddingTop(context.padding.top);
-  }
-}
-
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
-  _SliverAppBarDelegate(
-      {required this.child, required this.maxHeight, required this.minHeight});
-
-  final double minHeight;
-  final double maxHeight;
-  final Widget child;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return SizedBox.expand(
-      child: child,
+      gridDelegate: SliverGridDelegateWithComics(),
     );
   }
 
   @override
-  double get maxExtent => minHeight;
-
-  @override
-  double get minExtent => max(maxHeight, minHeight);
-
-  @override
-  bool shouldRebuild(SliverPersistentHeaderDelegate oldDelegate) {
-    return maxHeight != oldDelegate.maxExtent ||
-        minHeight != oldDelegate.minExtent;
-  }
+  Future<Res<List<int>>> loadData() =>
+      widget.loadResults?.call(widget.keyword, widget.sort) ??
+      HiNetwork().search(widget.keyword, sort: widget.sort);
 }
 
 class HitomiComicTileDynamicLoading extends StatefulWidget {

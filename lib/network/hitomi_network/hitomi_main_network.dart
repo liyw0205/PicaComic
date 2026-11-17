@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:html/parser.dart';
 import 'package:pica_comic/network/cache_network.dart';
 import 'package:pica_comic/network/hitomi_network/search.dart';
+import 'package:pica_comic/network/hitomi_network/search_sort.dart';
 import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import '../../base.dart';
@@ -291,14 +292,17 @@ class HiNetwork {
   }
 
   ///搜索Hitomi
-  Future<Res<List<int>>> search(String keyword) async {
+  Future<Res<List<int>>> search(String keyword,
+      {HitomiSearchSort sort = HitomiSearchSort.dateAdded}) async {
     await setNetworkProxy();
     appdata.searchHistory.remove(keyword);
     appdata.searchHistory.add(keyword);
     await appdata.writeHistory();
     try {
-      var searchEngine = HitomiSearch(withDefaultSearchLanguage(
-          keyword, int.tryParse(appdata.settings[69]) ?? 0));
+      var searchEngine = HitomiSearch(
+          withDefaultSearchLanguage(
+              keyword, int.tryParse(appdata.settings[69]) ?? 0),
+          sort: sort);
       var res = await searchEngine.search();
       return Res(res.data);
     } catch (e, s) {

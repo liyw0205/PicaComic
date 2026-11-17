@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/widgets.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
@@ -8,6 +10,7 @@ import 'package:pica_comic/foundation/image_loader/cached_image.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
+import 'package:pica_comic/network/hitomi_network/search_sort.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/hitomi/hitomi_comic_page.dart';
 import 'package:pica_comic/pages/hitomi/hitomi_home_page.dart';
@@ -33,8 +36,23 @@ final hitomi = ComicSource.named(
     ),
   ],
   searchPageData: SearchPageData.named(
-    overrideSearchResultBuilder: (keyword, options) {
-      return HitomiSearchPage(keyword);
+    searchOptions: [
+      SearchOptions(LinkedHashMap.of({
+        'dateAdded': '加入时间',
+        'published': '发布时间',
+        'today': '今日热门',
+        'week': '本周热门',
+        'month': '本月热门',
+        'year': '本年热门',
+        'random': '随机',
+      }), '排序'),
+    ],
+    customResultsBuilder: (keyword, options, header) {
+      return HitomiSearchResults(
+        keyword: keyword,
+        sort: HitomiSearchSort.fromOption(options.firstOrNull),
+        header: header,
+      );
     },
     enableLanguageFilter: true,
   ),

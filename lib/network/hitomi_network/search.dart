@@ -10,6 +10,7 @@ import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/http_client.dart';
 import '../res.dart';
 import 'hitomi_main_network.dart';
+import 'search_sort.dart';
 
 const _maxFileOffset = 0x7fffffffffffffff;
 
@@ -25,9 +26,12 @@ class HitomiSearch {
   var languagesIndexDir = 'languagesindex';
   var nozomiUrlIndexDir = 'nozomiurlindex';
   final String keyword;
+  final HitomiSearchSort sort;
 
   HitomiSearch(this.keyword,
-      {Dio? client, Future<Directory> Function()? cacheDirectoryProvider})
+      {this.sort = HitomiSearchSort.dateAdded,
+      Dio? client,
+      Future<Directory> Function()? cacheDirectoryProvider})
       : dio = client ?? logDio(),
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getApplicationCacheDirectory;
@@ -49,6 +53,9 @@ class HitomiSearch {
         positiveTerms.add(term);
       }
     }
+    final language = languageTerms.length == 1
+        ? languageTerms.single.substring('language:'.length)
+        : 'all';
 
     if (negativeTerms.isEmpty &&
         languageTerms.length == 1 &&
@@ -56,7 +63,7 @@ class HitomiSearch {
         positiveTerms[0].contains(':')) {
       results = await getGalleryIdsForTermAndLanguage(
           positiveTerms[0], languageTerms[0].split(":")[1]);
-      return Res(results);
+      return Res(await _orderResults(language));
     }
     positiveTerms += languageTerms;
 
@@ -109,7 +116,22 @@ class HitomiSearch {
       newRes.addAll(results.skip(p2));
       results = newRes;
     }
-    return Res(results);
+    return Res(await _orderResults(language));
+  }
+
+  Future<List<int>> _orderResults(String language) async {
+    if (sort == HitomiSearchSort.dateAdded || results.isEmpty) return results;
+    if (sort == HitomiSearchSort.random) {
+      return results = List<int>.of(results)..shuffle();
+    }
+    final ranked = await getGalleryIdsFromNozomi(
+        sort == HitomiSearchSort.published ? 'date' : 'popular',
+        sort.name,
+        language);
+    // The query intersection above requires descending IDs. Apply ranking only
+    // after filtering, preserving the server's order and excluding duplicates.
+    final matches = results.toSet();
+    return results = ranked.where(matches.remove).toList();
   }
 
   Future<void> getTagIndexVersion() async {

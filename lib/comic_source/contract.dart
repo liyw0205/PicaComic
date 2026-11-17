@@ -87,7 +87,8 @@ class ComicSourceContract {
     }
     if (source.searchPageData != null &&
         source.searchPageData!.loadPage == null &&
-        source.searchPageData!.overrideSearchResultBuilder == null) {
+        source.searchPageData!.overrideSearchResultBuilder == null &&
+        source.searchPageData!.customResultsBuilder == null) {
       violations.add(const ComicSourceContractViolation(
           'missing-search-loader', 'search metadata has no page loader'));
     }
