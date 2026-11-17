@@ -114,6 +114,16 @@ class _SharedSyncRemote {
     if (etags) _etag = '${++_etagVersion}';
     return true;
   }
+
+  void publishExternalRevision(SyncRevision revision, List<int> bytes) {
+    archives[revision.archiveName] = bytes;
+    metadata[revision.descriptorName] = encodeSyncRevision(revision);
+    metadata['sync-head.json'] = jsonEncode({
+      'protocol': 2,
+      'heads': [revision.id]
+    });
+    if (etags) _etag = '${++_etagVersion}';
+  }
 }
 
 class _SharedSyncTransport implements SyncTransport {
@@ -403,6 +413,48 @@ void main() {
       expect(Webdav.lastResult.status, SyncStatus.conflict);
       expect(remote.archives, hasLength(2));
       expect(remote.casResults, [true, false]);
+    } finally {
+      appdata.settings[46] = previousVersion;
+      Webdav.transportFactory = previousFactory;
+    }
+  });
+
+  test('remote client publishing after snapshot remains a visible branch',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    final remote = _SharedSyncRemote(etags: true);
+    final externalBytes = utf8.encode('client-b-snapshot');
+    final external = SyncRevision(
+      id: 'client-b-race',
+      device: 'device-b',
+      parents: const [],
+      sha256: sha256.convert(externalBytes).toString(),
+    );
+    remote.beforeCompareAndSet = () {
+      remote.beforeCompareAndSet = null;
+      remote.publishExternalRevision(external, externalBytes);
+    };
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+
+      expect(await Webdav.uploadData('https://dav.example;;;interleaved-a'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.conflict);
+      final visibleHeads =
+          Webdav.lastResult.heads.map((head) => head.id).toSet();
+      expect(visibleHeads, hasLength(2));
+      expect(visibleHeads, contains(external.id));
+      expect(remote.archives, hasLength(2));
+      expect(
+          remote.metadata.keys
+              .where((name) =>
+                  name.startsWith('revision-') && name.endsWith('.json'))
+              .length,
+          2);
+      expect(remote.casResults, [false]);
+      expect(jsonDecode(remote.metadata['sync-head.json']!)['heads'],
+          [external.id]);
     } finally {
       appdata.settings[46] = previousVersion;
       Webdav.transportFactory = previousFactory;
