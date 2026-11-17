@@ -419,47 +419,55 @@ void main() {
     }
   });
 
-  test('remote client publishing after snapshot remains a visible branch',
-      () async {
-    final previousFactory = Webdav.transportFactory;
-    final previousVersion = appdata.settings[46];
-    final remote = _SharedSyncRemote(etags: true);
-    final externalBytes = utf8.encode('client-b-snapshot');
-    final external = SyncRevision(
-      id: 'client-b-race',
-      device: 'device-b',
-      parents: const [],
-      sha256: sha256.convert(externalBytes).toString(),
-    );
-    remote.beforeCompareAndSet = () {
-      remote.beforeCompareAndSet = null;
-      remote.publishExternalRevision(external, externalBytes);
-    };
-    try {
-      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+  for (final etags in [true, false]) {
+    test(
+        'remote client publishing after snapshot remains visible '
+        '${etags ? 'with' : 'without'} ETag', () async {
+      final previousFactory = Webdav.transportFactory;
+      final previousVersion = appdata.settings[46];
+      final remote = _SharedSyncRemote(etags: etags);
+      final externalBytes = utf8.encode('client-b-snapshot');
+      final external = SyncRevision(
+        id: 'client-b-race',
+        device: 'device-b',
+        parents: const [],
+        sha256: sha256.convert(externalBytes).toString(),
+      );
+      remote.beforeCompareAndSet = () {
+        remote.beforeCompareAndSet = null;
+        remote.publishExternalRevision(external, externalBytes);
+      };
+      try {
+        Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+        final config = etags
+            ? 'https://dav.example;;;interleaved-etag-a'
+            : 'https://dav.example;;;interleaved-no-etag-a';
 
-      expect(await Webdav.uploadData('https://dav.example;;;interleaved-a'),
-          isTrue);
-      expect(Webdav.lastResult.status, SyncStatus.conflict);
-      final visibleHeads =
-          Webdav.lastResult.heads.map((head) => head.id).toSet();
-      expect(visibleHeads, hasLength(2));
-      expect(visibleHeads, contains(external.id));
-      expect(remote.archives, hasLength(2));
-      expect(
-          remote.metadata.keys
-              .where((name) =>
-                  name.startsWith('revision-') && name.endsWith('.json'))
-              .length,
-          2);
-      expect(remote.casResults, [false]);
-      expect(jsonDecode(remote.metadata['sync-head.json']!)['heads'],
-          [external.id]);
-    } finally {
-      appdata.settings[46] = previousVersion;
-      Webdav.transportFactory = previousFactory;
-    }
-  });
+        expect(await Webdav.uploadData(config), isTrue);
+        expect(Webdav.lastResult.status, SyncStatus.conflict);
+        final visibleHeads =
+            Webdav.lastResult.heads.map((head) => head.id).toSet();
+        expect(visibleHeads, hasLength(2));
+        expect(visibleHeads, contains(external.id));
+        expect(remote.archives, hasLength(2));
+        expect(
+            remote.metadata.keys
+                .where((name) =>
+                    name.startsWith('revision-') && name.endsWith('.json'))
+                .length,
+            2);
+        expect(remote.casResults, [!etags]);
+        final pointerHeads =
+            (jsonDecode(remote.metadata['sync-head.json']!)['heads'] as List)
+                .cast<String>();
+        expect(pointerHeads, hasLength(1));
+        expect(visibleHeads, contains(pointerHeads.single));
+      } finally {
+        appdata.settings[46] = previousVersion;
+        Webdav.transportFactory = previousFactory;
+      }
+    });
+  }
 
   test('without ETag, graph reread still reports concurrent client branches',
       () async {
