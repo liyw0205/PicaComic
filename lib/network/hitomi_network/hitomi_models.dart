@@ -150,24 +150,43 @@ class HitomiComic with HistoryMixin {
         "name": name,
         "type": type,
         "artists": artists,
+        "related": related,
         "lang": lang,
+        "parodys": parodys?.map(_tagToMap).toList() ?? [],
+        "characters": characters?.map(_tagToMap).toList() ?? [],
+        "tags": tags.map(_tagToMap).toList(),
         "time": time,
         "files": List<Map<String, dynamic>>.generate(
-            files.length, (index) => files[index].toMap())
+            files.length, (index) => files[index].toMap()),
+        "group": group,
       };
+
+  static Map<String, dynamic> _tagToMap(Tag tag) =>
+      {"name": tag.name, "link": tag.link};
+
+  static List<Tag> _tagsFromMap(dynamic value) => value is List
+      ? value
+          .whereType<Map>()
+          .map((tag) => Tag(tag["name"].toString(), tag["link"].toString()))
+          .toList()
+      : [];
 
   HitomiComic.fromMap(Map<String, dynamic> map)
       : id = map["id"],
         name = map["name"],
         type = map["type"],
-        artists = List<String>.from(map["artists"]),
+        artists = map["artists"] == null
+            ? <String>[]
+            : List<String>.from(map["artists"]),
         lang = map["lang"],
         time = map["time"],
-        parodys = [],
-        characters = [],
-        tags = [],
-        related = [],
-        group = [],
+        parodys = _tagsFromMap(map["parodys"]),
+        characters = _tagsFromMap(map["characters"]),
+        tags = _tagsFromMap(map["tags"]),
+        related =
+            map["related"] == null ? <int>[] : List<int>.from(map["related"]),
+        group =
+            map["group"] == null ? <String>[] : List<String>.from(map["group"]),
         cover = '',
         files = List.generate(map["files"].length,
             (index) => HitomiFile.fromMap(map["files"][index]));

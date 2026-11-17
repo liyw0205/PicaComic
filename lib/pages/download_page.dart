@@ -23,6 +23,8 @@ import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/tools/pdf.dart';
+import 'package:pica_comic/tools/cbz.dart';
+import 'package:pica_comic/tools/cbz_export.dart';
 import 'package:pica_comic/tools/tags_translation.dart';
 import 'package:pica_comic/pages/downloading_page.dart';
 import 'package:pica_comic/pages/ehentai/eh_gallery_page.dart';
@@ -409,6 +411,39 @@ class DownloadPage extends StatelessWidget {
     }
   }
 
+  Future<void> exportAsCbz(
+      DownloadedItem? comic, DownloadPageLogic logic) async {
+    final comics = comic != null
+        ? [comic]
+        : [
+            for (var index = 0; index < logic.selected.length; index++)
+              if (logic.selected[index]) logic.comics[index],
+          ];
+    if (comics.isEmpty) {
+      showToast(message: "请选择一个漫画".tl);
+      return;
+    }
+    final cancellation = CbzExportCancellation();
+    final controller = showLoadingDialog(
+      App.globalContext!,
+      onCancel: cancellation.cancel,
+      barrierDismissible: false,
+      allowCancel: true,
+      message: 'CBZ',
+    );
+    try {
+      await exportCbzComics(comics, cancellation: cancellation);
+    } on CbzExportException catch (error) {
+      showToast(message: error.saved == 0
+          ? "导出失败".tl
+          : "已导出@count本，剩余导出失败".tlParams({'count': '${error.saved}'}));
+    } catch (_) {
+      showToast(message: "导出失败".tl);
+    } finally {
+      controller.close();
+    }
+  }
+
   Widget buildItem(BuildContext context, DownloadPageLogic logic, int index) {
     bool selected = logic.selected[index];
     var type = logic.comics[index].type.name;
@@ -531,6 +566,11 @@ class DownloadPage extends StatelessWidget {
                 text: "导出为pdf".tl,
                 onClick: () =>
                     unawaited(exportAsPdf(logic.comics[index], logic)),
+              ),
+              DesktopMenuEntry(
+                text: "导出为CBZ".tl,
+                onClick: () =>
+                    unawaited(exportAsCbz(logic.comics[index], logic)),
               ),
               DesktopMenuEntry(
                 text: "查看漫画详情".tl,
@@ -770,6 +810,10 @@ class DownloadPage extends StatelessWidget {
                     PopupMenuItem(
                       child: Text("导出为pdf".tl),
                       onTap: () => unawaited(exportAsPdf(null, logic)),
+                    ),
+                    PopupMenuItem(
+                      child: Text("导出为CBZ".tl),
+                      onTap: () => unawaited(exportAsCbz(null, logic)),
                     ),
                     PopupMenuItem(
                       child: Text("查看漫画详情".tl),

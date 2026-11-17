@@ -150,7 +150,7 @@ void main() {
     for (var frame = 0; frame < 8; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    logic.jumpToPage(11);
+    logic.scrollController.jumpTo(5040);
     for (var frame = 0; frame < 12; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
       expect(logic.index, 11);

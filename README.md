@@ -49,6 +49,7 @@ Remote JavaScript sources are loaded from the companion
 - Local and source-backed favorites
 - WebDAV data synchronization
 - Archive export and local library management
+- CBZ export with ComicInfo metadata, original pages, and chapter bookmarks
 
 ## Build
 
