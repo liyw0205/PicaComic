@@ -555,7 +555,8 @@ class ComicInfoData with HistoryMixin {
         cover = json["cover"],
         description = json["description"],
         tags = _generateMap(json["tags"]),
-        chapters = Map<String, String>.from(json["chapters"]),
+        chapters = (json["chapters"] as Map?)
+            ?.map((key, value) => MapEntry(key.toString(), value.toString())),
         sourceKey = json["sourceKey"],
         comicId = json["comicId"],
         thumbnails = null,

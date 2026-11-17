@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:collection';
 import 'dart:math' as math;
 
@@ -14,6 +15,7 @@ import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
 import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
+import 'package:pica_comic/network/custom_download_model.dart';
 
 class _LastRandom implements math.Random {
   final List<int> bounds = [];
@@ -334,6 +336,38 @@ void main() {
     final downloading =
         DownloadingHtComic(series, null, null, null, 'Ht405320');
     expect(downloading.haveEps, isTrue);
+
+    const singleEpisode = ComicInfoData(
+      'single episode',
+      null,
+      'https://fixture.test/cover.jpg',
+      null,
+      <String, List<String>>{},
+      null,
+      null,
+      null,
+      1,
+      null,
+      'fixture_source',
+      'single-episode',
+    );
+    final restoredSingleEpisode =
+        ComicInfoData.fromJson(jsonDecode(jsonEncode(singleEpisode.toJson())));
+    expect(restoredSingleEpisode.chapters, isNull);
+    final legacyDownloaded = CustomDownloadedItem.fromJson({
+      'comicSize': null,
+      'downloadedEps': <int>[0],
+      'chapters': null,
+      'id': 'Other-single-episode',
+      'name': 'single episode',
+      'subTitle': '',
+      'tags': <String>[],
+      'sourceKey': 'fixture_source',
+      'sourceName': 'Fixture source',
+      'cover': 'https://fixture.test/cover.jpg',
+      'comicId': 'single-episode',
+    });
+    expect(legacyDownloaded.chapters, isNull);
 
     expect(
       HtmangaNetwork.parseImageList(

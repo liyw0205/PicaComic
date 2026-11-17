@@ -74,7 +74,8 @@ class CustomDownloadedItem extends DownloadedItem {
   CustomDownloadedItem.fromJson(Map<String, dynamic> json)
       : comicSize = json["comicSize"],
         downloadedEps = List<int>.from(json["downloadedEps"]),
-        chapters = Map<String, String>.from(json["chapters"]),
+        chapters = (json["chapters"] as Map?)
+            ?.map((key, value) => MapEntry(key.toString(), value.toString())),
         id = json["id"],
         name = json["name"],
         subTitle = json["subTitle"],
