@@ -520,11 +520,16 @@ void main() {
     ''';
     final subscription = server.listen((request) async {
       paths.add(request.uri.path);
-      request.response.statusCode = HttpStatus.ok;
+      final missingFirstPage = request.uri.path.contains('405321') &&
+          request.uri.path.contains('page-1');
+      request.response.statusCode =
+          missingFirstPage ? HttpStatus.notFound : HttpStatus.ok;
       request.response.headers.contentType = ContentType.html;
-      request.response.write(request.uri.path.contains('page-1')
-          ? '<div>fixture error</div>'
-          : detailHtml);
+      request.response.write(missingFirstPage
+          ? '<div>fixture missing</div>'
+          : request.uri.path.contains('page-1')
+              ? '<div>fixture error</div>'
+              : detailHtml);
       await request.response.close();
     });
     addTearDown(() async {
@@ -556,6 +561,18 @@ void main() {
       '/photos-index-page-1-aid-405320.html',
       '/photos-index-aid-405320.html',
       '/photos-index-page-2-aid-405320.html',
+    ]);
+
+    final missingFirstPage = await HtmangaNetwork().getThumbnails('405321', 1);
+    expect(missingFirstPage.error, isFalse,
+        reason: missingFirstPage.errorMessage);
+    expect(missingFirstPage.data, ['http://fixture.test/thumb.jpg']);
+    expect(paths, [
+      '/photos-index-page-1-aid-405320.html',
+      '/photos-index-aid-405320.html',
+      '/photos-index-page-2-aid-405320.html',
+      '/photos-index-page-1-aid-405321.html',
+      '/photos-index-aid-405321.html',
     ]);
   });
 
