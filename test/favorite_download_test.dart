@@ -166,6 +166,19 @@ void main() {
         tags: const [],
       );
 
+  test('WNACG favorites resolve the persisted download id', () {
+    final favorite = FavoriteItem(
+      target: '405320',
+      name: 'Fixture WNACG comic',
+      coverPath: '',
+      author: '',
+      type: FavoriteType.htManga,
+      tags: const [],
+    );
+
+    expect(favorite.toDownloadId(), 'Ht405320');
+  });
+
   FavoriteDownloading createFavorite(Future<DownloadingItem> Function() load,
       {String? directory = 'fixture', Future<void> Function()? updateInfo}) {
     final favorite = createFavoriteItem();

@@ -115,7 +115,9 @@ class FavoriteItem {
         ComicType.hitomi => RegExp(r"\d+(?=\.html)").hasMatch(target)
             ? "hitomi${RegExp(r"\d+(?=\.html)").firstMatch(target)?[0]}"
             : target,
-        ComicType.htManga => "ht$target",
+        // WNACG download records use the same capitalized prefix as
+        // DownloadManager.addHtDownload and DownloadedHtComic.id.
+        ComicType.htManga => "Ht$target",
         ComicType.nhentai => "nhentai$target",
         _ => DownloadManager().generateId(type.comicSource.key, target)
       };
