@@ -266,6 +266,13 @@ void main() {
           base: 'https://www.wnacg.com'),
       'https://img.fixture.test/cover.jpg',
     );
+    expect(
+      HtmangaNetwork.detailUrls('405320', base: 'https://www.wnacg.com/'),
+      [
+        'https://www.wnacg.com/photos-index-page-1-aid-405320.html',
+        'https://www.wnacg.com/photos-index-aid-405320.html',
+      ],
+    );
     for (final info in [
       '2026-01-01, 12頁',
       '12页，2026-01-01',

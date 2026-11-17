@@ -26,6 +26,15 @@ class HtmangaNetwork {
 
   static String get baseUrl => appdata.settings[31];
 
+  /// WNACG has served both the paged and unpaged detail URL forms.
+  static List<String> detailUrls(String id, {String? base}) {
+    final root = (base ?? baseUrl).replaceFirst(RegExp(r'/$'), '');
+    return [
+      '$root/photos-index-page-1-aid-$id.html',
+      '$root/photos-index-aid-$id.html',
+    ];
+  }
+
   /// Resolve image and link attributes from both protocol-relative and
   /// absolute URLs. The site mixes all three forms across its pages.
   static String resolveUrl(String raw, {String? base}) {
@@ -344,10 +353,18 @@ class HtmangaNetwork {
 
   /// 获取漫画详情, subData为第一页的缩略图
   Future<Res<HtComicInfo>> getComicInfo(String id) async {
-    var res =
-        await get("$baseUrl/photos-index-page-1-aid-$id.html", cache: false);
-    if (res.error) {
-      return Res(null, errorMessage: res.errorMessage);
+    Res<String>? res;
+    String? lastError;
+    for (final url in detailUrls(id)) {
+      final candidate = await get(url, cache: false);
+      if (!candidate.error) {
+        res = candidate;
+        break;
+      }
+      lastError = candidate.errorMessage;
+    }
+    if (res == null) {
+      return Res(null, errorMessage: lastError);
     }
     try {
       var document = parse(res.data);
