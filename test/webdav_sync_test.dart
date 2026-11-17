@@ -124,6 +124,10 @@ class _SharedSyncRemote {
     });
     if (etags) _etag = '${++_etagVersion}';
   }
+
+  void publishLegacyArchive(int version, List<int> bytes) {
+    archives['$version.picadata'] = bytes;
+  }
 }
 
 class _SharedSyncTransport implements SyncTransport {
@@ -468,6 +472,37 @@ void main() {
       }
     });
   }
+
+  test('legacy client archive racing a v2 upload remains a visible head',
+      () async {
+    final previousFactory = Webdav.transportFactory;
+    final previousVersion = appdata.settings[46];
+    final remote = _SharedSyncRemote(etags: false);
+    const legacyVersion = 1700000000;
+    remote.beforeCompareAndSet = () {
+      remote.beforeCompareAndSet = null;
+      remote.publishLegacyArchive(
+          legacyVersion, utf8.encode('legacy-client-snapshot'));
+    };
+    try {
+      Webdav.transportFactory = (_) => _SharedSyncTransport(remote);
+
+      expect(
+          await Webdav.uploadData(
+              'https://dav.example;;;interleaved-legacy-client'),
+          isTrue);
+      expect(Webdav.lastResult.status, SyncStatus.conflict);
+      final visibleHeads =
+          Webdav.lastResult.heads.map((head) => head.id).toSet();
+      expect(visibleHeads, hasLength(2));
+      expect(visibleHeads, contains('legacy-$legacyVersion'));
+      expect(remote.archives, hasLength(2));
+      expect(remote.archives, contains('$legacyVersion.picadata'));
+    } finally {
+      appdata.settings[46] = previousVersion;
+      Webdav.transportFactory = previousFactory;
+    }
+  });
 
   test('without ETag, graph reread still reports concurrent client branches',
       () async {
