@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:collection';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/comic_source/contract.dart';
+import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
@@ -16,6 +18,7 @@ import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
 import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
 import 'package:pica_comic/network/custom_download_model.dart';
+import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 
 class _LastRandom implements math.Random {
@@ -434,6 +437,69 @@ void main() {
       '简介：样本内容',
     );
     expect(HtmangaNetwork.firstNonEmptyText(const []), '');
+  });
+
+  test('WNACG detail fallback retries a 200 non-detail page', () async {
+    final oldSettings = List<String>.from(appdata.settings);
+    final oldOverrides = HttpOverrides.current;
+    final oldProxyOverrides = proxyHttpOverrides;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final paths = <String>[];
+    final detailHtml = '''
+      <div class="userwrap">
+        <h2>Fixture detail</h2>
+        <div class="asTB">
+          <div class="asTBcell uwthumb">
+            <img src="http://fixture.test/cover.jpg">
+          </div>
+        </div>
+        <div class="asTBcell uwconn">
+          <label>分类：单行本</label>
+          <label>页数：2页</label>
+          <p>fixture description</p>
+        </div>
+        <div class="asTBcell uwuinfo">
+          <a><p>fixture uploader</p>
+            <img src="http://fixture.test/avatar.jpg">
+          </a>
+          <p><font>7</font></p>
+        </div>
+        <div class="pic_box tb">
+          <a><img src="http://fixture.test/thumb.jpg"></a>
+        </div>
+      </div>
+    ''';
+    final subscription = server.listen((request) async {
+      paths.add(request.uri.path);
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentType = ContentType.html;
+      request.response.write(request.uri.path.contains('page-1')
+          ? '<div>fixture error</div>'
+          : detailHtml);
+      await request.response.close();
+    });
+    addTearDown(() async {
+      await subscription.cancel();
+      await server.close(force: true);
+      appdata.settings = oldSettings;
+      proxyHttpOverrides = oldProxyOverrides;
+      HttpOverrides.global = oldOverrides;
+    });
+
+    appdata.settings[31] = 'http://127.0.0.1:${server.port}';
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    proxyHttpOverrides = null;
+
+    final result = await HtmangaNetwork().getComicInfo('405320');
+    expect(result.error, isFalse, reason: result.errorMessage);
+    expect(paths, [
+      '/photos-index-page-1-aid-405320.html',
+      '/photos-index-aid-405320.html',
+    ]);
+    expect(result.data.title, 'Fixture detail');
+    expect(result.data.pages, 2);
+    expect(result.data.cover, 'http://fixture.test/cover.jpg');
   });
 
   test('built-in source definitions are valid without opening the network', () {
