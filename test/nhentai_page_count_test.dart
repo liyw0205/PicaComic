@@ -273,6 +273,35 @@ void main() {
     expect(comic.tags, containsAll(['full color', 'glasses']));
   });
 
+  test('malformed embedded blocks do not erase legacy gallery tags', () {
+    final document = html.parse(
+      '<script data-sveltekit-fetched>not-json</script>'
+      '<script data-sveltekit-fetched>${jsonEncode({
+            'body': jsonEncode({
+              'result': [
+                {
+                  'id': '42',
+                  'tag_ids': [29963, '8378', null, {}, 1.5],
+                },
+                {'id': 43, 'tag_ids': null},
+              ],
+            }),
+          })}</script>'
+      '<div class="gallery" data-tags="20905 8378 999999999">'
+      '<a href="/g/42/"><img src="thumb.jpg"></a>'
+      '<div class="caption">Fixture</div>'
+      '</div>',
+    );
+    final comic = NhentaiNetwork().parseComic(
+      document.querySelector('.gallery')!,
+      nhentaiTagIdsFromFetchedData(document),
+    );
+
+    expect(comic.lang, '中文');
+    expect(comic.tags.where((tag) => tag == 'glasses'), hasLength(1));
+    expect(comic.tags.where((tag) => tag == 'full color'), hasLength(1));
+  });
+
   test('API gallery page count is separate from listing pagination', () async {
     final network = NhentaiNetwork();
     final savedCookieJar = network.cookieJar;
