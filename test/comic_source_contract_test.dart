@@ -16,6 +16,7 @@ import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
 import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
 import 'package:pica_comic/network/custom_download_model.dart';
+import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 
 class _LastRandom implements math.Random {
   final List<int> bounds = [];
@@ -351,6 +352,7 @@ void main() {
       'fixture_source',
       'single-episode',
     );
+    expect(singleEpisode.toJson()['chapters'], isNull);
     final restoredSingleEpisode =
         ComicInfoData.fromJson(jsonDecode(jsonEncode(singleEpisode.toJson())));
     expect(restoredSingleEpisode.chapters, isNull);
@@ -363,6 +365,7 @@ void main() {
       ..['chapters'] = <String, String>{};
     final restoredEmptySeries = HtComicInfo.fromJson(emptySeriesJson);
     expect(restoredEmptySeries.chapters, isNull);
+    expect(restoredEmptySeries.toJson()['chapters'], isNull);
     final emptyDownloaded = DownloadedHtComic(restoredEmptySeries, 1);
     expect(emptyDownloaded.eps, ['EP 1']);
     expect(emptyDownloaded.downloadedEps, [0]);
@@ -404,6 +407,11 @@ void main() {
       'single-episode',
     );
     expect(emptyDownloadedItem.chapters, isNull);
+    final emptyReading =
+        CustomReadingData('single-episode', 'single episode', null, {});
+    expect(emptyReading.hasEp, isFalse);
+    expect(emptyReading.buildImageKey(1, 0, 'page.jpg'),
+        'single-episodesingle-episodepage.jpg');
 
     expect(
       HtmangaNetwork.parseImageList(
