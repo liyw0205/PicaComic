@@ -429,6 +429,13 @@ class HtmangaNetwork {
 
   Future<Res<List<String>>> getThumbnails(String id, int page) async {
     var res = await get("$baseUrl/photos-index-page-$page-aid-$id.html");
+    if (page == 1 && (res.error || !isDetailPage(res.data))) {
+      final fallback = await get("$baseUrl/photos-index-aid-$id.html");
+      if (fallback.error) {
+        return Res(null, errorMessage: fallback.errorMessage);
+      }
+      res = fallback;
+    }
     if (res.error) {
       return Res(null, errorMessage: res.errorMessage);
     }

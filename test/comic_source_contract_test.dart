@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/comic_source/contract.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
@@ -499,6 +500,62 @@ void main() {
     expect(result.data.title, 'Fixture detail');
     expect(result.data.pages, 2);
     expect(result.data.cover, 'http://fixture.test/cover.jpg');
+  });
+
+  test('WNACG thumbnails fallback retries an unpaged first page', () async {
+    final oldSettings = List<String>.from(appdata.settings);
+    final oldOverrides = HttpOverrides.current;
+    final oldProxyOverrides = proxyHttpOverrides;
+    final appRoot = await Directory.systemTemp.createTemp('pica-htmanga-');
+    App.cachePath = appRoot.path;
+    App.dataPath = appRoot.path;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final paths = <String>[];
+    const detailHtml = '''
+      <div class="userwrap"><h2>Fixture detail</h2></div>
+      <div class="pic_box tb">
+        <a><img src="http://fixture.test/thumb.jpg"></a>
+      </div>
+    ''';
+    final subscription = server.listen((request) async {
+      paths.add(request.uri.path);
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentType = ContentType.html;
+      request.response.write(request.uri.path.contains('page-1')
+          ? '<div>fixture error</div>'
+          : detailHtml);
+      await request.response.close();
+    });
+    addTearDown(() async {
+      await subscription.cancel();
+      await server.close(force: true);
+      appdata.settings = oldSettings;
+      proxyHttpOverrides = oldProxyOverrides;
+      HttpOverrides.global = oldOverrides;
+      await appRoot.delete(recursive: true);
+    });
+
+    appdata.settings[31] = 'http://127.0.0.1:${server.port}';
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    proxyHttpOverrides = null;
+
+    final result = await HtmangaNetwork().getThumbnails('405320', 1);
+    expect(result.error, isFalse, reason: result.errorMessage);
+    expect(paths, [
+      '/photos-index-page-1-aid-405320.html',
+      '/photos-index-aid-405320.html',
+    ]);
+    expect(result.data, ['http://fixture.test/thumb.jpg']);
+
+    final pageTwo = await HtmangaNetwork().getThumbnails('405320', 2);
+    expect(pageTwo.error, isFalse, reason: pageTwo.errorMessage);
+    expect(pageTwo.data, ['http://fixture.test/thumb.jpg']);
+    expect(paths, [
+      '/photos-index-page-1-aid-405320.html',
+      '/photos-index-aid-405320.html',
+      '/photos-index-page-2-aid-405320.html',
+    ]);
   });
 
   test('built-in source definitions are valid without opening the network', () {
