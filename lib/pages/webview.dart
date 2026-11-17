@@ -69,6 +69,7 @@ class AppWebview extends StatefulWidget {
       this.onStarted,
       this.onCookieLogin,
       this.onExtractCookie,
+      this.onClose,
       super.key});
 
   final String initialUrl;
@@ -85,6 +86,8 @@ class AppWebview extends StatefulWidget {
 
   final void Function(BuildContext context, InAppWebViewController controller)?
       onExtractCookie;
+
+  final void Function()? onClose;
 
   final bool singlePage;
 
@@ -150,6 +153,7 @@ class _AppWebviewState extends State<AppWebview> with WidgetsBindingObserver {
   void dispose() {
     _proxyRefreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    widget.onClose?.call();
     super.dispose();
   }
 
