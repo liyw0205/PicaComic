@@ -176,6 +176,179 @@ class _SharedSyncTransport implements SyncTransport {
   }
 }
 
+class _ObservedWebdavRequest {
+  const _ObservedWebdavRequest(this.method, this.path,
+      {this.ifMatch, this.ifNoneMatch});
+
+  final String method;
+  final String path;
+  final String? ifMatch;
+  final String? ifNoneMatch;
+}
+
+class _LoopbackWebdav {
+  _LoopbackWebdav._(this.server, this.directory, this.includeEtags);
+
+  static Future<_LoopbackWebdav> start(
+      {required String directory, required bool includeEtags}) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final fixture = _LoopbackWebdav._(server, directory, includeEtags);
+    fixture._subscription = server.listen(fixture._handle);
+    return fixture;
+  }
+
+  final HttpServer server;
+  final String directory;
+  final bool includeEtags;
+  final Map<String, List<int>> objects = <String, List<int>>{};
+  final Map<String, String> _etags = <String, String>{};
+  final List<_ObservedWebdavRequest> requests = <_ObservedWebdavRequest>[];
+  final List<Object> errors = <Object>[];
+  late StreamSubscription<HttpRequest> _subscription;
+  int _etagCounter = 0;
+
+  String get baseUrl => 'http://${server.address.address}:${server.port}';
+
+  Future<void> close() async {
+    await _subscription.cancel();
+    await server.close(force: true);
+  }
+
+  Future<void> _handle(HttpRequest request) async {
+    requests.add(_ObservedWebdavRequest(request.method, request.uri.path,
+        ifMatch: request.headers.value('if-match'),
+        ifNoneMatch: request.headers.value('if-none-match')));
+    try {
+      switch (request.method) {
+        case 'OPTIONS':
+          await _respond(request, HttpStatus.ok,
+              headers: const {'allow': 'OPTIONS, GET, PUT, PROPFIND, MKCOL'});
+          break;
+        case 'MKCOL':
+          await request.drain<void>();
+          await _respond(request, HttpStatus.methodNotAllowed);
+          break;
+        case 'PROPFIND':
+          await request.drain<void>();
+          await _propfind(request);
+          break;
+        case 'GET':
+          await _get(request);
+          break;
+        case 'PUT':
+          await _put(request);
+          break;
+        default:
+          await request.drain<void>();
+          await _respond(request, HttpStatus.methodNotAllowed);
+          break;
+      }
+    } catch (error) {
+      errors.add(error);
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        await request.response.close();
+      } catch (_) {
+        // The response may already be closed if the failure happened late.
+      }
+    }
+  }
+
+  Future<void> _get(HttpRequest request) async {
+    final bytes = objects[request.uri.path];
+    if (bytes == null) {
+      await _respond(request, HttpStatus.notFound);
+      return;
+    }
+    final isJson = request.uri.path.endsWith('.json');
+    await _respond(request, HttpStatus.ok,
+        body: bytes,
+        contentType: isJson
+            ? ContentType('application', 'json', charset: 'utf-8')
+            : ContentType('application', 'octet-stream'),
+        headers: {
+          if (includeEtags && _etags[request.uri.path] != null)
+            'etag': _etags[request.uri.path]!,
+        });
+  }
+
+  Future<void> _put(HttpRequest request) async {
+    final path = request.uri.path;
+    final body = await request.fold<List<int>>(<int>[], (bytes, chunk) {
+      bytes.addAll(chunk);
+      return bytes;
+    });
+    if (path.endsWith('/sync-head.json')) {
+      final ifNoneMatch = request.headers.value('if-none-match');
+      final ifMatch = request.headers.value('if-match');
+      if ((ifNoneMatch == '*' && objects.containsKey(path)) ||
+          (ifMatch != null && _etags[path] != ifMatch)) {
+        await _respond(request, HttpStatus.preconditionFailed);
+        return;
+      }
+    }
+    objects[path] = body;
+    if (path.endsWith('/sync-head.json') && includeEtags) {
+      _etags[path] = '"${++_etagCounter}"';
+    }
+    await _respond(request, HttpStatus.created, headers: {
+      if (includeEtags && _etags[path] != null) 'etag': _etags[path]!,
+    });
+  }
+
+  Future<void> _propfind(HttpRequest request) async {
+    final prefix = '$directory/';
+    final entries = <StringBuffer>[
+      _entry('$directory/', collection: true, length: 0),
+    ];
+    for (final path in objects.keys) {
+      if (!path.startsWith(prefix)) continue;
+      final name = path.substring(prefix.length);
+      if (name.isEmpty || name.contains('/')) continue;
+      entries.add(_entry(path,
+          collection: false,
+          length: objects[path]!.length,
+          etag: includeEtags ? _etags[path] : null));
+    }
+    final xml = '<d:multistatus xmlns:d="DAV:">'
+        '${entries.map((entry) => entry.toString()).join()}'
+        '</d:multistatus>';
+    await _respond(request, 207,
+        body: utf8.encode(xml),
+        contentType: ContentType('application', 'xml', charset: 'utf-8'));
+  }
+
+  StringBuffer _entry(String href,
+      {required bool collection, required int length, String? etag}) {
+    return StringBuffer()
+      ..write('<d:response><d:href>$href</d:href><d:propstat><d:prop>')
+      ..write(
+          '<d:displayname>${Uri.decodeComponent(href.split('/').last)}</d:displayname>')
+      ..write(collection
+          ? '<d:resourcetype><d:collection/></d:resourcetype>'
+          : '<d:resourcetype/>')
+      ..write('<d:getcontentlength>$length</d:getcontentlength>')
+      ..write('<d:getcontenttype>application/octet-stream</d:getcontenttype>')
+      ..write(etag == null ? '' : '<d:getetag>$etag</d:getetag>')
+      ..write(
+          '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>');
+  }
+
+  Future<void> _respond(HttpRequest request, int status,
+      {List<int> body = const <int>[],
+      ContentType? contentType,
+      Map<String, String> headers = const <String, String>{}}) async {
+    final response = request.response..statusCode = status;
+    if (contentType != null) response.headers.contentType = contentType;
+    for (final entry in headers.entries) {
+      response.headers.set(entry.key, entry.value);
+    }
+    response.contentLength = body.length;
+    if (body.isNotEmpty) response.add(body);
+    await response.close();
+  }
+}
+
 Future<T> _withHttpServer<T>(FutureOr<void> Function(HttpRequest) handler,
     Future<T> Function(String baseUrl) action) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -595,6 +768,88 @@ void main() {
     addTearDown(transport.close);
 
     expect(transport.directory, '/pica/backups/');
+  });
+
+  test('production transport round-trips sync objects and enforces ETag CAS',
+      () async {
+    final fixture =
+        await _LoopbackWebdav.start(directory: '/pica', includeEtags: true);
+    final transport = WebdavSyncTransport([fixture.baseUrl, '', '', '/pica']);
+    final archiveBytes = List<int>.generate(257, (index) => (index * 37) % 256);
+    final archive = File('${root.path}/loopback-revision.picadata');
+    final downloaded = File('${root.path}/loopback-downloaded.picadata');
+    final revision = SyncRevision(
+      id: 'loopback-revision',
+      device: 'loopback-device',
+      parents: const <String>[],
+      sha256: sha256.convert(archiveBytes).toString(),
+    );
+
+    try {
+      await archive.writeAsBytes(archiveBytes);
+      expect(await transport.list(), isEmpty);
+
+      final descriptor = encodeSyncRevision(revision);
+      await transport.writeText(revision.descriptorName, descriptor);
+      expect(await transport.readText(revision.descriptorName), descriptor);
+
+      await transport.upload(archive.path, revision.archiveName);
+      await transport.download(revision.archiveName, downloaded.path);
+      final downloadedBytes = await downloaded.readAsBytes();
+      expect(downloadedBytes, archiveBytes);
+      expect(sha256.convert(downloadedBytes).toString(), revision.sha256);
+
+      final absentPointer = await transport.pointer();
+      expect(absentPointer.etag, '*');
+      expect(absentPointer.known, isTrue);
+      expect(
+          await transport.compareAndSetPointer(
+              absentPointer, '{"protocol":2,"heads":["loopback-revision"]}'),
+          isTrue);
+
+      final currentPointer = await transport.pointer();
+      expect(currentPointer.etag, '"1"');
+      expect(
+          await transport.compareAndSetPointer(
+              currentPointer, '{"protocol":2}'),
+          isTrue);
+      expect(
+          await transport.compareAndSetPointer(
+              currentPointer, '{"protocol":2}'),
+          isFalse);
+      expect(await transport.readText('sync-head.json'), '{"protocol":2}');
+
+      expect(
+          await transport.list(),
+          containsAll([
+            revision.descriptorName,
+            revision.archiveName,
+            'sync-head.json',
+          ]));
+      expect(fixture.errors, isEmpty);
+      expect(
+          fixture.requests
+              .where((request) => request.method == 'PROPFIND')
+              .map((request) => request.path),
+          contains('/pica/'));
+      expect(
+          fixture.requests.any((request) =>
+              request.method == 'PUT' &&
+              request.path == '/pica/sync-head.json' &&
+              request.ifNoneMatch == '*'),
+          isTrue);
+      expect(
+          fixture.requests.where((request) =>
+              request.method == 'PUT' &&
+              request.path == '/pica/sync-head.json' &&
+              request.ifMatch == '"1"'),
+          hasLength(2));
+    } finally {
+      transport.close();
+      await fixture.close();
+      if (archive.existsSync()) await archive.delete();
+      if (downloaded.existsSync()) await downloaded.delete();
+    }
   });
 
   test('unsupported pointer methods fall back to graph-based detection',
