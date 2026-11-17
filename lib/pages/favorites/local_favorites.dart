@@ -764,6 +764,8 @@ class LocalFavoriteTile extends ComicTile {
                   res.data.id,
                   comic.name,
                   initialPage: history.page,
+                  initialEp: history.ep,
+                  chapters: res.data.chapters,
                 ),
               );
             }

@@ -46,7 +46,7 @@ class HtmangaNetwork {
 
   static int parsePages(String info) {
     final explicit =
-        RegExp(r'(\d[\d,]*)\s*(?:頁|页|pages?)', caseSensitive: false)
+        RegExp(r'(\d[\d,]*)\s*(?:頁|页|pages?|章|話|话)', caseSensitive: false)
             .firstMatch(info);
     final parts = _infoParts(info);
     final fallback = parts
@@ -61,7 +61,7 @@ class HtmangaNetwork {
   static String parseTime(String info) {
     final parts = _infoParts(info);
     for (final part in parts) {
-      if (!RegExp(r'\d[\d,]*\s*(?:頁|页|pages?)', caseSensitive: false)
+      if (!RegExp(r'\d[\d,]*\s*(?:頁|页|pages?|章|話|话)', caseSensitive: false)
           .hasMatch(part)) {
         return part;
       }
@@ -72,6 +72,34 @@ class HtmangaNetwork {
   static String firstNonEmptyText(Iterable<String> values) => values
       .map((value) => value.trim())
       .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+  /// Reads the chapter links used by the current WNACG series detail page.
+  ///
+  /// Older single-gallery pages do not contain any of these nodes and return
+  /// null, which keeps their existing one-episode behaviour intact.
+  static Map<String, String>? parseChapterLinks(String html) {
+    final document = parse(html);
+    final chapters = <String, String>{};
+    final nodes = document.querySelectorAll(
+      '[data-chid], .sr_compact a[href], '
+      'a[href*="photos-slide-aid-"], a[href*="photos-list-aid-"]',
+    );
+    for (final node in nodes) {
+      final id = firstNonEmptyText([
+        node.attributes['data-chid'] ?? '',
+        ...RegExp(r'photos-(?:slide|list)-aid-(\d+)')
+            .allMatches(node.attributes['href'] ?? '')
+            .map((match) => match.group(1) ?? ''),
+      ]);
+      if (id.isEmpty) continue;
+      final title = firstNonEmptyText([
+        node.text,
+        node.attributes['title'] ?? '',
+      ]);
+      if (title.isNotEmpty) chapters[id] = title;
+    }
+    return chapters.isEmpty ? null : chapters;
+  }
 
   static List<String> parseImageList(String script) {
     final normalized = script.replaceAll(r'\/', '/');
@@ -330,9 +358,21 @@ class HtmangaNetwork {
           .attributes["src"]!;
       coverPath = resolveUrl(coverPath);
       var labels = document.querySelectorAll("div.asTBcell.uwconn > label");
-      var category = labels[0].text.split("：")[1];
-      var pages = int.parse(
-          RegExp(r"\d+").firstMatch(labels[1].text.split("：")[1])![0]!);
+      final categoryLabel = labels.firstWhere(
+        (label) => label.text.contains(RegExp(r'分類|分类')),
+        orElse: () => labels.first,
+      );
+      final category = categoryLabel.text.contains('：')
+          ? categoryLabel.text.split('：').sublist(1).join('：').trim()
+          : categoryLabel.text.trim();
+      final chapters = parseChapterLinks(res.data);
+      final countLabel = labels.firstWhere(
+        (label) => label.text
+            .contains(RegExp(r'頁|页|章|話|话|pages?', caseSensitive: false)),
+        orElse: () => labels.length > 1 ? labels[1] : categoryLabel,
+      );
+      final countText = countLabel.text.split('：').last;
+      final pages = chapters?.length ?? parsePages(countText);
       var tagsDom = document.querySelectorAll("a.tagshow");
       var tags = <String, String>{};
       for (var tag in tagsDom) {
@@ -354,7 +394,8 @@ class HtmangaNetwork {
       var photos = List<String>.generate(photosDom.length,
           (index) => resolveUrl(photosDom[index].attributes["src"] ?? ''));
       return Res(HtComicInfo(id, coverPath, name, category, pages, tags,
-          description, uploader, avatar, uploadNum, photos));
+          description, uploader, avatar, uploadNum, photos,
+          chapters: chapters));
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");

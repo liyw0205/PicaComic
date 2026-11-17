@@ -83,6 +83,7 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
           comic.target,
           comic.title,
           initialPage: initialPage,
+          chapters: comic.chapters,
         ),
       );
     } catch (error, stack) {
@@ -95,7 +96,21 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   }
 
   @override
-  EpsData? get eps => null;
+  EpsData? get eps {
+    final chapters = data?.chapters;
+    if (chapters == null || chapters.isEmpty) return null;
+    return EpsData(chapters.values.toList(), (index) async {
+      await History.findOrCreate(data!);
+      App.globalTo(
+        () => ComicReadingPage.htmanga(
+          data!.id,
+          data!.title,
+          initialEp: index + 1,
+          chapters: chapters,
+        ),
+      );
+    });
+  }
 
   @override
   String? get introduction => data!.description;
@@ -104,7 +119,7 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
   Future<Res<HtComicInfo>> loadData() => HtmangaNetwork().getComicInfo(id);
 
   @override
-  int? get pages => null;
+  int? get pages => data?.chapters == null ? data?.pages : null;
 
   @override
   void read(History? history) {
@@ -122,6 +137,8 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
           comic.target,
           comic.title,
           initialPage: currentHistory.page,
+          initialEp: currentHistory.ep,
+          chapters: comic.chapters,
         ),
       );
     } catch (error, stack) {
@@ -159,10 +176,13 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
       ));
 
   @override
-  ThumbnailsData? get thumbnailsCreator => ThumbnailsData(
-      data!.thumbnails,
-      (page) => HtmangaNetwork().getThumbnails(data!.id, page),
-      (data!.pages / 12).ceil());
+  ThumbnailsData? get thumbnailsCreator {
+    if (data!.chapters != null) return null;
+    return ThumbnailsData(
+        data!.thumbnails,
+        (page) => HtmangaNetwork().getThumbnails(data!.id, page),
+        (data!.pages / 12).ceil());
+  }
 
   @override
   String? get title => data?.name.removeAllBlank;

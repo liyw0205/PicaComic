@@ -145,9 +145,12 @@ class ComicReadingPage extends StatelessWidget {
   }
 
   ComicReadingPage.htmanga(String target, String title,
-      {super.key, this.initialPage = 1})
-      : initialEp = 1,
-        readingData = HtReadingData(title, target) {
+      {super.key,
+      this.initialPage = 1,
+      int initialEp = 1,
+      Map<String, String>? chapters})
+      : initialEp = initialEp <= 0 ? 1 : initialEp,
+        readingData = HtReadingData(title, target, chapters) {
     StateController.put(ComicReadingPageLogic(
         initialEp,
         readingData,

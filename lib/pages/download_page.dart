@@ -93,6 +93,8 @@ extension ReadComic on DownloadedItem {
           comic.comic.id,
           comic.comic.title,
           initialPage: ep == null ? history.page : 0,
+          initialEp: ep ?? history.ep,
+          chapters: comic.comic.chapters,
         ),
       );
     } else if (comic.type == DownloadType.nhentai) {

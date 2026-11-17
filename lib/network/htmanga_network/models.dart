@@ -12,7 +12,7 @@ class HtHomePageData {
 }
 
 @immutable
-class HtComicBrief extends BaseComic{
+class HtComicBrief extends BaseComic {
   final String name;
   final String time;
   final String image;
@@ -55,36 +55,53 @@ class HtComicInfo with HistoryMixin {
   final int uploadNum;
   final List<String> thumbnails;
 
-  const HtComicInfo(this.id, this.coverPath, this.name, this.category, this.pages, this.tags,
-      this.description, this.uploader, this.avatar, this.uploadNum, this.thumbnails);
+  /// Chapter id -> display name for WNACG series albums.
+  final Map<String, String>? chapters;
+
+  const HtComicInfo(
+      this.id,
+      this.coverPath,
+      this.name,
+      this.category,
+      this.pages,
+      this.tags,
+      this.description,
+      this.uploader,
+      this.avatar,
+      this.uploadNum,
+      this.thumbnails,
+      {this.chapters});
 
   HtComicBrief toBrief() => HtComicBrief(name, "", coverPath, id, pages);
 
   Map<String, dynamic> toJson() => {
-    "id": id,
-    "coverPath": coverPath,
-    "name": name,
-    "category": category,
-    "pages": pages,
-    "tags": tags,
-    "description": description,
-    "uploader": uploader,
-    "avatar": avatar,
-    "uploadNum": uploadNum
-  };
+        "id": id,
+        "coverPath": coverPath,
+        "name": name,
+        "category": category,
+        "pages": pages,
+        "tags": tags,
+        "description": description,
+        "uploader": uploader,
+        "avatar": avatar,
+        "uploadNum": uploadNum,
+        "chapters": chapters,
+      };
 
-  HtComicInfo.fromJson(Map<String, dynamic> json):
-      id = json["id"],
-      coverPath = json["coverPath"],
-      name = json["name"],
-      category = json["category"],
-      pages = json["pages"],
-      tags = Map<String, String>.from(json["tags"]),
-      description = json["description"],
-      uploader = json["uploader"],
-      avatar = json["avatar"],
-      uploadNum = json["uploadNum"],
-      thumbnails = [];
+  HtComicInfo.fromJson(Map<String, dynamic> json)
+      : id = json["id"],
+        coverPath = json["coverPath"],
+        name = json["name"],
+        category = json["category"],
+        pages = json["pages"],
+        tags = Map<String, String>.from(json["tags"]),
+        description = json["description"],
+        uploader = json["uploader"],
+        avatar = json["avatar"],
+        uploadNum = json["uploadNum"],
+        thumbnails = [],
+        chapters = (json["chapters"] as Map?)
+            ?.map((key, value) => MapEntry(key.toString(), value.toString()));
 
   @override
   String get cover => coverPath;

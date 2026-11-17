@@ -282,16 +282,14 @@ class HtReadingData extends ReadingData {
   @override
   final String id;
 
-  HtReadingData(
-    this.title,
-    this.id,
-  );
+  HtReadingData(this.title, this.id, [Map<String, String>? chapters])
+      : eps = chapters == null || chapters.isEmpty ? null : chapters;
 
   @override
-  Map<String, String>? get eps => null;
+  final Map<String, String>? eps;
 
   @override
-  bool get hasEp => false;
+  bool get hasEp => eps != null;
 
   @override
   String get sourceKey => "htManga";
@@ -304,7 +302,8 @@ class HtReadingData extends ReadingData {
 
   @override
   Future<Res<List<String>>> loadEpNetwork(int ep) {
-    return HtmangaNetwork().getImages(id);
+    final chapterId = eps?.keys.elementAtOrNull(ep - 1) ?? id;
+    return HtmangaNetwork().getImages(chapterId);
   }
 
   @override

@@ -12,6 +12,8 @@ import 'package:pica_comic/foundation/def.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
+import 'package:pica_comic/network/htmanga_network/models.dart';
+import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
 
 class _LastRandom implements math.Random {
   final List<int> bounds = [];
@@ -267,11 +269,56 @@ void main() {
     for (final info in [
       '2026-01-01, 12頁',
       '12页，2026-01-01',
-      '2026-01-01, 12'
+      '2026-01-01, 12',
+      '章節：6 話，2026-09-25',
     ]) {
-      expect(HtmangaNetwork.parsePages(info), 12);
-      expect(HtmangaNetwork.parseTime(info), '2026-01-01');
+      expect(HtmangaNetwork.parsePages(info), info.contains('6 話') ? 6 : 12);
+      expect(HtmangaNetwork.parseTime(info),
+          info.contains('6 話') ? '2026-09-25' : '2026-01-01');
     }
+
+    const seriesHtml = '''
+      <div id="sr_pub">
+        <a class="tagshow" data-chid="218635"
+          href="/photos-slide-aid-218635-sid-405320.html"
+          title="第1話 29P">第1話 第一章</a>
+        <a class="tagshow" data-chid="268347"
+          href="/photos-slide-aid-268347-sid-405320.html">第2話 第二章</a>
+      </div>
+    ''';
+    expect(HtmangaNetwork.parseChapterLinks(seriesHtml), {
+      '218635': '第1話 第一章',
+      '268347': '第2話 第二章',
+    });
+    expect(
+        HtmangaNetwork.parseChapterLinks('<div>single gallery</div>'), isNull);
+
+    final series = HtComicInfo(
+      '405320',
+      'https://fixture.test/cover.jpg',
+      'fixture series',
+      '合集',
+      2,
+      const {},
+      '',
+      'uploader',
+      '',
+      1,
+      const [],
+      chapters: const {'218635': '第1话 第一章', '268347': '第2话 第二章'},
+    );
+    final restored = HtComicInfo.fromJson(series.toJson());
+    expect(restored.chapters, series.chapters);
+
+    final downloaded = DownloadedHtComic(restored, 12.5);
+    expect(downloaded.eps, ['第1话 第一章', '第2话 第二章']);
+    expect(downloaded.downloadedEps, [0, 1]);
+    downloaded.downloadedEps.remove(0);
+    final partial = DownloadedHtComic.fromJson(downloaded.toJson());
+    expect(partial.downloadedEps, [1]);
+    final downloading =
+        DownloadingHtComic(series, null, null, null, 'Ht405320');
+    expect(downloading.haveEps, isTrue);
 
     expect(
       HtmangaNetwork.parseImageList(
