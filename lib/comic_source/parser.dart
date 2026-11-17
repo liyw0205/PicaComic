@@ -102,6 +102,7 @@ class ComicSourceParser {
 
       JsEngine().runCode("""
         ComicSource.sources.$_key = this['temp'];
+        void 0;
       """);
       installedKey = key;
 

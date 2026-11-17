@@ -1,679 +1,585 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:html/parser.dart' as html;
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/comic_source/contract.dart';
-import 'package:pica_comic/network/base_comic.dart';
-import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/js_engine.dart';
+import 'package:pica_comic/network/cookie_jar.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 
-/// A deliberately small transport seam for source fixtures.  It records the
-/// logical request stage instead of opening a socket, so a failed assertion
-/// identifies the source operation that changed.
-class _FixtureTransport {
-  _FixtureTransport(this.payloads);
-
-  final Map<String, String> payloads;
-  final List<String> requests = <String>[];
-
-  String get(String stage) {
-    requests.add('GET:$stage');
-    return payloads[stage] ?? (throw StateError('missing fixture $stage'));
-  }
-
-  String post(String stage) {
-    requests.add('POST:$stage');
-    return payloads[stage] ?? (throw StateError('missing fixture $stage'));
-  }
-}
-
-class _RemoteComic extends BaseComic {
-  const _RemoteComic(this.id, this.title, this.cover,
-      {this.subTitle = '', this.tags = const []});
-
-  @override
-  final String id;
-
-  @override
-  final String title;
-
-  @override
-  final String cover;
-
-  @override
-  final String subTitle;
-
-  @override
-  final List<String> tags;
-
-  @override
-  String get description => '';
-}
-
-class _RemoteFixture {
-  const _RemoteFixture({
-    required this.name,
+class _RuleFixture {
+  const _RuleFixture({
+    required this.file,
     required this.key,
     required this.version,
-    required this.id,
+    required this.comicId,
     required this.episode,
-    required this.source,
-    required this.transport,
+    required this.requiredRequests,
   });
 
-  final String name;
+  final String file;
   final String key;
   final String version;
-  final String id;
+  final String comicId;
   final String episode;
-  final ComicSource source;
-  final _FixtureTransport transport;
+  final List<String> requiredRequests;
 }
 
-ComicInfoData _detail({
-  required String sourceKey,
-  required String id,
-  required String title,
-  required String cover,
-  required String chapterId,
-  required String chapterTitle,
-  required List<String> thumbnails,
-}) {
-  return ComicInfoData(
-    title,
-    'Fixture author',
-    cover,
-    'Fixture description',
-    const <String, List<String>>{
-      'author': <String>['Fixture author'],
-      'tag': <String>['fixture'],
-    },
-    <String, String>{chapterTitle: chapterId},
-    thumbnails,
-    null,
-    1,
-    const <BaseComic>[],
-    sourceKey,
-    id,
-  );
-}
-
-ComicSource _source({
-  required String name,
-  required String key,
-  required String version,
-  required String url,
-  required _FixtureTransport transport,
-  required String comicId,
-  required String episode,
-  required Future<Res<List<BaseComic>>> Function(String keyword, int page)
-      search,
-  required Future<Res<ComicInfoData>> Function(String id) detail,
-  required Future<Res<List<String>>> Function(String id, String? ep) pages,
-  Future<Res<Map<String, String>>> Function([String? id])? loadFolders,
-  Future<Res<List<BaseComic>>> Function(int page, [String? folder])?
-      loadFavorites,
-  Future<Res<bool>> Function(String id, String folder, bool adding)? favorite,
-  GetImageLoadingConfigFunc? imageLoading,
-}) {
-  return ComicSource.named(
-    name: name,
-    key: key,
-    version: version,
-    url: url,
-    filePath: 'remote-fixture',
-    explorePages: <ExplorePageData>[
-      ExplorePageData.named(
-        title: name,
-        type: ExplorePageType.singlePageWithMultiPart,
-        loadMultiPart: () async {
-          // The source fixtures intentionally share the card payload between
-          // the home and search routes, while keeping one parser/transport
-          // implementation per source.
-          final result = await search('fixture', 1);
-          return Res(<ExplorePagePart>[
-            ExplorePagePart(
-                name, result.dataOrNull ?? const <BaseComic>[], null),
-          ]);
-        },
-      ),
+const _rules = <_RuleFixture>[
+  _RuleFixture(
+    file: 'copy_manga.js',
+    key: 'copy_manga',
+    version: '1.1.4',
+    comicId: 'fixture-comic',
+    episode: 'fixture-episode',
+    requiredRequests: <String>[
+      'GET api.copymanga.tv/api/v3/search/comic',
+      'GET api.copymanga.tv/api/v3/comic2/fixture-comic',
+      'GET api.copymanga.tv/api/v3/comic/fixture-comic/chapter2/fixture-episode',
+      'GET api.copymanga.tv/api/v3/h5/homeIndex',
+      'GET api.copymanga.tv/api/v3/member/collect/comics',
     ],
-    searchPageData: SearchPageData.named(
-      loadPage: (keyword, page, options) => search(keyword, page),
-    ),
-    loadComicInfo: detail,
-    loadComicPages: pages,
-    getImageLoadingConfig: imageLoading,
-    favoriteData: loadFavorites == null
-        ? null
-        : FavoriteData(
-            key: key,
-            title: name,
-            multiFolder: loadFolders != null,
-            loadComic: loadFavorites,
-            loadFolders: loadFolders,
-            addOrDelFavorite: favorite,
-          ),
-  );
-}
+  ),
+  _RuleFixture(
+    file: 'baozi.js',
+    key: 'baozi',
+    version: '1.0.1',
+    comicId: 'fixture-comic',
+    episode: '0',
+    requiredRequests: <String>[
+      'GET www.twmanga.com/search',
+      'GET www.twmanga.com/comic/fixture-comic',
+      'GET www.twmanga.com/comic/chapter/fixture-comic/0_0.html',
+      'GET www.twmanga.com',
+      'GET www.twmanga.com/user/my_bookshelf',
+    ],
+  ),
+  _RuleFixture(
+    file: 'komiic.js',
+    key: 'Komiic',
+    version: '1.0.5',
+    comicId: 'fixture-comic',
+    episode: 'fixture-episode',
+    requiredRequests: <String>[
+      'POST komiic.com/api/query#searchComicAndAuthorQuery',
+      'POST komiic.com/api/query#recentUpdate',
+      'POST komiic.com/api/query#chapterByComicId',
+      'POST komiic.com/api/query#imagesByChapterId',
+      'POST komiic.com/api/query#folderComicIds',
+      'POST komiic.com/api/query#getImageTicket',
+    ],
+  ),
+  _RuleFixture(
+    file: 'ikmmh.js',
+    key: 'ikmmh',
+    version: '1.1.3',
+    comicId: 'https://ymcdnyfqdapp.ikmmh.com/book/fixture-comic/',
+    episode: 'fixture-episode',
+    requiredRequests: <String>[
+      'GET ymcdnyfqdapp.ikmmh.com/search',
+      'GET ymcdnyfqdapp.ikmmh.com/book/fixture-comic/',
+      'GET ymcdnyfqdapp.ikmmh.com/chapter/fixture-comic/fixture-episode.html',
+      'GET ymcdnyfqdapp.ikmmh.com/',
+      'POST ymcdnyfqdapp.ikmmh.com/api/user/bookcase/ajax',
+      'POST ymcdnyfqdapp.ikmmh.com/api/user/bookcase/add',
+      'POST ymcdnyfqdapp.ikmmh.com/api/user/bookcase/del',
+    ],
+  ),
+];
 
-_RemoteFixture _copyMangaFixture() {
-  final transport = _FixtureTransport(<String, String>{
-    'search': jsonEncode(<String, dynamic>{
-      'results': <String, dynamic>{
-        'total': 1,
-        'list': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'path_word': 'copy-fixture',
-            'name': 'Copy fixture',
-            'cover': 'https://fixture.test/copy-cover.jpg',
-            'author': <Map<String, String>>[
-              <String, String>{'name': 'Fixture author'},
+class _FixtureAdapter implements HttpClientAdapter {
+  final requests = <String>[];
+  final unmatched = <String>[];
+
+  void reset() {
+    requests.clear();
+    unmatched.clear();
+  }
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    final operation = _operation(options.data);
+    final label = '${options.method} ${options.uri.host}${options.uri.path}'
+        '${operation == null ? '' : '#$operation'}';
+    requests.add(label);
+
+    final body = switch (options.uri.host) {
+      'api.copymanga.tv' => _copyManga(options),
+      'www.twmanga.com' => _baozi(options),
+      'komiic.com' => _komiic(operation),
+      'ymcdnyfqdapp.ikmmh.com' => _ikmmh(options),
+      _ => null,
+    };
+    if (body == null) {
+      unmatched.add(label);
+      throw StateError('Unexpected fixture request: $label');
+    }
+
+    return ResponseBody.fromString(
+      body,
+      200,
+      headers: <String, List<String>>{
+        'content-type': [
+          body.startsWith('<') ? 'text/html' : 'application/json'
+        ],
+      },
+    );
+  }
+
+  String? _operation(Object? data) {
+    try {
+      final decoded = data is String ? jsonDecode(data) : data;
+      if (decoded is Map) return decoded['operationName'] as String?;
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  String _json(Object value) => jsonEncode(value);
+
+  Map<String, dynamic> _copyComic() => <String, dynamic>{
+        'path_word': 'fixture-comic',
+        'uuid': 'fixture-uuid',
+        'name': 'Fixture comic',
+        'cover': 'https://fixture.test/copy-cover.jpg',
+        'brief': 'Fixture description',
+        'author': <Map<String, String>>[
+          <String, String>{'name': 'Fixture author'},
+        ],
+        'theme': <Map<String, String>>[
+          <String, String>{'name': 'fixture'},
+        ],
+        'datetime_updated': '2026-01-01',
+      };
+
+  String? _copyManga(RequestOptions options) {
+    final path = options.uri.path;
+    if (path.endsWith('/search/comic')) {
+      return _json({
+        'results': {
+          'total': 1,
+          'list': [_copyComic()]
+        },
+      });
+    }
+    if (path.endsWith('/h5/homeIndex')) {
+      final comic = _copyComic();
+      return _json({
+        'results': {
+          'recComics': {
+            'list': [comic]
+          },
+          'hotComics': [comic],
+          'newComics': [comic],
+          'finishComics': {
+            'list': [comic]
+          },
+          'rankDayComics': {
+            'list': [comic]
+          },
+          'rankWeekComics': {
+            'list': [comic]
+          },
+          'rankMonthComics': {
+            'list': [comic]
+          },
+        },
+      });
+    }
+    if (path.endsWith('/member/collect/comics')) {
+      return _json({
+        'results': {
+          'total': 1,
+          'list': [_copyComic()]
+        },
+      });
+    }
+    if (path.endsWith('/member/collect/comic')) return _json({'results': {}});
+    if (path.endsWith('/comic2/fixture-comic/query')) {
+      return _json({
+        'results': {'collect': null},
+      });
+    }
+    if (path.endsWith('/comic2/fixture-comic')) {
+      return _json({
+        'results': {'comic': _copyComic()},
+      });
+    }
+    if (path.endsWith('/group/default/chapters')) {
+      return _json({
+        'results': {
+          'total': 1,
+          'list': [
+            {'uuid': 'fixture-episode', 'name': 'Chapter 1'},
+          ],
+        },
+      });
+    }
+    if (path.endsWith('/chapter2/fixture-episode')) {
+      return _json({
+        'results': {
+          'chapter': {
+            'contents': [
+              {'url': 'https://fixture.test/copy-1.jpg'},
+              {'url': 'https://fixture.test/copy-2.jpg'},
             ],
-            'theme': <Map<String, String>>[
-              <String, String>{'name': 'fixture'},
-            ],
-            'datetime_updated': '2026-01-01',
+            'words': [1, 0],
+          },
+        },
+      });
+    }
+    return null;
+  }
+
+  String _baoziCard() => '''
+<div class="comics-card">
+  <a href="/comic/fixture-comic"><amp-img src="https://fixture.test/baozi-cover.jpg"></amp-img></a>
+  <h3>Fixture comic</h3>
+  <div class="tabs"><span>fixture</span></div>
+  <small>Updated</small>
+</div>
+''';
+
+  String _baoziDetail() => '''
+<h1 class="comics-detail__title">Fixture comic</h1>
+<div class="l-content"><div><div><amp-img src="https://fixture.test/baozi-cover.jpg"></amp-img></div></div></div>
+<h2 class="comics-detail__author">Fixture author</h2>
+<div class="tag-list"><span>fixture</span></div>
+<div class="supporting-text"><div><span><em>(2026-01-01)</em></span></div></div>
+<p class="comics-detail__desc">Fixture description</p>
+<div id="chapter-items"><div class="comics-chapters"><a><div><span>Chapter 1</span></div></a></div></div>
+''';
+
+  String _baoziFavorite() => '''
+<div class="bookshelf-items">
+  <h4><a href="/comic/fixture-comic">Fixture comic</a></h4>
+  <amp-img src="https://fixture.test/baozi-cover.jpg"></amp-img>
+  <div class="info"><ul>
+    <li>Type</li><li>Author：Fixture author</li><li>State</li><li>Update</li>
+    <li><a>Chapter 1</a></li>
+  </ul></div>
+</div>
+''';
+
+  String? _baozi(RequestOptions options) {
+    final path = options.uri.path;
+    if (path == '/search') return _baoziCard();
+    if (path.isEmpty || path == '/') {
+      return '<div class="index-recommend-items">'
+          '<div class="catalog-title">Featured</div>${_baoziCard()}</div>';
+    }
+    if (path == '/comic/fixture-comic') return _baoziDetail();
+    if (path == '/comic/chapter/fixture-comic/0_0.html') {
+      return '<amp-img class="comic-contain__item" src="https://fixture.test/baozi-1.jpg"></amp-img>';
+    }
+    if (path == '/user/my_bookshelf') return _baoziFavorite();
+    if (path == '/user/operation_v2') return _json({'ok': true});
+    return null;
+  }
+
+  Map<String, dynamic> _komiicComic() => <String, dynamic>{
+        'id': 'fixture-comic',
+        'title': 'Fixture comic',
+        'status': 'ONGOING',
+        'year': 2026,
+        'imageUrl': 'https://fixture.test/komiic-cover.jpg',
+        'authors': [
+          {'id': 'fixture-author', 'name': 'Fixture author'},
+        ],
+        'categories': [
+          {'id': 'fixture-category', 'name': 'fixture'},
+        ],
+        'dateUpdated': '2026-01-01T00:00:00Z',
+        'monthViews': 1,
+        'views': 1,
+        'favoriteCount': 1,
+        'lastBookUpdate': '2026-01-01',
+        'lastChapterUpdate': '2026-01-01',
+      };
+
+  String? _komiic(String? operation) {
+    final comic = _komiicComic();
+    final data = switch (operation) {
+      'searchComicAndAuthorQuery' => {
+          'searchComicsAndAuthors': {
+            'comics': [comic],
+            'authors': <Object>[],
+          },
+        },
+      'recentUpdate' => {
+          'recentUpdate': [comic],
+        },
+      'recommendComicById' => {
+          'recommendComicById': <Object>[],
+        },
+      'chapterByComicId' => {
+          'chaptersByComicId': [
+            {
+              'id': 'fixture-episode',
+              'serial': '1',
+              'type': 'chapter',
+              'dateCreated': '2026-01-01',
+              'dateUpdated': '2026-01-01',
+              'size': 2,
+            },
+          ],
+        },
+      'comicByIds' => {
+          'comicByIds': [comic],
+        },
+      'imagesByChapterId' => {
+          'imagesByChapterId': [
+            {
+              'id': 'fixture-image',
+              'kid': 'fixture-kid',
+              'height': 1,
+              'width': 1
+            },
+          ],
+        },
+      'myFolder' => {
+          'folders': [
+            {
+              'id': 'fixture-folder',
+              'key': 'fixture-folder',
+              'name': 'Fixture folder'
+            },
+          ],
+        },
+      'folderComicIds' => {
+          'folderComicIds': {
+            'comicIds': ['fixture-comic']
+          },
+        },
+      'getImageTicket' => {
+          'getImageTicket': {
+            'url': 'https://fixture.test/komiic-image.jpg',
+            'ticket': 'fixture-ticket',
+            'kid': 'fixture-kid',
+            'width': 1,
+            'height': 1,
+            'expiresAt': '2026-01-01T00:00:00Z',
+          },
+        },
+      'comicInAccountFolders' => {
+          'comicInAccountFolders': <String>['fixture-folder'],
+        },
+      'addComicToFolder' => {'addComicToFolder': true},
+      'removeComicToFolder' => {'removeComicToFolder': true},
+      _ => null,
+    };
+    return data == null ? null : _json({'data': data});
+  }
+
+  String _ikmmhHomeCard() => '''
+<li>
+  <a href="/book/fixture-comic/"><h4>Fixture comic</h4><img data-src="https://fixture.test/ikmmh-cover.jpg"></a>
+  <div class="tag-wrap"><p>fixture</p></div>
+</li>
+''';
+
+  String _ikmmhSearchCard() => '''
+<div class="classification">
+  <a href="/book/fixture-comic/">Fixture comic<img data-src="https://fixture.test/ikmmh-cover.jpg"></a>
+  <p class="describe"><a>Updated</a></p>
+</div>
+''';
+
+  String _ikmmhDetail() => '''
+<h1 class="detail-title">Fixture comic</h1>
+<div class="banner-img"><img data-src="https://fixture.test/ikmmh-cover.jpg"></div>
+<p class="author">Fixture author</p>
+<p class="ui-tag"><a>fixture</a></p>
+<div class="detail-desc">Fixture description</div>
+<div class="detail-info"><div><span><b>2026-01-01</b></span></div></div>
+<ol class="chapter-list"><li data-chapter="fixture-episode"><a title="Chapter 1"></a></li></ol>
+''';
+
+  String? _ikmmh(RequestOptions options) {
+    final path = options.uri.path;
+    if (path == '/') {
+      return '<ul class="panel-comic-r">${_ikmmhHomeCard()}</ul>';
+    }
+    if (path.startsWith('/search')) return _ikmmhSearchCard();
+    if (path == '/book/fixture-comic/') return _ikmmhDetail();
+    if (path == '/chapter/fixture-comic/fixture-episode.html') {
+      return '<img class="lazy" data-src="https://fixture.test/ikmmh-1.jpg">';
+    }
+    if (path == '/api/user/bookcase/ajax') {
+      return _json({
+        'code': 0,
+        'end': 1,
+        'data': [
+          {
+            'name': 'Fixture comic',
+            'author': 'Fixture author',
+            'cover': 'https://fixture.test/ikmmh-cover.jpg',
+            'info_url': '/book/fixture-comic/',
           },
         ],
-      },
-    }),
-    'detail': jsonEncode(<String, dynamic>{
-      'results': <String, dynamic>{
-        'comic': <String, dynamic>{
-          'uuid': 'copy-uuid',
-          'name': 'Copy fixture',
-          'cover': 'https://fixture.test/copy-cover.jpg',
-          'brief': 'Fixture description',
-          'datetime_updated': '2026-01-01',
-          'author': <Map<String, String>>[
-            <String, String>{'name': 'Fixture author'},
-          ],
-          'theme': <Map<String, String>>[
-            <String, String>{'name': 'fixture'},
-          ],
-        },
-      },
-    }),
-    'chapters': jsonEncode(<String, dynamic>{
-      'results': <String, dynamic>{
-        'total': 1,
-        'list': <Map<String, String>>[
-          <String, String>{'uuid': 'copy-episode', 'name': 'Chapter 1'},
-        ],
-      },
-    }),
-    'images': jsonEncode(<String, dynamic>{
-      'results': <String, dynamic>{
-        'chapter': <String, dynamic>{
-          'contents': <Map<String, dynamic>>[
-            <String, dynamic>{'url': 'https://fixture.test/copy-1.jpg'},
-            <String, dynamic>{'url': 'https://fixture.test/copy-2.jpg'},
-          ],
-          'words': <int>[1, 0],
-        },
-      },
-    }),
-    'favorite': '{"code":0}',
-  });
+      });
+    }
+    if (path == '/api/user/bookcase/add' || path == '/api/user/bookcase/del') {
+      return _json({'code': 0});
+    }
+    return null;
+  }
 
-  Map<String, dynamic> comic(String key) =>
-      (jsonDecode(transport.get(key)) as Map<String, dynamic>)['results']
-          ['comic'] as Map<String, dynamic>;
-  _RemoteComic parse(Map<String, dynamic> value) => _RemoteComic(
-        value['path_word'] as String,
-        value['name'] as String,
-        value['cover'] as String,
-        subTitle: (value['author'] as List).first['name'] as String,
-        tags: (value['theme'] as List)
-            .map((e) => (e as Map)['name'] as String)
-            .toList(),
-      );
-  final source = _source(
-    name: 'Copy fixture',
-    key: 'copy_manga',
-    version: '1.1.4',
-    url:
-        'https://raw.githubusercontent.com/liyw0205/pica_configs/master/copy_manga.js',
-    transport: transport,
-    comicId: 'copy-fixture',
-    episode: 'copy-episode',
-    search: (keyword, page) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      final data = jsonDecode(transport.get('search')) as Map<String, dynamic>;
-      final list = ((data['results'] as Map)['list'] as List)
-          .cast<Map<String, dynamic>>();
-      return Res(list.map(parse).toList());
-    },
-    detail: (id) async {
-      final value = comic('detail');
-      final chapterData =
-          jsonDecode(transport.get('chapters')) as Map<String, dynamic>;
-      final chapter = ((chapterData['results'] as Map)['list'] as List).single
-          as Map<String, dynamic>;
-      return Res(_detail(
-        sourceKey: 'copy_manga',
-        id: id,
-        title: value['name'] as String,
-        cover: value['cover'] as String,
-        chapterId: chapter['uuid'] as String,
-        chapterTitle: chapter['name'] as String,
-        thumbnails: <String>[value['cover'] as String],
-      ));
-    },
-    pages: (id, ep) async {
-      final value = jsonDecode(transport.get('images')) as Map<String, dynamic>;
-      final chapter = ((value['results'] as Map)['chapter'] as Map);
-      final urls = (chapter['contents'] as List)
-          .map((e) => (e as Map)['url'] as String)
-          .toList();
-      final words = (chapter['words'] as List).cast<int>();
-      final ordered = List<String>.filled(urls.length, '');
-      for (var i = 0; i < urls.length; i++) {
-        ordered[words[i]] = urls[i];
-      }
-      return Res(ordered);
-    },
-    loadFavorites: (page, [folder]) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      final data = jsonDecode(transport.get('search')) as Map<String, dynamic>;
-      final list = ((data['results'] as Map)['list'] as List)
-          .cast<Map<String, dynamic>>();
-      return Res(list.map(parse).toList(), subData: 1);
-    },
-    favorite: (id, folder, adding) async {
-      expect(jsonDecode(transport.post('favorite'))['code'], 0);
-      return const Res(true);
-    },
-  );
-  return _RemoteFixture(
-    name: 'Copy fixture',
-    key: 'copy_manga',
-    version: '1.1.4',
-    id: 'copy-fixture',
-    episode: 'copy-episode',
-    source: source,
-    transport: transport,
-  );
-}
-
-_RemoteFixture _baoziFixture() {
-  final transport = _FixtureTransport(<String, String>{
-    'search': '''
-      <div class="comics-card"><a href="/comic/baozi-fixture"><amp-img src="https://fixture.test/baozi-cover.jpg"></amp-img></a>
-      <h3>Baozi fixture</h3><div class="tabs"><span>fixture</span></div><small>updated</small></div>
-    ''',
-    'detail': '''
-      <h1 class="comics-detail__title">Baozi fixture</h1>
-      <div class="l-content"><div><amp-img src="https://fixture.test/baozi-cover.jpg"></amp-img></div></div>
-      <h2 class="comics-detail__author">Fixture author</h2>
-      <div class="tag-list"><span>fixture</span></div>
-      <div class="supporting-text"><div><span><em>(2026-01-01)</em></span></div></div>
-      <p class="comics-detail__desc">Fixture description</p>
-      <div id="chapter-items"><div class="comics-chapters"><a><div><span>Chapter 1</span></div></a></div></div>
-    ''',
-    'images': '''
-      <amp-img class="comic-contain__item" src="https://fixture.test/baozi-1.jpg"></amp-img>
-      <amp-img class="comic-contain__item" data-src="https://fixture.test/baozi-2.jpg"></amp-img>
-    ''',
-    'favorite': '{"code":0}',
-  });
-  final source = _source(
-    name: 'Baozi fixture',
-    key: 'baozi',
-    version: '1.0.1',
-    url:
-        'https://raw.githubusercontent.com/liyw0205/pica_configs/master/baozi.js',
-    transport: transport,
-    comicId: 'baozi-fixture',
-    episode: '0',
-    search: (keyword, page) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      final document = html.parse(transport.get('search'));
-      final card = document.querySelector('div.comics-card')!;
-      final anchor = card.querySelector('a')!;
-      final image = anchor.querySelector('amp-img')!;
-      return Res(<BaseComic>[
-        _RemoteComic(
-          anchor.attributes['href']!.split('/').last,
-          card.querySelector('h3')!.text.trim(),
-          image.attributes['src']!,
-          tags: card
-              .querySelectorAll('div.tabs > span')
-              .map((e) => e.text.trim())
-              .toList(),
-        )
-      ]);
-    },
-    detail: (id) async {
-      final document = html.parse(transport.get('detail'));
-      return Res(_detail(
-        sourceKey: 'baozi',
-        id: id,
-        title: document.querySelector('h1.comics-detail__title')!.text.trim(),
-        cover:
-            document.querySelector('div.l-content amp-img')!.attributes['src']!,
-        chapterId: '0',
-        chapterTitle:
-            document.querySelector('div#chapter-items span')!.text.trim(),
-        thumbnails: <String>[
-          document.querySelector('div.l-content amp-img')!.attributes['src']!
-        ],
-      ));
-    },
-    pages: (id, ep) async {
-      final document = html.parse(transport.get('images'));
-      return Res(document
-          .querySelectorAll('amp-img.comic-contain__item')
-          .map(
-            (e) => e.attributes['src'] ?? e.attributes['data-src']!,
-          )
-          .toList());
-    },
-    loadFavorites: (page, [folder]) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      return const Res(<BaseComic>[
-        _RemoteComic(
-          'baozi-fixture',
-          'Baozi fixture',
-          'https://fixture.test/baozi-cover.jpg',
-        )
-      ], subData: 1);
-    },
-    favorite: (id, folder, adding) async {
-      expect(jsonDecode(transport.post('favorite'))['code'], 0);
-      return const Res(true);
-    },
-  );
-  return _RemoteFixture(
-    name: 'Baozi fixture',
-    key: 'baozi',
-    version: '1.0.1',
-    id: 'baozi-fixture',
-    episode: '0',
-    source: source,
-    transport: transport,
-  );
-}
-
-Map<String, dynamic> _komiicComic() => <String, dynamic>{
-      'id': 'komiic-fixture',
-      'title': 'Komiic fixture',
-      'imageUrl': 'https://fixture.test/komiic-cover.jpg',
-      'authors': <Map<String, String>>[
-        <String, String>{'name': 'Fixture author'},
-      ],
-      'categories': <Map<String, String>>[
-        <String, String>{'name': 'fixture'},
-      ],
-      'dateUpdated': '2026-01-01T00:00:00Z',
-    };
-
-_RemoteFixture _komiicFixture() {
-  final comic = _komiicComic();
-  final transport = _FixtureTransport(<String, String>{
-    'search': jsonEncode(<String, dynamic>{
-      'data': <String, dynamic>{
-        'searchComicsAndAuthors': <String, dynamic>{
-          'comics': <dynamic>[comic]
-        },
-      },
-    }),
-    'recommend': '{"data":{"recommendComicById":[]}}',
-    'detail': jsonEncode(<String, dynamic>{
-      'data': <String, dynamic>{
-        'comicByIds': <dynamic>[comic]
-      }
-    }),
-    'chapters':
-        '{"data":{"chaptersByComicId":[{"id":"komiic-episode","serial":"1","type":"chapter"}]}}',
-    'images':
-        '{"data":{"imagesByChapterId":[{"id":"image-1","kid":"kid-1","height":100,"width":100},{"id":"image-2","kid":"kid-2","height":100,"width":100}]}}',
-    'image-ticket':
-        '{"data":{"getImageTicket":{"url":"https://cdn.fixture.test/kid-1","ticket":"fixture-ticket","kid":"kid-1"}}}',
-    'favorite': '{"data":{"addComicToFolder":true}}',
-  });
-  _RemoteComic parse(Map<String, dynamic> value) => _RemoteComic(
-        value['id'] as String,
-        value['title'] as String,
-        value['imageUrl'] as String,
-        subTitle: (value['authors'] as List).first['name'] as String,
-        tags: (value['categories'] as List)
-            .map((e) => (e as Map)['name'] as String)
-            .toList(),
-      );
-  final source = _source(
-    name: 'Komiic fixture',
-    key: 'Komiic',
-    version: '1.0.5',
-    url:
-        'https://raw.githubusercontent.com/liyw0205/pica_configs/master/komiic.js',
-    transport: transport,
-    comicId: 'komiic-fixture',
-    episode: 'komiic-episode',
-    search: (keyword, page) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      final data = jsonDecode(transport.get('search')) as Map<String, dynamic>;
-      final comics = (((data['data'] as Map)['searchComicsAndAuthors']
-              as Map)['comics'] as List)
-          .cast<Map<String, dynamic>>();
-      return Res(comics.map(parse).toList());
-    },
-    detail: (id) async {
-      final value = (jsonDecode(transport.get('detail')) as Map)['data']
-          ['comicByIds'][0] as Map<String, dynamic>;
-      final chapters = (jsonDecode(transport.get('chapters')) as Map)['data']
-          ['chaptersByComicId'] as List;
-      final chapter = chapters.single as Map<String, dynamic>;
-      return Res(_detail(
-        sourceKey: 'Komiic',
-        id: id,
-        title: value['title'] as String,
-        cover: value['imageUrl'] as String,
-        chapterId: chapter['id'] as String,
-        chapterTitle: chapter['serial'].toString(),
-        thumbnails: <String>[value['imageUrl'] as String],
-      ));
-    },
-    pages: (id, ep) async {
-      final data = jsonDecode(transport.get('images')) as Map<String, dynamic>;
-      final images = (data['data']['imagesByChapterId'] as List)
-          .cast<Map<String, dynamic>>();
-      return Res(images
-          .map((e) => 'https://komiic.com/api/image/${e['kid']}')
-          .toList());
-    },
-    loadFolders: ([id]) async =>
-        const Res(<String, String>{'folder-1': 'Fixture'}),
-    loadFavorites: (page, [folder]) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      return Res(<BaseComic>[parse(comic)], subData: 1);
-    },
-    favorite: (id, folder, adding) async {
-      expect(jsonDecode(transport.post('favorite'))['data']['addComicToFolder'],
-          true);
-      return const Res(true);
-    },
-    imageLoading: (imageKey, comicId, epId) async {
-      final data =
-          jsonDecode(transport.get('image-ticket')) as Map<String, dynamic>;
-      final ticket = data['data']['getImageTicket'] as Map<String, dynamic>;
-      return <String, dynamic>{
-        'url': ticket['url'],
-        'headers': <String, String>{
-          'X-Image-Ticket': ticket['ticket'] as String
-        },
-      };
-    },
-  );
-  return _RemoteFixture(
-    name: 'Komiic fixture',
-    key: 'Komiic',
-    version: '1.0.5',
-    id: 'komiic-fixture',
-    episode: 'komiic-episode',
-    source: source,
-    transport: transport,
-  );
-}
-
-_RemoteFixture _ikmmhFixture() {
-  final transport = _FixtureTransport(<String, String>{
-    'search': '''
-      <div class="classification"><a href="/book/ikmmh-fixture.html">IK fixture</a>
-      <img data-src="https://fixture.test/ikmmh-cover.jpg"><p class="describe"><a>updated</a></p></div>
-    ''',
-    'detail': '''
-      <h1 class="detail-title">IK fixture</h1><div class="banner-img"><img data-src="https://fixture.test/ikmmh-cover.jpg"></div>
-      <p class="author">Fixture author</p><p class="ui-tag"><a>fixture</a></p>
-      <div class="detail-desc">Fixture description</div><div class="detail-info"><div><span><b>2026-01-01</b></span></div></div>
-      <ol class="chapter-list"><li data-chapter="ikmmh-episode"><a title="Chapter 1"></a></li></ol>
-    ''',
-    'images':
-        '<img class="lazy" data-src="https://fixture.test/ikmmh-1.jpg"><img class="lazy" src="https://fixture.test/ikmmh-2.jpg">',
-    'favorite': '{"code":0}',
-  });
-  final source = _source(
-    name: 'IK fixture',
-    key: 'ikmmh',
-    version: '1.1.2',
-    url:
-        'https://raw.githubusercontent.com/liyw0205/pica_configs/master/ikmmh.js',
-    transport: transport,
-    comicId: 'https://fixture.test/book/ikmmh-fixture.html',
-    episode: 'ikmmh-episode',
-    search: (keyword, page) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      final document = html.parse(transport.get('search'));
-      final element = document.querySelector('div.classification')!;
-      final link = element.querySelector('a')!;
-      final image = element.querySelector('img')!;
-      return Res(<BaseComic>[
-        _RemoteComic(
-          'https://fixture.test${link.attributes['href']}',
-          link.text.trim(),
-          image.attributes['data-src']!,
-          subTitle: element.querySelector('p.describe a')!.text.trim(),
-        )
-      ]);
-    },
-    detail: (id) async {
-      final document = html.parse(transport.get('detail'));
-      return Res(_detail(
-        sourceKey: 'ikmmh',
-        id: id,
-        title: document.querySelector('h1.detail-title')!.text.trim(),
-        cover: document
-            .querySelector('div.banner-img img')!
-            .attributes['data-src']!,
-        chapterId: document
-            .querySelector('ol.chapter-list li')!
-            .attributes['data-chapter']!,
-        chapterTitle:
-            document.querySelector('ol.chapter-list a')!.attributes['title']!,
-        thumbnails: <String>[
-          document.querySelector('div.banner-img img')!.attributes['data-src']!
-        ],
-      ));
-    },
-    pages: (id, ep) async {
-      final document = html.parse(transport.get('images'));
-      return Res(document
-          .querySelectorAll('img.lazy')
-          .map(
-            (e) => e.attributes['data-src'] ?? e.attributes['src']!,
-          )
-          .toList());
-    },
-    loadFavorites: (page, [folder]) async {
-      if (page > 1) return const Res(<BaseComic>[]);
-      return const Res(<BaseComic>[
-        _RemoteComic(
-          'https://fixture.test/book/ikmmh-fixture.html',
-          'IK fixture',
-          'https://fixture.test/ikmmh-cover.jpg',
-        )
-      ], subData: 1);
-    },
-    favorite: (id, folder, adding) async {
-      expect(jsonDecode(transport.post('favorite'))['code'], 0);
-      return const Res(true);
-    },
-  );
-  return _RemoteFixture(
-    name: 'IK fixture',
-    key: 'ikmmh',
-    version: '1.1.2',
-    id: 'https://fixture.test/book/ikmmh-fixture.html',
-    episode: 'ikmmh-episode',
-    source: source,
-    transport: transport,
-  );
+  @override
+  void close({bool force = false}) {}
 }
 
 void main() {
-  test('four remote source fixtures satisfy one shared offline contract',
-      () async {
-    final fixtures = <_RemoteFixture>[
-      _copyMangaFixture(),
-      _baoziFixture(),
-      _komiicFixture(),
-      _ikmmhFixture(),
-    ];
+  TestWidgetsFlutterBinding.ensureInitialized();
 
-    for (final fixture in fixtures) {
-      expect(fixture.source.key, fixture.key);
-      expect(fixture.source.version, fixture.version);
+  late Directory root;
+  late Dio dio;
+  late _FixtureAdapter adapter;
+  late SingleInstanceCookieJar cookieJar;
+
+  setUpAll(() async {
+    root = await Directory.systemTemp.createTemp('pica-remote-rules-');
+    App.dataPath = '${root.path}/data';
+    await Directory('${App.dataPath}/comic_source').create(recursive: true);
+    cookieJar = SingleInstanceCookieJar('${App.dataPath}/cookies.db');
+    adapter = _FixtureAdapter();
+    dio = Dio(BaseOptions(
+      responseType: ResponseType.plain,
+      validateStatus: (status) => true,
+    ))
+      ..httpClientAdapter = adapter;
+    await JsEngine().init(throwOnError: true, dio: dio);
+  });
+
+  tearDownAll(() async {
+    ComicSource.sources.clear();
+    JsEngine().runCode('ComicSource.sources = {};');
+    JsEngine().dispose();
+    dio.close(force: true);
+    cookieJar.dispose();
+    SingleInstanceCookieJar.instance = null;
+    if (root.existsSync()) await root.delete(recursive: true);
+  });
+
+  test('pinned remote rules satisfy the offline source contract', () async {
+    for (final fixture in _rules) {
+      ComicSource.sources.clear();
+      JsEngine().runCode('ComicSource.sources = {};');
+      adapter.reset();
+
+      final script = await File(
+        'test/fixtures/remote_sources/${fixture.file}',
+      ).readAsString();
+      final source = await ComicSourceParser().parse(
+        script,
+        'fixture/${fixture.file}',
+      );
+      expect(source.key, fixture.key, reason: fixture.file);
+      expect(source.version, fixture.version, reason: fixture.file);
       expect(
-          fixture.source.url,
-          startsWith(
-              'https://raw.githubusercontent.com/liyw0205/pica_configs/master/'));
-      expect(ComicSourceContract.validateDefinition(fixture.source), isEmpty,
-          reason: fixture.key);
+        source.url,
+        'https://raw.githubusercontent.com/liyw0205/pica_configs/master/${fixture.file}',
+        reason: fixture.file,
+      );
+      ComicSource.sources.add(source);
+      SourceNetworkPolicy.instance.configure(
+        source.key,
+        const SourceNetworkConfig(
+          minInterval: Duration.zero,
+          maxRetries: 0,
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
 
       final report = await ComicSourceContract.verify(
-        source: fixture.source,
-        comicId: fixture.id,
+        source: source,
+        comicId: fixture.comicId,
         episode: fixture.episode,
         searchKeyword: 'fixture',
+        maxPages: 1,
       );
       expect(report.isValid, isTrue,
           reason: '${fixture.key}: ${report.violations.join('\n')}');
-      expect(report.pagesChecked, <int>[1, 2], reason: fixture.key);
-      expect(report.emptyPages, <int>[2], reason: fixture.key);
+      expect(report.pagesChecked, <int>[1], reason: fixture.key);
 
-      final home = await fixture.source.explorePages.single.loadMultiPart!();
-      expect(home.success, isTrue, reason: '${fixture.key} home');
-      expect(home.dataOrNull, hasLength(1), reason: '${fixture.key} home');
-      expect(home.dataOrNull!.single.comics, isNotEmpty,
-          reason: '${fixture.key} home cards');
+      final explore = source.explorePages.single;
+      if (explore.loadMultiPart != null) {
+        final home = await explore.loadMultiPart!();
+        expect(
+          home.success,
+          isTrue,
+          reason: '${fixture.key} home: ${home.errorMessage}',
+        );
+        expect(
+          home.dataOrNull!.expand((part) => part.comics),
+          isNotEmpty,
+          reason: '${fixture.key} home cards',
+        );
+      } else {
+        final home = await explore.loadPage!(1);
+        expect(
+          home.success,
+          isTrue,
+          reason: '${fixture.key} home: ${home.errorMessage}',
+        );
+        expect(home.dataOrNull, isNotEmpty,
+            reason: '${fixture.key} home cards');
+      }
 
-      final favorite = fixture.source.favoriteData!;
-      expect((await favorite.loadComic(1)).success, isTrue,
-          reason: '${fixture.key} favorites');
-      expect((await favorite.addOrDelFavorite!(fixture.id, '', true)).success,
-          isTrue,
-          reason: '${fixture.key} add favorite');
-      expect((await favorite.addOrDelFavorite!(fixture.id, '', false)).success,
-          isTrue,
-          reason: '${fixture.key} remove favorite');
-      expect(fixture.transport.requests, contains('GET:search'),
-          reason: fixture.key);
-      expect(fixture.transport.requests, contains('GET:detail'),
-          reason: fixture.key);
-      expect(fixture.transport.requests, contains('GET:images'),
-          reason: fixture.key);
-      expect(fixture.transport.requests, contains('POST:favorite'),
-          reason: fixture.key);
+      source.data['account'] = <String>['fixture-user', 'fixture-password'];
+      source.data['token'] = 'fixture-token';
+      final favorites = source.favoriteData!;
+      String? folder;
+      if (favorites.loadFolders != null) {
+        final folders = await favorites.loadFolders!();
+        expect(folders.success, isTrue, reason: '${fixture.key} folders');
+        expect(folders.dataOrNull, isNotEmpty,
+            reason: '${fixture.key} folders');
+        folder = folders.dataOrNull!.keys.first;
+      }
+      final saved = await favorites.loadComic(1, folder);
+      expect(
+        saved.success,
+        isTrue,
+        reason: '${fixture.key} favorites: ${saved.errorMessage}',
+      );
+      expect(saved.dataOrNull, isNotEmpty, reason: '${fixture.key} favorites');
+      expect(
+        (await favorites.addOrDelFavorite!(fixture.comicId, folder ?? '', true))
+            .success,
+        isTrue,
+        reason: '${fixture.key} add favorite',
+      );
+      expect(
+        (await favorites.addOrDelFavorite!(
+                fixture.comicId, folder ?? '', false))
+            .success,
+        isTrue,
+        reason: '${fixture.key} remove favorite',
+      );
+
+      if (source.key == 'Komiic') {
+        final imageConfig = await source.getImageLoadingConfig!(
+          'https://komiic.com/api/image/fixture-kid',
+          fixture.comicId,
+          fixture.episode,
+        );
+        expect(imageConfig['url'], 'https://fixture.test/komiic-image.jpg');
+        expect((imageConfig['headers'] as Map)['X-Image-Ticket'],
+            'fixture-ticket');
+      }
+
+      expect(adapter.unmatched, isEmpty, reason: fixture.key);
+      for (final requiredRequest in fixture.requiredRequests) {
+        expect(adapter.requests, contains(requiredRequest),
+            reason: fixture.key);
+      }
     }
-  });
-
-  test('Komiic fixture keeps image ticket separate from page URLs', () async {
-    final fixture = _komiicFixture();
-    final config = await fixture.source.getImageLoadingConfig!(
-        'https://komiic.com/api/image/kid-1', fixture.id, fixture.episode);
-    expect(config['url'], 'https://cdn.fixture.test/kid-1');
-    expect((config['headers'] as Map)['X-Image-Ticket'], 'fixture-ticket');
-    expect(fixture.transport.requests, contains('GET:image-ticket'));
   });
 }

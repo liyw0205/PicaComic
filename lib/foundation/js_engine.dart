@@ -60,13 +60,15 @@ class JsEngine with _JSEngineApi {
     JsEngine().init();
   }
 
-  Future<void> init({bool throwOnError = false}) async {
+  Future<void> init({bool throwOnError = false, Dio? dio}) async {
     if (!_closed) {
       return;
     }
     try {
-      _dio ??= logDio(BaseOptions(
-          responseType: ResponseType.plain, validateStatus: (status) => true));
+      _dio ??= dio ??
+          logDio(BaseOptions(
+              responseType: ResponseType.plain,
+              validateStatus: (status) => true));
       _cookieJar ??= SingleInstanceCookieJar.instance!;
       _dio!.interceptors.add(CookieManagerSql(_cookieJar!));
       _dio!.interceptors.add(CloudflareInterceptor());
