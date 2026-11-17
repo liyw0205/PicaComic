@@ -502,7 +502,8 @@ void main() {
     expect(result.data.cover, 'http://fixture.test/cover.jpg');
   });
 
-  test('WNACG thumbnails fallback retries an unpaged first page', () async {
+  test('WNACG thumbnails normalize the domain and fallback first page',
+      () async {
     final oldSettings = List<String>.from(appdata.settings);
     final oldOverrides = HttpOverrides.current;
     final oldProxyOverrides = proxyHttpOverrides;
@@ -535,7 +536,7 @@ void main() {
       await appRoot.delete(recursive: true);
     });
 
-    appdata.settings[31] = 'http://127.0.0.1:${server.port}';
+    appdata.settings[31] = 'http://127.0.0.1:${server.port}/';
     appdata.settings[8] = '';
     appdata.settings[58] = '0';
     proxyHttpOverrides = null;
