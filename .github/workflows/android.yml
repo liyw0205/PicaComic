@@ -232,6 +232,9 @@ jobs:
         with:
           name: PicaComic-${{ github.ref_name }}-android
           path: release
+      - name: Generate release notes from commits
+        shell: bash
+        run: bash tool/generate_release_notes.sh "$GITHUB_SHA" "$RUNNER_TEMP/release-notes.md"
       - name: Upload APKs to GitHub Releases
         shell: bash
         env:
@@ -263,11 +266,11 @@ jobs:
             gh release edit "$tag" \
               --target "$GITHUB_SHA" \
               --title "$tag" \
-              --notes "Automated Android release build."
+              --notes-file "$RUNNER_TEMP/release-notes.md"
           else
             gh release create "$tag" release/*.apk release/SHA256SUMS \
               release/apk-metadata.json \
               --target "$GITHUB_SHA" \
               --title "$tag" \
-              --notes "Automated Android release build."
+              --notes-file "$RUNNER_TEMP/release-notes.md"
           fi

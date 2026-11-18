@@ -162,6 +162,40 @@ class _HtmlDetailFallbackAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _EmptyGalleryImageAdapter implements HttpClientAdapter {
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    if (options.uri.path.startsWith('/api/v2/')) {
+      return ResponseBody.fromString(
+        '{"error":"fixture API unavailable"}',
+        503,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+    final embedded = jsonEncode({
+      'body': jsonEncode({'media_id': 42, 'pages': const []}),
+    });
+    return ResponseBody.fromString(
+      '<script>$embedded</script>'
+      '<div id="image-container"><a><img '
+      'src="https://i.nhentai.net/galleries/42/1.jpg"></a></div>',
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 class _RedirectAdapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];
 
@@ -537,6 +571,36 @@ void main() {
     expect(adapter.requests.map((request) => request.uri.path), [
       '/api/v2/galleries/42',
       '/g/42/',
+    ]);
+  });
+
+  test('HTML image fallback rejects an empty gallery', () async {
+    final network = NhentaiNetwork();
+    final savedCookieJar = network.cookieJar;
+    final savedSettings = List<String>.from(appdata.settings);
+    final savedOverrides = HttpOverrides.current;
+    final savedProxyOverrides = proxyHttpOverrides;
+    final adapter = _EmptyGalleryImageAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    network.cookieJar = _UnusedCookieJar();
+    network.dio = dio;
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    proxyHttpOverrides = null;
+    addTearDown(() {
+      network.cookieJar = savedCookieJar;
+      appdata.settings = savedSettings;
+      HttpOverrides.global = savedOverrides;
+      proxyHttpOverrides = savedProxyOverrides;
+      dio.close();
+    });
+
+    final result = await network.getImages('42');
+    expect(result.error, isTrue);
+    expect(result.errorMessage, contains('图片列表为空'));
+    expect(adapter.requests.map((request) => request.uri.path), [
+      '/api/v2/galleries/42',
+      '/g/42/1/',
     ]);
   });
 

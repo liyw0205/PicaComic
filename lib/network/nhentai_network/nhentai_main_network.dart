@@ -1132,11 +1132,25 @@ class NhentaiNetwork {
           .querySelector("#image-container > a > img")!
           .attributes["src"]!;
 
-      String baseUrl = url.split('/galleries')[0];
+      final imageBaseUrl = url.split('/galleries')[0];
 
       var images = <String>[];
-      for (var image in galleryData["pages"]) {
-        images.add("$baseUrl/${image["path"]}");
+      final pages = galleryData["pages"];
+      if (pages is! List) {
+        return const Res.error("图片列表为空");
+      }
+      for (var image in pages) {
+        if (image is! Map) continue;
+        final path = image["path"]?.toString().trim() ?? "";
+        if (path.isEmpty) continue;
+        final parsed = Uri.tryParse(path);
+        images.add(parsed?.hasScheme == true
+            ? path
+            : Uri.parse("$imageBaseUrl/").resolve(path).toString());
+      }
+
+      if (images.isEmpty) {
+        return const Res.error("图片列表为空");
       }
 
       return Res(images);
