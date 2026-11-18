@@ -9,7 +9,6 @@ import 'package:pica_comic/components/components.dart';
 import "package:pica_comic/foundation/app.dart";
 import "package:pica_comic/foundation/local_favorites.dart";
 import "package:pica_comic/foundation/log.dart";
-import "package:pica_comic/network/download.dart";
 import "package:pica_comic/network/network_logging.dart";
 import "package:pica_comic/tools/translations.dart";
 
