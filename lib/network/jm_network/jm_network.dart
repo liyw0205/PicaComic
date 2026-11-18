@@ -993,8 +993,14 @@ class JmNetwork {
     try {
       if (folder != null) {
         var res = await post("$baseUrl/favorite", "aid=$id&$baseData");
+        if (res.error) {
+          return Res(null, errorMessage: res.errorMessage);
+        }
         if (res.data["type"] != "add") {
           res = await post("$baseUrl/favorite", "aid=$id&$baseData");
+          if (res.error) {
+            return Res(null, errorMessage: res.errorMessage);
+          }
         }
         Res res2 = const Res(true);
         if (folder != "0") {
@@ -1007,8 +1013,14 @@ class JmNetwork {
         }
       } else {
         var res = await post("$baseUrl/favorite", "aid=$id&$baseData");
+        if (res.error) {
+          return Res(null, errorMessage: res.errorMessage);
+        }
         if (res.data["type"] == "add") {
           res = await post("$baseUrl/favorite", "aid=$id&$baseData");
+          if (res.error) {
+            return Res(null, errorMessage: res.errorMessage);
+          }
         }
         return const Res(false);
       }
