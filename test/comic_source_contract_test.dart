@@ -856,4 +856,33 @@ void main() {
       throwsA(isA<ComicSourceParseException>()),
     );
   });
+
+  test('source save recovers after a failed atomic write', () async {
+    final source = ComicSource.named(
+      name: 'Save fixture',
+      key: 'blocked/nested',
+      filePath: 'test-fixture',
+    );
+    final sourceDirectory = Directory('${App.dataPath}/comic_source');
+    await sourceDirectory.create(recursive: true);
+    final blocked = File('${sourceDirectory.path}/blocked');
+    await blocked.writeAsString('not a directory');
+
+    source.data['state'] = 'failed';
+    await expectLater(source.saveData(), throwsA(isA<FileSystemException>()));
+
+    await blocked.delete();
+    source.data['state'] = 'recovered';
+    await source.saveData().timeout(const Duration(seconds: 1));
+
+    final saved = File('${sourceDirectory.path}/blocked/nested.data');
+    expect(jsonDecode(await saved.readAsString()), {'state': 'recovered'});
+    expect(
+      await saved.parent
+          .list()
+          .where((entry) => entry.path.contains('.tmp'))
+          .toList(),
+      isEmpty,
+    );
+  });
 }

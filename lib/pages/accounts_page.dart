@@ -77,9 +77,13 @@ class AccountsPage extends StatelessWidget {
                   registerWebsite: element.account!.registerWebsite,
                 ),
               );
-              element.saveData();
+              try {
+                await element.saveData();
+              } catch (_) {
+                if (context.mounted) showToast(message: "保存失败".tl);
+              }
             }
-            controller.update();
+            if (!controller.isDisposed) controller.update();
           },
         );
       }
@@ -144,11 +148,15 @@ class AccountsPage extends StatelessWidget {
         }
         yield ListTile(
           title: Text("退出登录".tl),
-          onTap: () {
+          onTap: () async {
             element.data["account"] = null;
             element.account?.logout();
-            element.saveData();
-            controller.update();
+            try {
+              await element.saveData();
+            } catch (_) {
+              if (context.mounted) showToast(message: "保存失败".tl);
+            }
+            if (!controller.isDisposed) controller.update();
           },
           trailing: const Icon(Icons.logout),
         );

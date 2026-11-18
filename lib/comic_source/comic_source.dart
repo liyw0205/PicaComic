@@ -192,23 +192,18 @@ class ComicSource {
     }
   }
 
-  bool _isSaving = false;
-  bool _haveWaitingTask = false;
+  Future<void> _saveTail = Future<void>.value();
 
+  /// Serializes source snapshots and keeps a failed write from wedging later
+  /// saves. Each call captures its own state before entering the queue.
   Future<void> saveData() async {
-    if (_haveWaitingTask) return;
-    while (_isSaving) {
-      _haveWaitingTask = true;
-      await Future.delayed(const Duration(milliseconds: 20));
-      _haveWaitingTask = false;
-    }
-    _isSaving = true;
-    var file = File("${App.dataPath}/comic_source/$key.data");
-    if (!await file.exists()) {
-      await file.create(recursive: true);
-    }
-    await file.writeAsString(jsonEncode(data));
-    _isSaving = false;
+    final snapshot = jsonEncode(data);
+    final operation = _saveTail.then<void>((_) async {
+      final file = File("${App.dataPath}/comic_source/$key.data");
+      await writeTextFileAtomically(file, snapshot);
+    });
+    _saveTail = operation.then<void>((_) {}, onError: (_, __) {});
+    await operation;
   }
 
   Future<bool> reLogin() async {
