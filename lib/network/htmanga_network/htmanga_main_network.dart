@@ -459,7 +459,11 @@ class HtmangaNetwork {
       return Res(null, errorMessage: res.errorMessage);
     }
     try {
-      return Res(parseImageList(res.data));
+      final images = parseImageList(res.data);
+      if (images.isEmpty) {
+        return const Res.error("图片列表为空");
+      }
+      return Res(images);
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");

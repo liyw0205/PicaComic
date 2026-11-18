@@ -91,6 +91,10 @@ class DownloadingHtComic extends DownloadingItem {
     final chapters = comic.chapters;
     if (chapters == null || chapters.isEmpty) {
       var res = await HtmangaNetwork().getImages(comic.id);
+      if (res.error || res.data.isEmpty) {
+        throw StateError(
+            'Failed to load WNACG images: ${res.errorMessage ?? "empty image list"}');
+      }
       return {0: res.data};
     }
     final links = <int, List<String>>{};

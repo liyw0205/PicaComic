@@ -142,6 +142,17 @@ ComicSource _fixtureSource({
 }
 
 void main() {
+  late Directory htmangaTestRoot;
+
+  setUpAll(() async {
+    htmangaTestRoot =
+        await Directory.systemTemp.createTemp('pica-htmanga-contract-');
+    App.cachePath = htmangaTestRoot.path;
+    App.dataPath = htmangaTestRoot.path;
+  });
+
+  tearDownAll(() => htmangaTestRoot.delete(recursive: true));
+
   test('random categories bound the sample and include the final legal start',
       () {
     final tags = List.generate(4, (index) => 'tag$index');
@@ -502,14 +513,40 @@ void main() {
     expect(result.data.cover, 'http://fixture.test/cover.jpg');
   });
 
+  test('WNACG empty gallery image lists fail explicitly', () async {
+    final oldSettings = List<String>.from(appdata.settings);
+    final oldOverrides = HttpOverrides.current;
+    final oldProxyOverrides = proxyHttpOverrides;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen((request) async {
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentType = ContentType.html;
+      request.response.write('<script>var imglist = [];</script>');
+      await request.response.close();
+    });
+    addTearDown(() async {
+      await subscription.cancel();
+      await server.close(force: true);
+      appdata.settings = oldSettings;
+      proxyHttpOverrides = oldProxyOverrides;
+      HttpOverrides.global = oldOverrides;
+    });
+
+    appdata.settings[31] = 'http://127.0.0.1:${server.port}';
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    proxyHttpOverrides = null;
+
+    final result = await HtmangaNetwork().getImages('405322');
+    expect(result.error, isTrue);
+    expect(result.errorMessage, contains('图片列表为空'));
+  });
+
   test('WNACG thumbnails normalize the domain and fallback first page',
       () async {
     final oldSettings = List<String>.from(appdata.settings);
     final oldOverrides = HttpOverrides.current;
     final oldProxyOverrides = proxyHttpOverrides;
-    final appRoot = await Directory.systemTemp.createTemp('pica-htmanga-');
-    App.cachePath = appRoot.path;
-    App.dataPath = appRoot.path;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final paths = <String>[];
     const detailHtml = '''
@@ -538,7 +575,6 @@ void main() {
       appdata.settings = oldSettings;
       proxyHttpOverrides = oldProxyOverrides;
       HttpOverrides.global = oldOverrides;
-      await appRoot.delete(recursive: true);
     });
 
     appdata.settings[31] = 'http://127.0.0.1:${server.port}/';
