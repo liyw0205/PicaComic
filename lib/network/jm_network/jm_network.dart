@@ -1007,7 +1007,8 @@ class JmNetwork {
           res2 = await moveToFolder(id, folder);
         }
         if (res.error || res2.error) {
-          return Res(null, errorMessage: res.errorMessage);
+          return Res(null,
+              errorMessage: res.errorMessage ?? res2.errorMessage);
         } else {
           return const Res(true);
         }

@@ -55,4 +55,17 @@ void main() {
     expect(result.data, isFalse);
     expect(network.requests, hasLength(2));
   });
+
+  test('adding to a folder reports a failed move', () async {
+    final network = _FavoriteNetwork([
+      const Res<dynamic>({'type': 'add'}),
+      const Res.error('folder unavailable'),
+    ]);
+
+    final result = await network.favorite('123', '42');
+
+    expect(result.success, isFalse);
+    expect(result.errorMessage, 'folder unavailable');
+    expect(network.requests, hasLength(2));
+  });
 }
