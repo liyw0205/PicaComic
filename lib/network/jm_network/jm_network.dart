@@ -764,6 +764,11 @@ class JmNetwork {
       return Res(null, errorMessage: res.errorMessage);
     }
     try {
+      int parseCount(dynamic value) {
+        if (value is num) return value.toInt();
+        return int.tryParse(value?.toString() ?? '') ?? 0;
+      }
+
       var author = <String>[];
       for (var s in res.data["author"] ?? "未知") {
         author.add(s);
@@ -802,8 +807,8 @@ class JmNetwork {
           id,
           author,
           res.data["description"] ?? "无",
-          int.parse(res.data["likes"] ?? "0"),
-          int.parse(res.data["total_views"] ?? "0"),
+          parseCount(res.data["likes"]),
+          parseCount(res.data["total_views"]),
           series,
           tags,
           works,
@@ -811,7 +816,7 @@ class JmNetwork {
           related,
           res.data["liked"] ?? false,
           res.data["is_favorite"] ?? false,
-          int.parse(res.data["comment_total"] ?? "0"),
+          parseCount(res.data["comment_total"]),
           epNames));
     } catch (e, s) {
       LogManager.addLog(

@@ -10,6 +10,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/built_in/jm.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/network/cache_network.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/jm_network/domain_selection.dart';
 import 'package:pica_comic/network/jm_network/jm_network.dart';
@@ -58,6 +59,20 @@ class _LoginNetwork extends JmNetwork {
     checkinRelogin = allowReLogin;
     checkinFinished.complete();
     return const Res.error('Optional check-in unavailable');
+  }
+}
+
+class _ComicInfoNetwork extends JmNetwork {
+  _ComicInfoNetwork(this.payload) : super.create();
+
+  final Map<String, dynamic> payload;
+
+  @override
+  Future<Res<dynamic>> get(String url,
+      {Map<String, String>? header,
+      CacheExpiredTime expiredTime = CacheExpiredTime.long,
+      bool isRetry = false}) async {
+    return Res(payload);
   }
 }
 
@@ -200,6 +215,30 @@ void main() {
     expect(await network.selectDomain(), 1);
     expect(adapter.closed, isTrue);
     expect(adapter.cancelToken?.isCancelled, isTrue);
+  });
+
+  test('comic details accept numeric counters from JSON', () async {
+    final network = _ComicInfoNetwork({
+      'name': 'Fixture comic',
+      'author': ['Fixture author'],
+      'description': 'Description',
+      'likes': 12,
+      'total_views': 345,
+      'comment_total': 6,
+      'series': [],
+      'tags': ['fixture'],
+      'works': [],
+      'actors': [],
+      'related_list': [],
+      'liked': false,
+      'is_favorite': false,
+    });
+
+    final result = await network.getComicInfo('42');
+    expect(result.success, isTrue);
+    expect(result.data.likes, 12);
+    expect(result.data.views, 345);
+    expect(result.data.comments, 6);
   });
 
   test('unavailable lines never receive credentials', () async {
