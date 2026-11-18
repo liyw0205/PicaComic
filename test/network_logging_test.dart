@@ -203,6 +203,13 @@ void main() {
     );
   });
 
+  test('Cloudflare completion is delivered only once', () {
+    final gate = CloudflareCompletionGate();
+
+    expect(gate.tryComplete(), isTrue);
+    expect(gate.tryComplete(), isFalse);
+  });
+
   test('ordinary 403 responses remain Dio errors', () async {
     final dio = Dio()
       ..httpClientAdapter = _ResponseAdapter(headers: <String, List<String>>{})

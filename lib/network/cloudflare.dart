@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
@@ -56,6 +57,17 @@ class CloudflareException implements DioException {
   DioExceptionType get type => DioExceptionType.badResponse;
 }
 
+@visibleForTesting
+class CloudflareCompletionGate {
+  bool _completed = false;
+
+  bool tryComplete() {
+    if (_completed) return false;
+    _completed = true;
+    return true;
+  }
+}
+
 class CloudflareInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -98,15 +110,11 @@ Future<void> passCloudflare(
     CloudflareException e, void Function() onFinished) async {
   var url = e.url;
   var uri = Uri.parse(url);
-  var finished = false;
+  final completionGate = CloudflareCompletionGate();
   var completionInProgress = false;
 
   void finishOnce() {
-    if (finished) {
-      return;
-    }
-    finished = true;
-    onFinished();
+    if (completionGate.tryComplete()) onFinished();
   }
 
   void saveCookies(Map<String, String> cookies) {
@@ -130,7 +138,7 @@ Future<void> passCloudflare(
     var webview = DesktopWebview(
       initialUrl: url,
       onTitleChange: (title, controller) async {
-        if (finished || completionInProgress) {
+        if (completionGate._completed || completionInProgress) {
           return;
         }
         var res = await controller.evaluateJavascript(
@@ -163,7 +171,7 @@ Future<void> passCloudflare(
         initialUrl: url,
         singlePage: true,
         onTitleChange: (title, controller) async {
-          if (finished || completionInProgress) {
+          if (completionGate._completed || completionInProgress) {
             return;
           }
           var res = await controller.platform.evaluateJavascript(
