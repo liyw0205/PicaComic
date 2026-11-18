@@ -210,6 +210,21 @@ void main() {
         ['reorder-second', 'reorder-first']);
   });
 
+  test('folder import completes after its persistence boundary', () async {
+    final imported = comic('imported')..time = '2026-11-18 12:00:00';
+    final result = await favorites.loadFolderData(jsonEncode({
+      'name': 'imported-folder',
+      'comics': [imported.toJson()],
+    }));
+
+    expect(result, (false, ''));
+    expect(
+        favorites
+            .getComic('imported-folder', imported.target, imported.type)
+            .toJson(),
+        imported.toJson());
+  });
+
   test('normal scope leaves synchronization enabled for user writes', () async {
     final image = favorite('normal');
     await DataMaintenance.run(() async {

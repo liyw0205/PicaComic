@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
@@ -798,7 +799,7 @@ class LocalFavoritesManager {
       on ${_identifier(name)}(display_order, target, type);
     ''');
     _modifiedAfterLastCache = true;
-    saveData();
+    unawaited(saveData());
     return name;
   }
 
@@ -1106,7 +1107,7 @@ class LocalFavoritesManager {
     return const JsonEncoder().convert(data);
   }
 
-  (bool, String) loadFolderData(String dataString) {
+  Future<(bool, String)> loadFolderData(String dataString) async {
     if (DataMaintenance.busy) {
       return (true, 'Data maintenance in progress');
     }
@@ -1131,7 +1132,7 @@ class LocalFavoritesManager {
         }
       });
       updateUI();
-      saveData();
+      await saveData();
       return (false, "");
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "IO",

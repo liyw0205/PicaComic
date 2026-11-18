@@ -229,7 +229,7 @@ class CreateFolderDialog extends StatelessWidget {
                     return;
                   }
                   var (error, message) =
-                      LocalFavoritesManager().loadFolderData(data);
+                      await LocalFavoritesManager().loadFolderData(data);
                   if (error) {
                     showToast(message: message);
                   } else {
