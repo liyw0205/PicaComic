@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -129,7 +130,7 @@ class JsEngine with _JSEngineApi {
               var source = ComicSource.sources
                   .firstWhere((element) => element.key == key);
               source.data[dataKey] = data;
-              source.saveData();
+              unawaited(source.saveData());
             }
           case 'delete_data':
             {
@@ -138,7 +139,7 @@ class JsEngine with _JSEngineApi {
               var source = ComicSource.sources
                   .firstWhereOrNull((element) => element.key == key);
               source?.data.remove(dataKey);
-              source?.saveData();
+              if (source != null) unawaited(source.saveData());
             }
           case 'http':
             {

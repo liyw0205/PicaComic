@@ -214,7 +214,7 @@ class PicacgNetwork {
     }
     user = res.data;
     picacg.data['user'] = user!.toJson();
-    picacg.saveData();
+    await picacg.saveData();
     return const Res(true);
   }
 

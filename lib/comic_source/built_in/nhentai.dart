@@ -97,7 +97,7 @@ final nhentai = ComicSource.named(
       if (NhentaiNetwork().logged) {
         var source = ComicSource.find('nhentai')!;
         source.data["account"] = 'ok';
-        source.saveData();
+        await source.saveData();
       }
     },
     logout: () {
@@ -105,7 +105,7 @@ final nhentai = ComicSource.named(
       NhentaiNetwork().logout();
       var source = ComicSource.find('nhentai')!;
       source.data["account"] = null;
-      source.saveData();
+      unawaited(source.saveData());
     },
     allowReLogin: false,
   ),

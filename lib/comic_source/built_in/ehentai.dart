@@ -156,7 +156,7 @@ final ehentai = ComicSource.named(
       if (ehentai.data['name'] != null) {
         ehentai.data['account'] = 'ok';
       }
-      ehentai.saveData();
+      await ehentai.saveData();
     },
     logout: () {
       var ehentai = ComicSource.find('ehentai')!;

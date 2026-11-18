@@ -587,7 +587,7 @@ class EhNetwork {
           if (!isSame) {
             folderNames = names;
             ehentai.data["favoriteNames"] = names;
-            ehentai.saveData();
+            await ehentai.saveData();
           }
         } catch (e) {
           //忽视

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
@@ -74,7 +75,7 @@ final picacg = ComicSource.named(
       var picacg = ComicSource.find('picacg')!;
       picacg.data['user'] = null;
       picacg.data['token'] = null;
-      picacg.saveData();
+      unawaited(picacg.saveData());
     },
     infoItems: [
       AccountInfoItem(title: "账号", data: () => network.user?.email ?? ''),
@@ -127,7 +128,7 @@ final picacg = ComicSource.named(
   ],
   categoryComicsData: CategoryComicsData.named(
     load: (category, param, options, page) async {
-      if(category == "random") {
+      if (category == "random") {
         return PicacgNetwork().getRandomComics();
       } else if (category == "latest") {
         return PicacgNetwork().getLatest(page);
@@ -163,7 +164,8 @@ final picacg = ComicSource.named(
   ),
   searchPageData: SearchPageData.named(
     loadPage: (keyword, page, options) {
-      return PicacgNetwork().search(keyword, options[0], page, addToHistory: true);
+      return PicacgNetwork()
+          .search(keyword, options[0], page, addToHistory: true);
     },
     searchOptions: [
       SearchOptions.named(

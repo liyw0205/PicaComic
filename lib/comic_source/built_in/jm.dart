@@ -184,7 +184,7 @@ final jm = ComicSource.named(
       var a = <String>[account, pwd];
       var source = ComicSource.find('jm')!;
       source.data['account'] = a;
-      source.saveData();
+      await source.saveData();
       return res;
     },
     logout: () {
