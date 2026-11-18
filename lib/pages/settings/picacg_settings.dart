@@ -30,7 +30,7 @@ class _PicacgSettingsState extends State<PicacgSettings> {
             values: ["分流1".tl, "分流2".tl, "分流3".tl],
             onChange: (i) {
               picacg.data['appChannel'] = (i + 1).toString();
-              picacg.saveData();
+              unawaited(picacg.saveData());
             },
           ),
         ),
@@ -44,7 +44,7 @@ class _PicacgSettingsState extends State<PicacgSettings> {
             values: ["低".tl, "中".tl, "高".tl, "原图".tl],
             onChange: (i) {
               picacg.data['imageQuality'] = _imageQualityValues[i];
-              picacg.saveData();
+              unawaited(picacg.saveData());
             },
           ),
         ),
