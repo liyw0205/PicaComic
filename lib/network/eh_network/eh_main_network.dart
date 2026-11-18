@@ -384,6 +384,29 @@ class EhNetwork {
         : image?.attributes['data-src'] ?? '';
   }
 
+  List<String> _listingTags(dom.Element item) {
+    final tags = <String>[];
+
+    void add(String? value) {
+      final tag = value?.trim() ?? '';
+      if (tag.isNotEmpty && !tags.contains(tag)) tags.add(tag);
+    }
+
+    for (final node in item.querySelectorAll('div.gt, div.gtl')) {
+      add(node.attributes['title'] ?? node.text);
+    }
+    if (tags.isEmpty) {
+      // Compact pages have used both nested title nodes and direct tag nodes.
+      // Restrict the fallback to namespaced titles so cover/link metadata is
+      // not exposed as a gallery tag.
+      for (final node in item.querySelectorAll('[title]')) {
+        final title = node.attributes['title'];
+        if (title?.contains(':') == true) add(title);
+      }
+    }
+    return tags;
+  }
+
   ///从e-hentai链接中获取当前页面的所有画廊
   Future<Res<Galleries>> getGalleries(String url,
       {bool leaderboard = false, bool favoritePage = false}) async {
@@ -424,11 +447,7 @@ class EhNetwork {
           } catch (e) {
             //收藏夹页没有uploader
           }
-          var tags = <String>[];
-          for (var node
-              in item.children[2 + t].children[0].children[1].children) {
-            tags.add(node.attributes["title"]!);
-          }
+          final tags = _listingTags(item);
 
           galleries.add(EhGalleryBrief(
               title, type, time, uploader, cover, stars, link!, tags,
@@ -464,7 +483,7 @@ class EhNetwork {
                   .nums ??
               "");
           galleries.add(EhGalleryBrief(
-              title, type, time, "", coverPath, stars, link, [],
+              title, type, time, "", coverPath, stars, link, _listingTags(item),
               pages: pages));
         } catch (e) {
           //忽视
@@ -498,10 +517,7 @@ class EhNetwork {
               "");
           final link =
               item.querySelector("td.gl1e > div > a")?.attributes["href"] ?? "";
-          final tags = item
-              .querySelectorAll('div.gt, div.gtl')
-              .map((e) => e.attributes["title"] ?? "")
-              .toList();
+          final tags = _listingTags(item);
           final pages = int.tryParse(item
                   .querySelectorAll("td.gl2e > div > div.gl3e > div")
                   .firstWhereOrNull((element) => element.text.contains("pages"))
@@ -539,8 +555,8 @@ class EhNetwork {
                   "");
           final link =
               item.querySelector("td.gl3m > a")?.attributes["href"] ?? "";
-          galleries.add(EhGalleryBrief(
-              title, type, time, uploader, coverPath, stars, link, []));
+          galleries.add(EhGalleryBrief(title, type, time, uploader, coverPath,
+              stars, link, _listingTags(item)));
         } catch (e) {
           //忽视
         }

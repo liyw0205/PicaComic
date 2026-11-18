@@ -103,6 +103,13 @@ const _watchedFixtures = {
     <div><div>2026-11-17 01:00</div><div class="ir" style="background-position:0px -1px"></div></div></td>
     <td><a href="$_listingLink"><div>Title</div><div><div title="female:glasses"></div></div></a></td>
     <td><div><a>User</a></div><div>12 pages</div></td></tr></tbody></table>''',
+  'compact-updated':
+      '''<table class="itg gltc"><tbody><tr><td><div>Manga</div></td>
+    <td><div></div><div><div>$_listingImage</div></div>
+    <div><div>2026-11-17 01:00</div><div class="ir" style="background-position:0px -1px"></div></div></td>
+    <td><a href="$_listingLink"><div>Title</div>
+    <div class="gt" title="female:updated"></div></a></td>
+    <td><div><a>User</a></div><div>12 pages</div></td></tr></tbody></table>''',
   'extended': '''<table class="itg glte"><tbody><tr>
     <td class="gl1e"><div><a href="$_listingLink">$_listingImage</a></div></td>
     <td class="gl2e"><div><a><div><div class="glink">Title</div></div></a>
@@ -561,6 +568,12 @@ void main() {
           expect(result.data.single.link, _listingLink, reason: fixture.key);
           expect(result.data.single.coverPath, 'https://img.invalid/cover.jpg',
               reason: fixture.key);
+          if (fixture.key == 'compact') {
+            expect(result.data.single.tags, ['female:glasses']);
+          }
+          if (fixture.key == 'compact-updated') {
+            expect(result.data.single.tags, ['female:updated']);
+          }
           final last = await pager.load(2);
           expect(last.data, isEmpty);
           expect(last.subData, 2);
