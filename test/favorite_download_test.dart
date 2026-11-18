@@ -12,6 +12,7 @@ import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/network/download_model.dart';
 import 'package:pica_comic/network/download_progress.dart';
 import 'package:pica_comic/network/favorite_download.dart';
+import 'package:pica_comic/pages/favorites/local_favorites.dart';
 import 'package:pica_comic/tools/translations.dart';
 
 class _TestDownloadingItem extends DownloadingItem {
@@ -177,6 +178,19 @@ void main() {
     );
 
     expect(favorite.toDownloadId(), 'Ht405320');
+  });
+
+  test('batch-safe favorite entry ignores an unavailable source', () {
+    final favorite = FavoriteItem(
+      target: 'fixture',
+      name: 'Unavailable source',
+      coverPath: '',
+      author: '',
+      type: FavoriteType(999),
+      tags: const [],
+    );
+
+    expect(favorite.addDownload, returnsNormally);
   });
 
   FavoriteDownloading createFavorite(Future<DownloadingItem> Function() load,

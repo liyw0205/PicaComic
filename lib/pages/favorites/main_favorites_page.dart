@@ -153,7 +153,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
                 () {
                   var comics = controller.selectedComics;
                   for (var comic in comics) {
-                    DownloadManager().addFavoriteDownload(comic);
+                    comic.addDownload();
                   }
                   showToast(message: "已添加下载任务".tl);
                 },
