@@ -1270,7 +1270,11 @@ extension AddDownloadExt on DownloadManager {
       0 => comic.target,
       1 => getGalleryId(comic.target),
       2 => "jm${comic.target}",
-      3 => "hitomi${RegExp(r"\d+(?=\.html)").firstMatch(comic.target)![0]!}",
+      3 => () {
+          final galleryId = hitomiGalleryIdFromTarget(comic.target);
+          if (galleryId == null) throw StateError('Invalid Hitomi target');
+          return "hitomi$galleryId";
+        }(),
       4 => "Ht${comic.target}",
       6 => "nhentai${comic.target}",
       _ => generateId(comic.type.comicSource.key, comic.target)

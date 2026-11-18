@@ -9,6 +9,7 @@ import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/comic_source/contract.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
@@ -268,6 +269,29 @@ void main() {
     expect(brief.tags, ['female:fixture ♀']);
     expect(brief.tagList.single.link, 'https://hitomi.la/tag/fixture.html');
     expect(brief.subTitle, 'N/A');
+    for (final target in [
+      'https://hitomi.la/galleries/42.html',
+      'https://hitomi.la/reader/42.html?from=app#page=3',
+      'https://hitomi.la/doujinshi/title-42.html',
+      '42',
+    ]) {
+      expect(hitomiGalleryIdFromTarget(target), '42');
+      expect(
+          canonicalHitomiTarget(target), 'https://hitomi.la/galleries/42.html');
+    }
+    expect(
+      FavoriteItem.fromHitomi(HitomiComicBrief(
+        'fixture',
+        'manga',
+        'chinese',
+        const [],
+        '',
+        'N/A',
+        'https://hitomi.la/reader/42.html?from=app',
+        'https://fixture.test/cover.jpg',
+      )).target,
+      'https://hitomi.la/galleries/42.html',
+    );
     expect(
       HitomiFile('01.webp', 'hash', false, true, 1, 1, '42').preferredExtension,
       'avif',

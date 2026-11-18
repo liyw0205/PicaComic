@@ -40,6 +40,25 @@ void main() {
     expect(manager.count(folder), 2);
   });
 
+  test('Hitomi favorites match and delete legacy URL variants', () async {
+    final manager = LocalFavoritesManager.create();
+    final path = '${directory.path}/hitomi-target-compat.db';
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('hitomi-targets');
+    final legacy = favorite('https://hitomi.la/reader/42.html', 3);
+    final canonical = favorite('https://hitomi.la/galleries/42.html', 3);
+    await manager.addComic(folder, legacy, null, false);
+
+    try {
+      expect(await manager.findWithModel(canonical), [folder]);
+      expect(manager.comicExists(folder, canonical.target, 3), isTrue);
+      await manager.deleteComic(folder, canonical);
+      expect(manager.comicExists(folder, legacy.target, 3), isFalse);
+    } finally {
+      manager.close();
+    }
+  });
+
   test('values round trip and tag updates retain source identity', () async {
     final manager = LocalFavoritesManager();
     final folder = manager.createFolder('values');

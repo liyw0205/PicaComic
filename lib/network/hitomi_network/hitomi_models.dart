@@ -1,6 +1,27 @@
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/network/base_comic.dart';
 
+/// Extract the stable Hitomi gallery id from the URL forms accepted by the
+/// site and by app links. Query strings and fragments are intentionally
+/// ignored because they do not identify a different gallery.
+String? hitomiGalleryIdFromTarget(String target) {
+  final value = target.trim();
+  if (RegExp(r'^\d+$').hasMatch(value)) return value;
+
+  final parsed = Uri.tryParse(value);
+  var path = parsed?.path ?? value.split(RegExp(r'[?#]')).first;
+  path = path.replaceFirst(RegExp(r'/+$'), '');
+  final fileName = path.split('/').last;
+  final htmlId =
+      RegExp(r'(\d+)(?=\.html$)', caseSensitive: false).firstMatch(fileName);
+  return htmlId?.group(1) ?? RegExp(r'(\d+)$').firstMatch(fileName)?.group(1);
+}
+
+String canonicalHitomiTarget(String target) {
+  final id = hitomiGalleryIdFromTarget(target);
+  return id == null ? target : 'https://hitomi.la/galleries/$id.html';
+}
+
 class Tag {
   String name;
   String link;

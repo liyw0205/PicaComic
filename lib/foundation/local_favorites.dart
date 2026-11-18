@@ -113,9 +113,9 @@ class FavoriteItem {
         ComicType.picacg => target,
         ComicType.ehentai => getGalleryId(target),
         ComicType.jm => "jm$target",
-        ComicType.hitomi => RegExp(r"\d+(?=\.html)").hasMatch(target)
-            ? "hitomi${RegExp(r"\d+(?=\.html)").firstMatch(target)?[0]}"
-            : target,
+        ComicType.hitomi => hitomiGalleryIdFromTarget(target) == null
+            ? target
+            : "hitomi${hitomiGalleryIdFromTarget(target)}",
         // WNACG download records use the same capitalized prefix as
         // DownloadManager.addHtDownload and DownloadedHtComic.id.
         ComicType.htManga => "Ht$target",
@@ -166,7 +166,7 @@ class FavoriteItem {
         type = FavoriteType.hitomi,
         tags = List.generate(
             comic.tagList.length, (index) => comic.tagList[index].name),
-        target = comic.link,
+        target = canonicalHitomiTarget(comic.link),
         coverPath = comic.cover;
 
   FavoriteItem.fromHtcomic(HtComicBrief comic)
@@ -243,12 +243,15 @@ class FavoriteItem {
   @override
   bool operator ==(Object other) {
     return other is FavoriteItem &&
-        other.target == target &&
+        _favoriteTargetsMatch(type, other.target, target) &&
         other.type == type;
   }
 
   @override
-  int get hashCode => target.hashCode ^ type.hashCode;
+  int get hashCode =>
+      (type == FavoriteType.hitomi ? canonicalHitomiTarget(target) : target)
+          .hashCode ^
+      type.hashCode;
 
   @override
   String toString() {
@@ -446,10 +449,7 @@ class LocalFavoritesManager {
   Future<List<String>> find(String target, FavoriteType type) async {
     var res = <String>[];
     for (var folder in folderNames) {
-      var rows = _db.select("""
-        select * from ${_identifier(folder)}
-        where target == ? and type == ?;
-      """, [target, type.key]);
+      final rows = _matchingRows(folder, target, type);
       if (rows.isNotEmpty) {
         res.add(folder);
       }
@@ -460,10 +460,7 @@ class LocalFavoritesManager {
   Future<List<String>> findWithModel(FavoriteItem item) async {
     var res = <String>[];
     for (var folder in folderNames) {
-      var rows = _db.select("""
-        select * from ${_identifier(folder)}
-        where target == ? and type == ?;
-      """, [item.target, item.type.key]);
+      final rows = _matchingRows(folder, item.target, item.type);
       if (rows.isNotEmpty) {
         res.add(folder);
       }
@@ -804,18 +801,11 @@ class LocalFavoritesManager {
   }
 
   bool comicExists(String folder, String target, int type) {
-    var res = _db.select("""
-      select 1 from ${_identifier(folder)}
-      where target == ? and type == ?;
-    """, [target, type]);
-    return res.isNotEmpty;
+    return _matchingRows(folder, target, FavoriteType(type)).isNotEmpty;
   }
 
   FavoriteItem getComic(String folder, String target, FavoriteType type) {
-    var res = _db.select("""
-      select * from ${_identifier(folder)}
-      where target == ? and type == ?;
-    """, [target, type.key]);
+    final res = _matchingRows(folder, target, type);
     if (res.isEmpty) {
       throw Exception("Comic not found");
     }
@@ -981,10 +971,33 @@ class LocalFavoritesManager {
   }
 
   void _deleteComicWithTarget(String folder, String target, FavoriteType type) {
-    _db.execute("""
-      delete from ${_identifier(folder)}
-      where target == ? and type == ?;
-    """, [target, type.key]);
+    if (type != FavoriteType.hitomi) {
+      _db.execute("""
+        delete from ${_identifier(folder)}
+        where target == ? and type == ?;
+      """, [target, type.key]);
+      return;
+    }
+    for (final row in _matchingRows(folder, target, type)) {
+      _db.execute("""
+        delete from ${_identifier(folder)}
+        where target == ? and type == ?;
+      """, [row['target'], type.key]);
+    }
+  }
+
+  List<Row> _matchingRows(String folder, String target, FavoriteType type) {
+    final rows = type == FavoriteType.hitomi ? _db.select("""
+          select * from ${_identifier(folder)} where type == ?;
+        """, [type.key]) : _db.select("""
+          select * from ${_identifier(folder)}
+          where target == ? and type == ?;
+        """, [target, type.key]);
+    if (type != FavoriteType.hitomi) return rows;
+    return rows
+        .where((row) =>
+            _favoriteTargetsMatch(type, row['target'] as String, target))
+        .toList();
   }
 
   Future<void> clearAll() => DataMaintenance.run(() async {
@@ -1202,11 +1215,15 @@ class LocalFavoritesManager {
     _modifiedAfterLastCache = false;
     _cachedFavoritedTargets.clear();
     for (var folder in folderNames) {
-      var res = _db.select("""
-        select target from ${_identifier(folder)};
+      final res = _db.select("""
+        select target, type from ${_identifier(folder)};
       """);
       for (var row in res) {
         _cachedFavoritedTargets[row["target"]] = true;
+        if (row['type'] == FavoriteType.hitomi.key) {
+          final canonical = canonicalHitomiTarget(row['target'] as String);
+          _cachedFavoritedTargets[canonical] = true;
+        }
       }
     }
   }
@@ -1226,4 +1243,11 @@ class LocalFavoritesManager {
       comic.type.key
     ]);
   }
+}
+
+bool _favoriteTargetsMatch(FavoriteType type, String left, String right) {
+  if (type != FavoriteType.hitomi) return left == right;
+  final leftId = hitomiGalleryIdFromTarget(left);
+  final rightId = hitomiGalleryIdFromTarget(right);
+  return leftId != null && rightId != null ? leftId == rightId : left == right;
 }
