@@ -183,6 +183,7 @@ Future<void> passCloudflare(
               }
               saveCookies(cookiesMap);
               App.globalBack();
+              finishOnce();
             } finally {
               completionInProgress = false;
             }
@@ -199,7 +200,6 @@ Future<void> passCloudflare(
         },
       ),
     );
-    finishOnce();
   } else {
     showToast(message: "当前设备不支持".tl);
   }
