@@ -7,6 +7,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
@@ -100,7 +101,7 @@ Future<List<T>> getFavorites<T extends Object>(BuildContext context,
   return comics;
 }
 
-void startConvert<T extends Object>(
+Future<void> startConvert<T extends Object>(
     GetFavoriteFunc<T> getFavoriteFunc,
     Duration? interval,
     BuildContext context,
@@ -117,29 +118,34 @@ void startConvert<T extends Object>(
     i++;
   }
 
-  LocalFavoritesManager().createFolder(name);
-  // 是否同步网络收藏
-  if (agreeSync) {
-    LocalFavoritesManager()
-        .insertFolderSync(FolderSync(name, key, jsonEncode(syncData)));
-  }
-  int order = 0;
-  for (var comic in comics) {
-    LocalFavoritesManager().addComic(name, toLocalFavoriteFunc(comic), order);
-    order++;
-  }
+  final manager = LocalFavoritesManager();
+  await DataMaintenance.run<void>(() async {
+    manager.createFolder(name);
+    // 是否同步网络收藏
+    if (agreeSync) {
+      manager.insertFolderSync(FolderSync(name, key, jsonEncode(syncData)));
+    }
+    int order = 0;
+    for (var comic in comics) {
+      await manager.addComic(name, toLocalFavoriteFunc(comic), order);
+      order++;
+    }
+  }, suppressSync: true, operationName: 'favorites-convert');
+  // A conversion with no comics still needs to publish its new folder and
+  // optional network-sync metadata.
+  await manager.saveData();
 }
 
-void startFolderSync<T extends Object>(
+Future<void> startFolderSync<T extends Object>(
     BuildContext context, FolderSync folderSync) async {
   final key = folderSync.key;
   final folderName = folderSync.folderName;
   final syncDataObj = folderSync.syncDataObj;
 
-  final curAllComics = LocalFavoritesManager().getAllComics(folderName);
-  final minValue = LocalFavoritesManager().minValue(folderName);
-  final maxValue = LocalFavoritesManager().maxValue(folderName);
-  int addValue = 0;
+  final manager = LocalFavoritesManager();
+  final curAllComics = manager.getAllComics(folderName);
+  final minValue = manager.minValue(folderName);
+  final maxValue = manager.maxValue(folderName);
   final loadComicObj = LoadComicClass();
   final fData = getFavoriteData(key);
   final total = int.parse(appdata.settings[71]);
@@ -156,25 +162,29 @@ void startFolderSync<T extends Object>(
       .toList()
       .reversed
       .toList(); // 翻转一下, 保证插入顺序最终和网络收藏一致
-  for (var comic in comicsWithRange) {
-    final temComic = FavoriteItem.fromBaseComic(comic);
-    final index =
-        curAllComics.indexWhere((element) => element.target == temComic.target);
-    if (index == -1) {
-      if (direction == "0") {
-        addValue += 1;
-      } else {
-        addValue -= 1;
+  var addValue = 0;
+  await DataMaintenance.run<void>(() async {
+    for (var comic in comicsWithRange) {
+      final temComic = FavoriteItem.fromBaseComic(comic);
+      final index = curAllComics
+          .indexWhere((element) => element.target == temComic.target);
+      if (index == -1) {
+        if (direction == "0") {
+          addValue += 1;
+        } else {
+          addValue -= 1;
+        }
+        await manager.addComic(folderName, temComic,
+            direction == "0" ? maxValue + addValue : minValue + addValue);
       }
-      LocalFavoritesManager().addComic(folderName, temComic,
-          direction == "0" ? maxValue + addValue : minValue + addValue);
     }
-  }
+    folderSync.time = getCurTime();
+    manager.updateFolderSyncTime(folderSync);
+  }, suppressSync: true, operationName: 'favorites-sync');
   showToast(
       message: "本次更新数: ".tl +
           addValue.abs().toString() +
           ", 上次更新时间: ".tl +
           folderSync.time);
-  folderSync.time = getCurTime();
-  LocalFavoritesManager().updateFolderSyncTime(folderSync);
+  await manager.saveData();
 }

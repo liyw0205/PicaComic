@@ -1084,7 +1084,7 @@ class _LocalFavoritesFolderState extends State<LocalFavoritesFolder> {
   @override
   void dispose() {
     if (changed) {
-      LocalFavoritesManager().reorder(comics, widget.name);
+      unawaited(LocalFavoritesManager().reorder(comics, widget.name));
     }
     LocalFavoriteTile.cache.clear();
     super.dispose();

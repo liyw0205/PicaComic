@@ -997,8 +997,11 @@ class LocalFavoritesManager {
         await saveData();
       });
 
-  void reorder(List<FavoriteItem> newFolder, String folder) {
-    if (_deferWrite(() => reorder(List.of(newFolder), folder))) return;
+  Future<void> reorder(List<FavoriteItem> newFolder, String folder) async {
+    if (DataMaintenance.busy) {
+      return DataMaintenance.run<void>(
+          () => reorder(List.of(newFolder), folder));
+    }
     if (!folderNames.contains(folder)) {
       throw Exception("Failed to reorder: folder not found");
     }
@@ -1011,7 +1014,7 @@ class LocalFavoritesManager {
       }
     });
     updateUI();
-    saveData();
+    await saveData();
   }
 
   Future<void> rename(String before, String after) async {

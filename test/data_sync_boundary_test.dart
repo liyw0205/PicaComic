@@ -185,6 +185,31 @@ void main() {
         ['Unavailable']);
   });
 
+  test('favorite reorder waits for maintenance before publishing', () async {
+    final first = comic('reorder-first');
+    final second = comic('reorder-second');
+    await favorites.addComic(favoritesFolder, first, 0, false);
+    await favorites.addComic(favoritesFolder, second, 1, false);
+
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final maintenance = DataMaintenance.run<void>(() async {
+      entered.complete();
+      await release.future;
+    }, suppressSync: true);
+    await entered.future;
+
+    final reorder = favorites.reorder([second, first], favoritesFolder);
+    expect(favorites.getAllComics(favoritesFolder).map((item) => item.target),
+        ['reorder-first', 'reorder-second']);
+
+    release.complete();
+    await maintenance;
+    await reorder;
+    expect(favorites.getAllComics(favoritesFolder).map((item) => item.target),
+        ['reorder-second', 'reorder-first']);
+  });
+
   test('normal scope leaves synchronization enabled for user writes', () async {
     final image = favorite('normal');
     await DataMaintenance.run(() async {

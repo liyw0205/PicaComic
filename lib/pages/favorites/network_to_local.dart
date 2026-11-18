@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/foundation/app.dart';
@@ -218,7 +220,7 @@ class _ChooseNetworkFolderWidgetState
     }
     App.globalBack();
     final loadComicObj = LoadComicClass();
-    startConvert<BaseComic>(
+    unawaited(startConvert<BaseComic>(
         (page) => loadComicObj.loadComic(data, page, folderId),
         null,
         App.globalContext!,
@@ -226,7 +228,7 @@ class _ChooseNetworkFolderWidgetState
         (comic) => FavoriteItem.fromBaseComic(comic),
         data.key,
         agreeSync,
-        {"folderId": folderId});
+        {"folderId": folderId}));
   }
 }
 
