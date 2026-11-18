@@ -232,6 +232,24 @@ void main() {
     expect(loads, 2);
   });
 
+  test('runtime category refresh replaces the label and parameter snapshot',
+      () {
+    var tags = ['one', 'two'];
+    var loads = 0;
+    final part = RandomCategoryPartWithRuntimeData('tags', () {
+      loads++;
+      return tags;
+    }, 2, 'category', buildParam: (tag) => '/tag/$tag');
+
+    expect(part.categories, ['one', 'two']);
+    expect(part.categoryParams, ['/tag/one', '/tag/two']);
+
+    tags = ['three', 'four'];
+    expect(part.refreshCategories(), ['three', 'four']);
+    expect(part.categoryParams, ['/tag/three', '/tag/four']);
+    expect(loads, 2);
+  });
+
   test('an empty runtime snapshot does not reload while building parameters',
       () {
     var loads = 0;

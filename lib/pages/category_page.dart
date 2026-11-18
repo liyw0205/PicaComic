@@ -139,15 +139,21 @@ class CategoryPage extends StatelessWidget {
 
     for (var part in data.categories) {
       if (part.enableRandom) {
+        var randomTags = part.categories;
+        var randomParams = part.categoryParams;
         children.add(StatefulBuilder(builder: (context, updater) {
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              buildTitleWithRefresh(part.title, () => updater(() {})),
+              buildTitleWithRefresh(part.title, () {
+                randomTags = part.refreshCategories();
+                randomParams = part.categoryParams;
+                updater(() {});
+              }),
               buildTagsWithParams(
-                part.categories,
-                part.categoryParams,
+                randomTags,
+                randomParams,
                 part.title,
                 (key, param) => handleClick(
                   key,

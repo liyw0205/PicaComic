@@ -39,6 +39,12 @@ abstract class BaseCategoryPart {
 
   List<String> get categories;
 
+  /// Rebuild the visible random sample and return its labels.
+  ///
+  /// Fixed category parts have no sample state, so their current labels are
+  /// returned unchanged.
+  List<String> refreshCategories() => categories;
+
   List<String>? get categoryParams => null;
 
   bool get enableRandom;
@@ -130,19 +136,24 @@ class RandomCategoryPartWithRuntimeData extends BaseCategoryPart {
 
   List<String>? _lastCategories;
 
-  @override
-  List<String> get categories {
+  List<String> _sampleCategories() {
     _lastCategories = List.unmodifiable(
         _randomCategories(loadTags(), randomNumber, _random ?? random));
     return List.of(_lastCategories!);
   }
 
   @override
+  List<String> get categories => _sampleCategories();
+
+  @override
+  List<String> refreshCategories() => _sampleCategories();
+
+  @override
   List<String>? get categoryParams {
     final builder = buildParam;
     if (builder == null) return null;
     // Navigation must use the same sample as the most recently rendered labels.
-    return (_lastCategories ?? categories).map(builder).toList();
+    return (_lastCategories ?? _sampleCategories()).map(builder).toList();
   }
 
   /// A [BaseCategoryPart] that show random tags on category page.
