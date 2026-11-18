@@ -454,7 +454,8 @@ class HtmangaNetwork {
   }
 
   Future<Res<List<String>>> getImages(String id) async {
-    var res = await get("$baseUrl/photos-gallery-aid-$id.html");
+    final root = baseUrl.replaceFirst(RegExp(r'/$'), '');
+    var res = await get("$root/photos-gallery-aid-$id.html");
     if (res.error) {
       return Res(null, errorMessage: res.errorMessage);
     }

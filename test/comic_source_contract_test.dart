@@ -518,7 +518,9 @@ void main() {
     final oldOverrides = HttpOverrides.current;
     final oldProxyOverrides = proxyHttpOverrides;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final paths = <String>[];
     final subscription = server.listen((request) async {
+      paths.add(request.uri.path);
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType.html;
       request.response.write('<script>var imglist = [];</script>');
@@ -532,7 +534,7 @@ void main() {
       HttpOverrides.global = oldOverrides;
     });
 
-    appdata.settings[31] = 'http://127.0.0.1:${server.port}';
+    appdata.settings[31] = 'http://127.0.0.1:${server.port}/';
     appdata.settings[8] = '';
     appdata.settings[58] = '0';
     proxyHttpOverrides = null;
@@ -540,6 +542,7 @@ void main() {
     final result = await HtmangaNetwork().getImages('405322');
     expect(result.error, isTrue);
     expect(result.errorMessage, contains('图片列表为空'));
+    expect(paths, ['/photos-gallery-aid-405322.html']);
   });
 
   test('WNACG thumbnails normalize the domain and fallback first page',
