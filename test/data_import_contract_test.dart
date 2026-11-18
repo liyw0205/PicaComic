@@ -59,6 +59,18 @@ void main() {
     expect(DataMaintenance.lastStats?.operation, 'data-import');
   });
 
+  test('implicit reader settings round-trip through SharedPreferences',
+      () async {
+    final isolated = Appdata();
+    isolated.implicitData[1] = '1';
+
+    await isolated.writeImplicitData();
+
+    final restored = Appdata();
+    await restored.readImplicitData();
+    expect(restored.implicitData[1], '1');
+  });
+
   test('readDataFromJson propagates malformed payload errors', () async {
     final isolated = Appdata();
     final malformed = <String, dynamic>{

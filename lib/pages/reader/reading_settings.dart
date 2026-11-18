@@ -73,7 +73,7 @@ class _ReadingSettingsState extends State<ReadingSettings> {
                 value: appdata.implicitData[1] == '1',
                 onChanged: (b) {
                   appdata.implicitData[1] = b ? '1' : '0';
-                  appdata.writeData();
+                  unawaited(appdata.writeImplicitData());
                   setState(() {});
                   logic.update();
                 },
