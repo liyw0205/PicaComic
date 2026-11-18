@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,8 @@ import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/eh_network/subscription_pager.dart';
 import 'package:pica_comic/network/res.dart';
+import 'package:pica_comic/foundation/history.dart';
+import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/ehentai/subscription.dart';
 import 'package:pica_comic/tools/translations.dart';
 
@@ -122,6 +125,75 @@ const _galleryFixture = '''<html><h1 id="gn">Title</h1>
 
 void main() {
   AppTranslation.translations = const {};
+
+  test('comic detail retries transient failures and keeps the final result',
+      () async {
+    final root = await Directory.systemTemp.createTemp('pica-detail-retry-');
+    final previousHistory = HistoryManager.cache;
+    final history = HistoryManager.create();
+    HistoryManager.cache = history;
+    await history.init(
+        databasePath: '${root.path}/history.db', importLegacy: false);
+    addTearDown(() async {
+      history.close();
+      HistoryManager.cache = previousHistory;
+      await root.delete(recursive: true);
+    });
+    final logic = ComicPageLogic<int>();
+    var attempts = 0;
+    var favoriteCalls = 0;
+
+    await logic.get(
+      () async {
+        attempts++;
+        if (attempts < 3) return const Res.error('temporary failure');
+        return const Res(42);
+      },
+      (value) async {
+        favoriteCalls++;
+        return value.isEven;
+      },
+      () => 'fixture',
+      retryAttempts: 3,
+      retryDelay: Duration.zero,
+    );
+
+    expect(attempts, 3);
+    expect(logic.data, 42);
+    expect(logic.message, isNull);
+    expect(favoriteCalls, 1);
+    logic.dispose();
+  });
+
+  test('refresh cancels a pending detail retry', () async {
+    final retryStarted = Completer<void>();
+    final retryRelease = Completer<Res<int>>();
+    final logic = ComicPageLogic<int>();
+    var attempts = 0;
+
+    final request = logic.get(
+      () async {
+        attempts++;
+        if (attempts == 1) return const Res.error('temporary failure');
+        if (!retryStarted.isCompleted) retryStarted.complete();
+        return retryRelease.future;
+      },
+      (_) async => false,
+      () => 'fixture',
+      retryAttempts: 3,
+      retryDelay: Duration.zero,
+    );
+    await retryStarted.future;
+    logic.refresh_();
+    retryRelease.complete(const Res(99));
+    await request;
+
+    expect(attempts, 2);
+    expect(logic.data, isNull);
+    expect(logic.loading, isTrue);
+    expect(logic.message, isNull);
+    logic.dispose();
+  });
 
   test('a failed continuous page waits for an explicit retry', () async {
     final logic = ComicsPageLogic<int>()

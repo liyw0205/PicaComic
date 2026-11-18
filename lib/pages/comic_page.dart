@@ -712,16 +712,32 @@ class ComicPageLogic<T extends Object> extends StateController {
   bool? favoriteOnPlatform;
 
   Future<void> get(Future<Res<T>> Function() loadData,
-      Future<bool> Function(T) loadFavorite, String Function() getId) async {
+      Future<bool> Function(T) loadFavorite, String Function() getId,
+      {int retryAttempts = 1, Duration retryDelay = Duration.zero}) async {
     if (isDisposed || _requestInFlight) return;
     _requestInFlight = true;
     final generation = ++_requestGeneration;
     try {
-      var [res, _] = await Future.wait(
-          [loadData(), Future.delayed(const Duration(milliseconds: 300))]);
+      final attempts = retryAttempts < 1 ? 1 : retryAttempts;
+      Res<T>? res;
+      for (var attempt = 0; attempt < attempts; attempt++) {
+        if (isDisposed || generation != _requestGeneration) return;
+        try {
+          var [loaded, _] = await Future.wait(
+              [loadData(), Future.delayed(const Duration(milliseconds: 300))]);
+          res = loaded as Res<T>;
+          if (!res.error || attempt + 1 == attempts) break;
+        } catch (_) {
+          if (attempt + 1 == attempts) rethrow;
+        }
+        if (isDisposed || generation != _requestGeneration) return;
+        if (retryDelay > Duration.zero) {
+          await Future<void>.delayed(retryDelay * (attempt + 1));
+        }
+      }
       if (isDisposed || generation != _requestGeneration) return;
-      if (res.error) {
-        message = res.errorMessage ?? "Network Error";
+      if (res == null || res.error) {
+        message = res?.errorMessage ?? "Network Error";
         loading = false;
         update();
         return;
@@ -778,6 +794,12 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
 
   /// load comic data
   Future<Res<T>> loadData();
+
+  /// Number of attempts used for transient detail-page failures.
+  int get loadRetryAttempts => 1;
+
+  /// Delay between automatic detail-page retries.
+  Duration get loadRetryDelay => Duration.zero;
 
   /// get comic data
   @nonVirtual
@@ -920,7 +942,9 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
             _logic.width = constraints.maxWidth;
             _logic.height = constraints.maxHeight;
             if (logic.loading) {
-              unawaited(logic.get(loadData, loadFavorite, () => id));
+              unawaited(logic.get(loadData, loadFavorite, () => id,
+                  retryAttempts: loadRetryAttempts,
+                  retryDelay: loadRetryDelay));
               return buildLoading(context);
             } else if (logic.message != null) {
               return NetworkError(
@@ -1979,9 +2003,8 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
                           "取消收藏".tl,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onErrorContainer,
+                            color:
+                                Theme.of(context).colorScheme.onErrorContainer,
                           ),
                         ),
                       ),

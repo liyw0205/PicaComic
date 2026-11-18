@@ -133,6 +133,12 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
   Future<Res<JmComicInfo>> loadData() => JmNetwork().getComicInfo(id);
 
   @override
+  int get loadRetryAttempts => 3;
+
+  @override
+  Duration get loadRetryDelay => const Duration(milliseconds: 350);
+
+  @override
   int? get pages => null;
 
   @override
