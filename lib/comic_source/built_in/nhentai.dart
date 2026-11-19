@@ -169,7 +169,7 @@ final nhentai = ComicSource.named(
   ),
   comicPageBuilder: (context, id, cover) {
     return NhentaiComicPage(
-      id,
+      id.replaceFirst(RegExp(r'^(?:nhentai|nh)', caseSensitive: false), ''),
       comicCover: cover,
     );
   },

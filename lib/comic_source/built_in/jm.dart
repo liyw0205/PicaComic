@@ -254,7 +254,8 @@ final jm = ComicSource.named(
     ],
   ),
   comicPageBuilder: (context, id, cover) {
-    return JmComicPage(id);
+    return JmComicPage(
+        id.replaceFirst(RegExp(r'^jm', caseSensitive: false), ''));
   },
 );
 
