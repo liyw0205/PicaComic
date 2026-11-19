@@ -11,6 +11,7 @@ import 'package:pica_comic/tools/translations.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   AppTranslation.translations = const {};
+  final exploreKey = GlobalKey();
 
   void configure(List<String> pages) {
     final oldSources = ComicSource.sources;
@@ -39,7 +40,7 @@ void main() {
 
   Widget host() => MaterialApp(
         theme: ThemeData(splashFactory: NoSplash.splashFactory),
-        home: Scaffold(body: ExplorePage(key: const Key('configured-explore'))),
+        home: Scaffold(body: ExplorePage(key: exploreKey)),
       );
 
   testWidgets('refresh ignores stale multipart results', (tester) async {
