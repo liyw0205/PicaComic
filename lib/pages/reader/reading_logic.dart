@@ -352,6 +352,7 @@ class ComicReadingPageLogic extends StateController {
   }
 
   void jumpToNextChapter() {
+    if (isLoading || loadInFlight) return;
     var eps = data.eps;
     jumpToLastPageOnChapterLoad = false;
     showFloatingButtonValue = 0;
@@ -394,6 +395,7 @@ class ComicReadingPageLogic extends StateController {
   }
 
   void jumpToLastChapter({bool jumpToLast = false}) {
+    if (isLoading || loadInFlight) return;
     jumpToLastPageOnChapterLoad = false;
     showFloatingButtonValue = 0;
     if (order == 1 || !data.hasEp) {

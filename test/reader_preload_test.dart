@@ -55,6 +55,22 @@ class _ControlledReadingData extends _ReadingData {
   Future<Res<List<String>>> loadEp(int ep) => loadEpResult;
 }
 
+class _ChapterReadingData extends PicacgReadingData {
+  _ChapterReadingData(this.provider)
+      : super('Reader test', 'reader-test', ['Chapter 1', 'Chapter 2']);
+
+  final ImageProvider provider;
+
+  @override
+  Future<Res<List<String>>> loadEp(int ep) async =>
+      Res(List.generate(ep == 1 ? 4 : 2, (index) => 'page-$index'));
+
+  @override
+  ImageProvider createImageProvider(int ep, int page, String url,
+          {ImageTaskScope? taskScope}) =>
+      provider;
+}
+
 class _ContinuousReadingData extends _ReadingData {
   _ContinuousReadingData(this.providers) : super(providers.first);
 
@@ -497,7 +513,7 @@ void main() {
     appdata.settings[9] = '1';
     final data =
         PicacgReadingData('Reader test', 'reader-test', ['one', 'two']);
-    final logic = ComicReadingPageLogic(2, data, 1, () {});
+    final logic = ComicReadingPageLogic(2, data, 1, () {})..isLoading = false;
     addTearDown(() {
       logic.releaseImageTasks();
       logic.pageController.dispose();
@@ -510,6 +526,141 @@ void main() {
     // A normal chapter selection must clear a stale request.
     logic.jumpToChapter(2);
     expect(logic.jumpToLastPageOnChapterLoad, isFalse);
+  });
+
+  for (final forward in [true, false]) {
+    test(
+        'chapter changes ignore repeated ${forward ? 'next' : 'previous'} input',
+        () async {
+      final oldMode = appdata.settings[9];
+      addTearDown(() => appdata.settings[9] = oldMode);
+      appdata.settings[9] = '1';
+      final result = Completer<Res<List<String>>>();
+      final data = _ControlledReadingData(result.future)
+        ..eps.addAll({
+          for (final name in ['one', 'two', 'three', 'four']) name: name
+        });
+      final startingChapter = forward ? 2 : 3;
+      final page = ComicReadingPage(data, 1, startingChapter);
+      final registered = StateController.find<ComicReadingPageLogic>();
+      registered.releaseImageTasks();
+      registered.pageController.dispose();
+      registered.scrollController.dispose();
+      registered.focusNode.dispose();
+      StateController.remove<ComicReadingPageLogic>();
+      final logic = ComicReadingPageLogic(startingChapter, data, 1, () {})
+        ..isLoading = false
+        ..urls = ['old-page'];
+      final controllers = <PageController>{logic.pageController};
+      Future<void>? pending;
+      addTearDown(() async {
+        logic.releaseImageTasks();
+        if (!result.isCompleted) result.complete(const Res(<String>[]));
+        await pending;
+        for (final controller in controllers) {
+          controller.dispose();
+        }
+        logic.scrollController.dispose();
+        logic.focusNode.dispose();
+        logic.clearPhotoViewControllers();
+      });
+
+      void changeChapter() {
+        if (forward) {
+          logic.jumpToNextChapter();
+        } else {
+          logic.jumpToLastChapter();
+        }
+        controllers.add(logic.pageController);
+      }
+
+      changeChapter();
+      final target = forward ? 3 : 2;
+      final controller = logic.pageController;
+      final generation = logic.loadGeneration;
+      changeChapter();
+      expect(logic.order, target);
+      expect(logic.pageController, same(controller));
+      expect(logic.loadGeneration, generation);
+
+      pending = page.loadInfo(logic);
+      expect(logic.loadInFlight, isTrue);
+      changeChapter();
+      expect(logic.order, target);
+      result.complete(const Res(<String>['loaded-1', 'loaded-2']));
+      await pending;
+
+      expect(logic.urls, ['loaded-1', 'loaded-2']);
+      expect(logic.order, target);
+      expect(logic.isLoading, isFalse);
+      expect(logic.loadInFlight, isFalse);
+
+      if (forward) {
+        logic.jumpToLastChapter();
+      } else {
+        logic.jumpToNextChapter();
+      }
+      controllers.add(logic.pageController);
+      expect(logic.order, startingChapter);
+      expect(logic.isLoading, isTrue);
+    });
+  }
+
+  testWidgets('previous chapter opens on its last page after loading',
+      (tester) async {
+    final oldMode = appdata.settings[9];
+    final oldPreload = appdata.settings[28];
+    appdata.settings[9] = '1';
+    appdata.settings[28] = '0';
+    addTearDown(() {
+      appdata.settings[9] = oldMode;
+      appdata.settings[28] = oldPreload;
+    });
+
+    final data =
+        _ChapterReadingData(_ControlledImageProvider(Completer<ImageInfo>()));
+    final page = ComicReadingPage(data, 1, 2);
+    final registered = StateController.find<ComicReadingPageLogic>();
+    registered.releaseImageTasks();
+    registered.pageController.dispose();
+    StateController.remove<ComicReadingPageLogic>();
+    final logic = ComicReadingPageLogic(2, data, 1, () {});
+    addTearDown(() {
+      logic.releaseImageTasks();
+      logic.pageController.dispose();
+      logic.clearPhotoViewControllers();
+      StateController.remove<ComicReadingPageLogic>();
+    });
+
+    await page.loadInfo(logic);
+    await tester.pumpWidget(MaterialApp(
+      home: StateBuilder<ComicReadingPageLogic>(
+        init: logic,
+        builder: (value) => Builder(builder: (context) {
+          if (value.isLoading || value.urls.isEmpty) {
+            return const SizedBox();
+          }
+          return Stack(children: [
+            page.buildComicView(value, context, data.id),
+          ]);
+        }),
+      ),
+    ));
+    expect(logic.index, 1);
+
+    final previousController = logic.pageController;
+    logic.jumpToLastChapter(jumpToLast: true);
+    await tester.pump();
+    previousController.dispose();
+
+    await page.loadInfo(logic);
+    await tester.pump();
+
+    expect(logic.order, 1);
+    expect(logic.index, 4);
+    expect(logic.pageController.page, 4);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 
   test('chapter loading exposes completion to lifecycle callers', () async {
