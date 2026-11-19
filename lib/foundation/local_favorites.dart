@@ -764,6 +764,26 @@ class LocalFavoritesManager {
 
   /// create a folder
   String createFolder(String name, [bool renameWhenInvalidName = false]) {
+    name = _availableFolderName(name, renameWhenInvalidName);
+    final folderName = name;
+    if (_deferWrite(() => createFolder(folderName))) return folderName;
+    _createFolderTable(name);
+    _modifiedAfterLastCache = true;
+    unawaited(saveData());
+    return name;
+  }
+
+  Future<String> createFolderAndSave(String name) =>
+      DataMaintenance.run(() async {
+        final folderName = _availableFolderName(name, false);
+        _transaction(() => _createFolderTable(folderName));
+        _modifiedAfterLastCache = true;
+        updateUI();
+        await saveData();
+        return folderName;
+      }, operationName: 'favorites-folder-create');
+
+  String _availableFolderName(String name, bool renameWhenInvalidName) {
     if (name.isEmpty ||
         name.contains('\u0000') ||
         name.toLowerCase().startsWith('sqlite_') ||
@@ -790,8 +810,10 @@ class LocalFavoritesManager {
         throw Exception("Folder is existing");
       }
     }
-    final folderName = name;
-    if (_deferWrite(() => createFolder(folderName))) return folderName;
+    return name;
+  }
+
+  void _createFolderTable(String name) {
     _db.execute("""
       create table ${_identifier(name)}(
         target text,
@@ -811,9 +833,6 @@ class LocalFavoritesManager {
       create index if not exists $indexName
       on ${_identifier(name)}(display_order, target, type);
     ''');
-    _modifiedAfterLastCache = true;
-    unawaited(saveData());
-    return name;
   }
 
   bool comicExists(String folder, String target, int type) {

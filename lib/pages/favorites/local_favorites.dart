@@ -182,90 +182,130 @@ class _UpdateFavoritesInfoDialogState extends State<UpdateFavoritesInfoDialog> {
   }
 }
 
-class CreateFolderDialog extends StatelessWidget {
-  const CreateFolderDialog({Key? key}) : super(key: key);
+class CreateFolderDialog extends StatefulWidget {
+  const CreateFolderDialog({super.key});
+
+  @override
+  State<CreateFolderDialog> createState() => _CreateFolderDialogState();
+}
+
+class _CreateFolderDialogState extends State<CreateFolderDialog> {
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
+  late final _manager = LocalFavoritesManager();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    final name = _controller.text;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    setState(() => _saving = true);
+    try {
+      await _manager.createFolderAndSave(name);
+    } catch (error, stack) {
+      log('Failed to create favorite folder.\n${safeNetworkError(error)}\n$stack',
+          'Favorite', LogLevel.error);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      showToast(message: error is String ? error.tl : '操作失败'.tl);
+      return;
+    }
+    if (!mounted) return;
+    if (route.isCurrent) {
+      navigator.pop(name);
+    } else if (route.isActive) {
+      navigator.removeRoute(route, name);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final controller = TextEditingController();
-    final FocusNode focusNode = FocusNode();
-    focusNode.requestFocus();
-    return SimpleDialog(
-      title: Text("创建收藏夹".tl),
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-          child: TextField(
-            focusNode: focusNode,
-            controller: controller,
-            onEditingComplete: () {
-              try {
-                LocalFavoritesManager().createFolder(controller.text);
-                App.globalBack();
-              } catch (e) {
-                showToast(message: e.toString());
-              }
-            },
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: "名称".tl,
+    return PopScope(
+      canPop: !_saving,
+      child: SimpleDialog(
+        title: Text("创建收藏夹".tl),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            child: TextField(
+              focusNode: _focusNode,
+              controller: _controller,
+              autofocus: true,
+              enabled: !_saving,
+              onEditingComplete: () => unawaited(_submit()),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: "名称".tl,
+              ),
             ),
           ),
-        ),
-        const SizedBox(
-          height: 8,
-        ),
-        SizedBox(
-          width: 260,
-          child: Row(
-            children: [
-              const Spacer(),
-              TextButton(
-                child: Text("从文件导入".tl),
-                onPressed: () async {
-                  context.pop();
-                  var data = await getDataFromUserSelectedFile(["json"]);
-                  if (data == null) {
-                    return;
-                  }
-                  var (error, message) =
-                      await LocalFavoritesManager().loadFolderData(data);
-                  if (error) {
-                    showToast(message: message);
-                  }
-                },
-              ),
-              const Spacer(),
-              TextButton(
-                child: Text("从网络导入".tl),
-                onPressed: () async {
-                  App.globalBack();
-                  await Future.delayed(const Duration(milliseconds: 200));
-                  networkToLocal();
-                },
-              ),
-              const Spacer(),
-            ],
+          const SizedBox(
+            height: 8,
           ),
-        ),
-        const SizedBox(
-          height: 8,
-        ),
-        SizedBox(
-            height: 35,
-            child: Center(
-              child: FilledButton(
-                  onPressed: () {
-                    try {
-                      LocalFavoritesManager().createFolder(controller.text);
-                      App.globalBack();
-                    } catch (e) {
-                      showToast(message: e.toString());
-                    }
-                  },
-                  child: Text("提交".tl)),
-            ))
-      ],
+          SizedBox(
+            width: 260,
+            child: Row(
+              children: [
+                const Spacer(),
+                TextButton(
+                  child: Text("从文件导入".tl),
+                  onPressed: _saving
+                      ? null
+                      : () async {
+                          context.pop();
+                          var data =
+                              await getDataFromUserSelectedFile(["json"]);
+                          if (data == null) {
+                            return;
+                          }
+                          var (error, message) = await LocalFavoritesManager()
+                              .loadFolderData(data);
+                          if (error) {
+                            showToast(message: message);
+                          }
+                        },
+                ),
+                const Spacer(),
+                TextButton(
+                  child: Text("从网络导入".tl),
+                  onPressed: _saving
+                      ? null
+                      : () async {
+                          context.pop();
+                          await Future.delayed(
+                              const Duration(milliseconds: 200));
+                          networkToLocal();
+                        },
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+          const SizedBox(
+            height: 8,
+          ),
+          SizedBox(
+              height: 35,
+              child: Center(
+                child: FilledButton(
+                    onPressed: _saving ? null : () => unawaited(_submit()),
+                    child: _saving
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text("提交".tl)),
+              ))
+        ],
+      ),
     );
   }
 }
