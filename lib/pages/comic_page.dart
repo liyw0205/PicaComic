@@ -190,11 +190,20 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
     unawaited(_read(history));
   }
 
+  @override
+  void onThumbnailTapped(int index) {
+    final pageLogic =
+        StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
+    if (pageLogic == null || pageLogic.isDisposed || pageLogic.loading) return;
+    unawaited(_read(pageLogic.history, initialPage: index + 1));
+  }
+
   Future<void> _openEpisode(int ep) async {
     final pageLogic =
         StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
     final comic = pageLogic?.data;
     if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
+    final generation = pageLogic._requestGeneration;
     try {
       await History.findOrCreate(comic);
     } catch (error, stack) {
@@ -203,6 +212,7 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
       return;
     }
     if (pageLogic.isDisposed ||
+        generation != pageLogic._requestGeneration ||
         !identical(pageLogic.data, comic) ||
         App.globalContext?.mounted != true) {
       return;
@@ -221,19 +231,22 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
     );
   }
 
-  Future<void> _read(History? history) async {
+  Future<void> _read(History? history, {int? initialPage}) async {
     final pageLogic =
         StateController.findOrNull<ComicPageLogic<ComicInfoData>>(tag: tag);
     final comic = pageLogic?.data;
     if (pageLogic == null || pageLogic.isDisposed || comic == null) return;
+    final generation = pageLogic._requestGeneration;
+    final History currentHistory;
     try {
-      history = await History.createIfNull(history, comic);
+      currentHistory = await History.createIfNull(history, comic);
     } catch (error, stack) {
       LogManager.addLog(LogLevel.error, "UI",
           "Failed to save comic reading history: ${safeNetworkError(error)}\n$stack");
       return;
     }
     if (pageLogic.isDisposed ||
+        generation != pageLogic._requestGeneration ||
         !identical(pageLogic.data, comic) ||
         App.globalContext?.mounted != true) {
       return;
@@ -246,8 +259,8 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
           ComicSource.find(sourceKey)!,
           comic.chapters,
         ),
-        history!.page,
-        history.ep,
+        initialPage ?? currentHistory.page,
+        currentHistory.ep,
       ),
     );
   }
@@ -739,7 +752,8 @@ class ThumbnailsData {
     }
   }
 
-  ThumbnailsData(this.thumbnails, this.load, this.maxPage);
+  ThumbnailsData(List<String> thumbnails, this.load, this.maxPage)
+      : thumbnails = List.of(thumbnails);
 }
 
 class ComicPageLogic<T extends Object> extends StateController {
@@ -760,6 +774,21 @@ class ComicPageLogic<T extends Object> extends StateController {
   bool showFullEps = false;
   int colorIndex = 0;
   bool? favoriteOnPlatform;
+
+  Future<void> loadThumbnails() async {
+    final current = thumbnailsData;
+    if (isDisposed || loading || current == null) return;
+    try {
+      await current.get(() {
+        if (isDisposed || !identical(thumbnailsData, current)) return;
+        update();
+      });
+    } catch (error, stack) {
+      if (isDisposed || !identical(thumbnailsData, current)) return;
+      LogManager.addLog(LogLevel.error, "Network",
+          "Failed to load thumbnails: ${safeNetworkError(error)}\n$stack");
+    }
+  }
 
   Future<void> get(Future<Res<T>> Function() loadData,
       Future<bool> Function(T) loadFavorite, String Function() getId,
@@ -793,11 +822,13 @@ class ComicPageLogic<T extends Object> extends StateController {
         return;
       }
       data = res.data;
-      favorite = await loadFavorite(res.data);
+      final loadedFavorite = await loadFavorite(res.data);
       if (isDisposed || generation != _requestGeneration) return;
+      final loadedHistory = await HistoryManager().find(getId());
+      if (isDisposed || generation != _requestGeneration) return;
+      favorite = loadedFavorite;
+      history = loadedHistory;
       loading = false;
-      history = await HistoryManager().find(getId());
-      if (isDisposed || generation != _requestGeneration) return;
       update();
     } catch (error) {
       if (isDisposed || generation != _requestGeneration) return;
@@ -814,6 +845,7 @@ class ComicPageLogic<T extends Object> extends StateController {
   void refresh_() {
     _requestGeneration++;
     _requestInFlight = false;
+    thumbnailsData = null;
     data = null;
     message = null;
     loading = true;
@@ -1783,7 +1815,7 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
             !tag.contains("Hitomi") &&
             !tag.contains("Eh"))) return [];
     if (thumbnails!.thumbnails.isEmpty) {
-      thumbnails!.get(update);
+      unawaited(_logic.loadThumbnails());
     }
     return [
       const SliverPadding(padding: EdgeInsets.all(5)),
@@ -1814,7 +1846,7 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
           delegate: SliverChildBuilderDelegate(
               childCount: thumbnails!.thumbnails.length, (context, index) {
             if (index == thumbnails!.thumbnails.length - 1) {
-              thumbnails!.get(update);
+              unawaited(_logic.loadThumbnails());
             }
             return Padding(
               padding: UiMode.m1(context)

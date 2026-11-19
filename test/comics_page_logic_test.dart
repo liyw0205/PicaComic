@@ -30,6 +30,15 @@ class _UnusedCookieJar implements SingleInstanceCookieJar {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _DetailHistoryManager extends HistoryManager {
+  _DetailHistoryManager(this.load) : super.create();
+
+  final Future<History?> Function(String) load;
+
+  @override
+  Future<History?> find(String target) => load(target);
+}
+
 class _WatchedNetwork extends EhNetwork {
   _WatchedNetwork(this.html) : super.create();
 
@@ -201,6 +210,79 @@ void main() {
     expect(logic.message, isNull);
     logic.dispose();
   });
+
+  for (final dispose in [false, true]) {
+    test(
+        'late detail favorite is ignored after ${dispose ? 'dispose' : 'refresh'}',
+        () async {
+      final previousHistory = HistoryManager.cache;
+      HistoryManager.cache = _DetailHistoryManager((_) async => null);
+      addTearDown(() => HistoryManager.cache = previousHistory);
+      final favoriteStarted = Completer<void>();
+      final favoriteResult = Completer<bool>();
+      final logic = ComicPageLogic<int>();
+      addTearDown(() => logic.controller.dispose());
+      final staleRequest = logic.get(
+        () async => const Res(1),
+        (_) {
+          favoriteStarted.complete();
+          return favoriteResult.future;
+        },
+        () => 'fixture',
+      );
+      await favoriteStarted.future;
+      if (dispose) {
+        logic.dispose();
+      } else {
+        logic.refresh_();
+        await logic.get(
+            () async => const Res(2), (_) async => false, () => 'fixture');
+        expect(logic.data, 2);
+      }
+      favoriteResult.complete(true);
+      await staleRequest;
+
+      expect(logic.favorite, isFalse);
+      expect(logic.message, isNull);
+      logic.dispose();
+    });
+
+    test(
+        'late detail history is ignored after ${dispose ? 'dispose' : 'refresh'}',
+        () async {
+      final previousHistory = HistoryManager.cache;
+      final historyStarted = Completer<void>();
+      final historyResult = Completer<History?>();
+      HistoryManager.cache = _DetailHistoryManager((target) {
+        if (target == 'old') {
+          historyStarted.complete();
+          return historyResult.future;
+        }
+        return Future.value(null);
+      });
+      addTearDown(() => HistoryManager.cache = previousHistory);
+      final logic = ComicPageLogic<int>();
+      addTearDown(() => logic.controller.dispose());
+      final staleRequest =
+          logic.get(() async => const Res(1), (_) async => false, () => 'old');
+      await historyStarted.future;
+      if (dispose) {
+        logic.dispose();
+      } else {
+        logic.refresh_();
+        await logic.get(
+            () async => const Res(2), (_) async => false, () => 'new');
+        expect(logic.data, 2);
+      }
+      historyResult.complete(History(
+          HistoryType.picacg, DateTime(2026), 'Old', '', '', 1, 10, 'old'));
+      await staleRequest;
+
+      expect(logic.history, isNull);
+      expect(logic.message, isNull);
+      logic.dispose();
+    });
+  }
 
   test('a failed continuous page waits for an explicit retry', () async {
     final logic = ComicsPageLogic<int>()
@@ -803,7 +885,10 @@ void main() {
         return calls == 1 ? Future.value(Res(Galleries())) : pending.future;
       },
     );
-    await tester.pumpWidget(MaterialApp(home: SubscriptionPage(pager: pager)));
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      home: SubscriptionPage(pager: pager),
+    ));
     await tester.pumpAndSettle();
     expect(calls, 1);
     await tester.tap(find.byIcon(Icons.refresh));
@@ -813,7 +898,10 @@ void main() {
     final fresh = EhSubscriptionPager(
         baseUrl: () => 'https://e-hentai.org',
         loader: (_) async => Res(Galleries()));
-    await tester.pumpWidget(MaterialApp(home: SubscriptionPage(pager: fresh)));
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      home: SubscriptionPage(pager: fresh),
+    ));
     await tester.pumpAndSettle();
     pending.complete(const Res.error('Late failure'));
     await tester.pumpAndSettle();
