@@ -38,8 +38,18 @@ class _SelectState extends State<Select> {
   bool isHover = false;
 
   @override
+  void didUpdateWidget(covariant Select oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialValue != oldWidget.initialValue) {
+      value = widget.initialValue;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (value != null && value! < 0) value = null;
+    if (value != null && (value! < 0 || value! >= widget.values.length)) {
+      value = null;
+    }
     return MouseRegion(
       onEnter: (_) => setState(() => isHover = true),
       onExit: (_) => setState(() => isHover = false),
@@ -156,18 +166,14 @@ class _FilterChipFixedWidthState extends State<FilterChipFixedWidth> {
 
   var key = GlobalKey();
 
-  @override
-  void initState() {
-    Future.microtask(measureSize);
-    super.initState();
-  }
-
   void measureSize() {
-    final RenderBox renderBox =
-        key.currentContext!.findRenderObject() as RenderBox;
-    labelWidth = renderBox.size.width;
-    labelHeight = renderBox.size.height;
-    setState(() {});
+    if (!mounted || labelWidth != null) return;
+    final renderBox = key.currentContext?.findRenderObject();
+    if (renderBox is! RenderBox || !renderBox.hasSize) return;
+    setState(() {
+      labelWidth = renderBox.size.width;
+      labelHeight = renderBox.size.height;
+    });
   }
 
   @override
@@ -194,11 +200,16 @@ class _FilterChipFixedWidthState extends State<FilterChipFixedWidth> {
   }
 
   Widget firstBuild() {
-    return Center(
-      child: SizedBox(
-        key: key,
-        child: widget.label,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => measureSize());
+        return Center(
+          child: SizedBox(
+            key: key,
+            child: widget.label,
+          ),
+        );
+      },
     );
   }
 
