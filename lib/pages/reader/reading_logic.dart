@@ -422,6 +422,19 @@ class ComicReadingPageLogic extends StateController {
   ///当前章节的长度
   int get length => urls.length;
 
+  ({int ep, int page}) get historyPosition {
+    if (data.hasEp) {
+      if (order == 1 && index == 1) {
+        return (ep: 0, page: 0);
+      }
+      return (ep: order, page: index);
+    }
+    if (index == 1) {
+      return (ep: 0, page: 0);
+    }
+    return (ep: 1, page: index);
+  }
+
   /// 是否处于自动翻页状态
   bool runningAutoPageTurning = false;
   int _autoPageTurningGeneration = 0;

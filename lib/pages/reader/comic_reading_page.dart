@@ -172,29 +172,9 @@ class ComicReadingPage extends StatelessWidget {
   }
 
   _updateHistory(ComicReadingPageLogic? logic, bool updateMePage) {
-    if (readingData.hasEp) {
-      if (logic!.order == 1 && logic.index == 1) {
-        history?.ep = 0;
-        history?.page = 0;
-      } else {
-        if (logic.order == readingData.eps?.length &&
-            logic.index == logic.length) {
-          history?.ep = 0;
-          history?.page = 0;
-        } else {
-          history?.ep = logic.order;
-          history?.page = logic.index;
-        }
-      }
-    } else {
-      if (logic!.index == 1) {
-        history?.ep = 0;
-        history?.page = 0;
-      } else {
-        history?.ep = 1;
-        history?.page = logic.index;
-      }
-    }
+    final position = logic!.historyPosition;
+    history?.ep = position.ep;
+    history?.page = position.page;
     history!.maxPage = logic.length;
     HistoryManager().saveReadHistory(history!, updateMePage);
   }

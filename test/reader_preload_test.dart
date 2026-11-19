@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/foundation/data_maintenance.dart';
+import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 import 'package:pica_comic/foundation/state_controller.dart';
@@ -86,6 +89,80 @@ void main() {
       ..clear()
       ..clearLiveImages();
   });
+
+  for (final fixture in [
+    (name: 'final chapter', chapters: true, ep: 2, page: 2, count: 2),
+    (name: 'middle chapter', chapters: true, ep: 1, page: 2, count: 3),
+    (name: 'first page', chapters: true, ep: 1, page: 1, count: 2),
+    (name: 'single gallery', chapters: false, ep: 1, page: 3, count: 3),
+  ]) {
+    test('reader history persists ${fixture.name} and resumes after reopening',
+        () async {
+      final root = await Directory.systemTemp.createTemp('reader-history-');
+      final databasePath = '${root.path}/history.db';
+      final previousHistory = HistoryManager.cache;
+      final previousSync = appdata.settings[45];
+      final store = HistoryManager.create();
+      HistoryManager.cache = store;
+      appdata.settings[45] = '';
+      addTearDown(() async {
+        await DataMaintenance.waitForIdle();
+        store.close();
+        HistoryManager.cache = previousHistory;
+        appdata.settings[45] = previousSync;
+        await root.delete(recursive: true);
+      });
+      await store.init(databasePath: databasePath, importLegacy: false);
+      await store.addHistory(History(
+        fixture.chapters ? HistoryType.picacg : HistoryType.nhentai,
+        DateTime(2026, 1, 1),
+        'Reader history fixture',
+        '',
+        '',
+        0,
+        0,
+        'reader-history',
+      ));
+      final ReadingData data = fixture.chapters
+          ? PicacgReadingData(
+              'Reader history fixture', 'reader-history', ['First', 'Last'])
+          : NhentaiReadingData('Reader history fixture', 'reader-history');
+
+      void releaseReader() {
+        final logic = StateController.findOrNull<ComicReadingPageLogic>();
+        if (logic == null) return;
+        logic.releaseImageTasks();
+        logic.pageController.dispose();
+        logic.scrollController.dispose();
+        logic.focusNode.dispose();
+        logic.clearPhotoViewControllers();
+        StateController.remove<ComicReadingPageLogic>();
+      }
+
+      addTearDown(releaseReader);
+      ComicReadingPage(data, 1, 1);
+      StateController.find<ComicReadingPageLogic>()
+        ..order = fixture.ep
+        ..urls = List.generate(fixture.count, (index) => 'page-$index')
+        ..index = fixture.page;
+      await DataMaintenance.waitForIdle();
+      releaseReader();
+      store.close();
+      await store.init(databasePath: databasePath, importLegacy: false);
+
+      final saved = store.findSync('reader-history')!;
+      final isFirstPage = fixture.ep == 1 && fixture.page == 1;
+      expect(saved.ep, isFirstPage ? 0 : fixture.ep);
+      expect(saved.page, isFirstPage ? 0 : fixture.page);
+      expect(saved.maxPage, fixture.count);
+
+      final reopened = ComicReadingPage(data, saved.page, saved.ep);
+      final resumed = StateController.find<ComicReadingPageLogic>();
+      expect(resumed.order, fixture.ep);
+      expect(resumed.index, fixture.page);
+      expect(reopened.history!.page, saved.page);
+    });
+  }
 
   testWidgets(
       'continuous reader keeps unloaded pages during backward scrolling',

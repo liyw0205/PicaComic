@@ -10,7 +10,6 @@ import 'package:pica_comic/comic_source/contract.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
-import 'package:pica_comic/foundation/state_controller.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
