@@ -117,6 +117,17 @@ Future<void> verifyCacheManager() async {
     }
     await cache.clear();
     _check(cache.currentSize == 0, 'Clear did not reset size');
+
+    final oversizedOrphan = File('${cacheDir.path}/oversized-orphan');
+    await oversizedOrphan.writeAsBytes(Uint8List(2 * 1024 * 1024));
+    await cache.checkCache().timeout(const Duration(seconds: 3), onTimeout: () {
+      throw StateError('Cache cleanup stalled on an oversized orphan');
+    });
+    _check(!await oversizedOrphan.exists(),
+        'Oversized orphan survived cache reconciliation');
+    _check(cache.currentSize <= cache.limitSize,
+        'Oversized orphan remained in cache size accounting');
+
     stdout.writeln(
         'Cache: startup, TTL, replacement, streaming, eviction, lifecycle and recovery passed');
   } finally {

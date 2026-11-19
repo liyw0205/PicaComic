@@ -1207,64 +1207,113 @@ Future<void> syncDataSettings(BuildContext context) async {
 }
 
 void setCacheLimit() {
-  int size = appdata.appSettings.cacheLimit;
-  const minSize = 16;
-  bool isValid = true;
-  final FocusNode focusNode = FocusNode();
-  final TextEditingController controller =
-      TextEditingController(text: size.toString());
-  showDialog(
+  unawaited(showDialog<void>(
     context: App.globalContext!,
     useSafeArea: false,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) {
-        focusNode.requestFocus();
-        return ContentDialog(
-          title: "设置缓存限制".tl,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                focusNode: focusNode,
-                controller: controller,
-                keyboardType: TextInputType.number,
-                onChanged: (s) {
-                  size = int.tryParse(s) ?? 500;
-                  setState(() {
-                    isValid = size < minSize ? false : true;
-                  });
-                },
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: isValid ? Colors.grey : Colors.red),
-                  ),
-                  suffix: const Text("MB"),
-                  errorText: isValid ? null : "${"不能小于".tl} $minSize MB",
-                ),
-              ).paddingHorizontal(16),
-            ],
+    builder: (_) => const _CacheLimitDialog(),
+  ));
+}
+
+class _CacheLimitDialog extends StatefulWidget {
+  const _CacheLimitDialog();
+
+  @override
+  State<_CacheLimitDialog> createState() => _CacheLimitDialogState();
+}
+
+class _CacheLimitDialogState extends State<_CacheLimitDialog> {
+  static const _minSize = 16;
+  late final _controller =
+      TextEditingController(text: appdata.appSettings.cacheLimit.toString());
+  bool _saving = false;
+  String? _error;
+
+  int? get _size => int.tryParse(_controller.text.trim(), radix: 10);
+
+  String? _validationError() {
+    final size = _size;
+    if (size == null) return "输入的数字不正确".tl;
+    if (size < _minSize) return "${"不能小于".tl} $_minSize MB";
+    return null;
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final error = _validationError();
+    if (error != null) {
+      setState(() => _error = error);
+      return;
+    }
+    final size = _size!;
+    final data = appdata;
+    final previousSize = data.appSettings.cacheLimit;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    data.appSettings.cacheLimit = size;
+    try {
+      await data.writeData();
+      if (identical(data, appdata) && appdata.appSettings.cacheLimit == size) {
+        CacheManager().setLimitSize(size);
+      }
+      if (!mounted) return;
+      final route = ModalRoute.of(context)!;
+      final navigator = Navigator.of(context);
+      if (route.isCurrent) {
+        navigator.pop();
+      } else if (route.isActive) {
+        navigator.removeRoute(route);
+      }
+    } catch (error, stack) {
+      if (identical(data, appdata) && appdata.appSettings.cacheLimit == size) {
+        appdata.appSettings.cacheLimit = previousSize;
+      }
+      Log.error('Cache',
+          'Failed to save cache limit: ${safeNetworkError(error)}\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = "保存失败".tl;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_saving,
+      child: ContentDialog(
+        title: "设置缓存限制".tl,
+        content: TextField(
+          autofocus: true,
+          controller: _controller,
+          enabled: !_saving,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
+          onChanged: (_) => setState(() => _error = _validationError()),
+          onSubmitted: (_) => unawaited(_save()),
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(),
+            suffix: const Text("MB"),
+            errorText: _error,
           ),
-          actions: [
-            Button.filled(
-              child: Text("确认".tl),
-              onPressed: () {
-                if (size < minSize) {
-                  setState(() {
-                    isValid = false;
-                  });
-                  return;
-                } else {
-                  appdata.appSettings.cacheLimit = size;
-                  appdata.writeData();
-                  CacheManager().setLimitSize(size);
-                  App.globalBack();
-                }
-              },
-            ),
-          ],
-        );
-      },
-    ),
-  );
+        ).paddingHorizontal(16),
+        actions: [
+          Button.filled(
+            isLoading: _saving,
+            disabled: _saving,
+            onPressed: () => unawaited(_save()),
+            child: Text("确认".tl),
+          ),
+        ],
+      ),
+    );
+  }
 }
