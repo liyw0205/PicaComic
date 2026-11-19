@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:pica_comic/network/eh_network/eh_main_network.dart';
 import 'package:pica_comic/network/jm_network/jm_image.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/picacg_network/models.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/tools/time.dart';
 import 'package:pica_comic/foundation/history.dart';
+import 'package:pica_comic/foundation/log.dart';
 import '../base.dart';
 import '../foundation/app.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -28,7 +30,6 @@ class _HistoryPageState extends State<HistoryPage> {
   int _totalCount = 0;
   bool searchMode = false;
   String keyword = "";
-  bool isModified = false;
   bool _loadingPage = false;
   Timer? _searchDebounce;
 
@@ -78,12 +79,27 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void dispose() {
     _cancelSearchDebounce();
-    if (isModified) {
-      unawaited(appdata.history.saveData());
-    }
     _scrollController.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmRemoval([History? history]) {
+    final manager = HistoryManager();
+    return showDialog<void>(
+      context: context,
+      builder: (_) => _HistoryRemovalDialog(
+        clearAll: history == null,
+        onRemove: () async {
+          if (history == null) {
+            await manager.clearHistory();
+          } else {
+            await manager.remove(history.target);
+          }
+          if (mounted) setState(_reload);
+        },
+      ),
+    );
   }
 
   Widget buildTitle() {
@@ -119,26 +135,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 message: "清除".tl,
                 child: IconButton(
                   icon: const Icon(Icons.delete_forever),
-                  onPressed: () => showDialog(
-                      context: context,
-                      builder: (dialogContext) => AlertDialog(
-                            title: Text("清除记录".tl),
-                            content: Text("要清除历史记录吗?".tl),
-                            actions: [
-                              TextButton(
-                                  onPressed: () => App.globalBack(),
-                                  child: Text("取消".tl)),
-                              TextButton(
-                                  onPressed: () {
-                                    appdata.history.clearHistory();
-                                    _cancelSearchDebounce();
-                                    setState(_reload);
-                                    isModified = true;
-                                    App.globalBack();
-                                  },
-                                  child: Text("清除".tl)),
-                            ],
-                          )),
+                  onPressed: () => unawaited(_confirmRemoval()),
                 ),
               ),
               Tooltip(
@@ -174,64 +171,120 @@ class _HistoryPageState extends State<HistoryPage> {
     return SliverGrid(
       delegate:
           SliverChildBuilderDelegate(childCount: comics_.length, (context, i) {
+        final history = comics_[i];
         final comic = ComicItemBrief(
-          comics_[i].title,
-          comics_[i].subtitle,
+          history.title,
+          history.subtitle,
           0,
-          comics_[i].cover != ""
-              ? comics_[i].cover
-              : getJmCoverUrl(comics_[i].target),
-          comics_[i].target,
+          history.cover != "" ? history.cover : getJmCoverUrl(history.target),
+          history.target,
           [],
         );
         return NormalComicTile(
-          key: Key(comics_[i].target),
-          sourceKey: comics_[i].type.comicSource?.key,
-          onLongTap: () {
-            showDialog(
-                context: context,
-                builder: (context) {
-                  return AlertDialog(
-                    title: Text("删除".tl),
-                    content: Text("要删除这条历史记录吗".tl),
-                    actions: [
-                      TextButton(
-                          onPressed: () => App.globalBack(),
-                          child: Text("取消".tl)),
-                      TextButton(
-                          onPressed: () {
-                            appdata.history.remove(comics_[i].target);
-                            setState(() {
-                              isModified = true;
-                              _reload();
-                            });
-                            App.globalBack();
-                          },
-                          child: Text("删除".tl)),
-                    ],
-                  );
-                });
-          },
-          description_: timeToString(comics_[i].time),
+          key: Key(history.target),
+          sourceKey: history.type.comicSource?.key,
+          onLongTap: () => unawaited(_confirmRemoval(history)),
+          description_: timeToString(history.time),
           coverPath: comic.path,
           name: comic.title,
           subTitle_: comic.author,
-          badgeName: comics_[i].type.name,
+          badgeName: history.type.name,
           headers: {
-            if (comics_[i].type == HistoryType.ehentai)
+            if (history.type == HistoryType.ehentai)
               "cookie": EhNetwork().cookiesStr,
-            if (comics_[i].type == HistoryType.ehentai ||
-                comics_[i].type == HistoryType.hitomi)
+            if (history.type == HistoryType.ehentai ||
+                history.type == HistoryType.hitomi)
               "User-Agent": webUA,
-            if (comics_[i].type == HistoryType.hitomi)
+            if (history.type == HistoryType.hitomi)
               "Referer": "https://hitomi.la/"
           },
           onTap: () {
-            toComicPageWithHistory(context, comics_[i]);
+            toComicPageWithHistory(context, history);
           },
         );
       }),
       gridDelegate: SliverGridDelegateWithComics(),
+    );
+  }
+}
+
+class _HistoryRemovalDialog extends StatefulWidget {
+  const _HistoryRemovalDialog({required this.clearAll, required this.onRemove});
+
+  final bool clearAll;
+  final Future<void> Function() onRemove;
+
+  @override
+  State<_HistoryRemovalDialog> createState() => _HistoryRemovalDialogState();
+}
+
+class _HistoryRemovalDialogState extends State<_HistoryRemovalDialog> {
+  bool _removing = false;
+  bool _failed = false;
+
+  Future<void> _remove() async {
+    if (_removing) return;
+    setState(() {
+      _removing = true;
+      _failed = false;
+    });
+    try {
+      await widget.onRemove();
+      if (!mounted) return;
+      final route = ModalRoute.of(context)!;
+      final navigator = Navigator.of(context);
+      if (route.isCurrent) {
+        navigator.pop();
+      } else if (route.isActive) {
+        navigator.removeRoute(route);
+      }
+    } catch (error, stack) {
+      Log.error('History',
+          'Failed to delete history: ${safeNetworkError(error)}\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _removing = false;
+        _failed = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_removing,
+      child: AlertDialog(
+        title: Text(widget.clearAll ? "清除记录".tl : "删除".tl),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.clearAll ? "要清除历史记录吗?".tl : "要删除这条历史记录吗".tl),
+            if (_failed)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text("操作失败".tl,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _removing ? null : () => Navigator.of(context).pop(),
+            child: Text("取消".tl),
+          ),
+          TextButton(
+            onPressed: _removing ? null : () => unawaited(_remove()),
+            child: _removing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(widget.clearAll ? "清除".tl : "删除".tl),
+          ),
+        ],
+      ),
     );
   }
 }
