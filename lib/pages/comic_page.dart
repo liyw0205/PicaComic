@@ -408,8 +408,10 @@ class _CommentsPageState extends State<_CommentsPage> {
   bool _loading = true;
   bool _loadingInitial = false;
   bool _loadingMore = false;
+  int _generation = 0;
   List<Comment>? _comments;
   String? _error;
+  String? _paginationError;
   int _page = 1;
   int? maxPage;
   var controller = TextEditingController();
@@ -418,10 +420,11 @@ class _CommentsPageState extends State<_CommentsPage> {
   Future<void> firstLoad() async {
     if (_loadingInitial) return;
     _loadingInitial = true;
+    final generation = _generation;
     try {
       var res = await widget.source.commentsLoader!(
           widget.data.comicId, widget.data.subId, 1, widget.replyId);
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       if (res.error) {
         setState(() {
           _error = res.errorMessage;
@@ -429,32 +432,40 @@ class _CommentsPageState extends State<_CommentsPage> {
         });
       } else {
         setState(() {
-          _comments = res.data;
+          _comments = List<Comment>.of(res.data);
           _loading = false;
           maxPage = res.subData;
         });
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _error = safeNetworkError(error);
         _loading = false;
       });
     } finally {
-      _loadingInitial = false;
+      if (generation == _generation) _loadingInitial = false;
     }
   }
 
   Future<void> loadMore() async {
-    if (_loadingMore || _comments == null) return;
+    if (_loading ||
+        _loadingMore ||
+        _comments == null ||
+        _paginationError != null) {
+      return;
+    }
     _loadingMore = true;
+    final generation = _generation;
     final page = _page + 1;
     try {
       var res = await widget.source.commentsLoader!(
           widget.data.comicId, widget.data.subId, page, widget.replyId);
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       if (res.error) {
-        showToast(message: res.errorMessage ?? "Unknown Error");
+        setState(() {
+          _paginationError = res.errorMessage ?? "Unknown Error";
+        });
       } else {
         setState(() {
           _comments!.addAll(res.data);
@@ -465,12 +476,21 @@ class _CommentsPageState extends State<_CommentsPage> {
         });
       }
     } catch (error) {
-      if (mounted) {
-        showToast(message: safeNetworkError(error));
+      if (mounted && generation == _generation) {
+        setState(() {
+          _paginationError = safeNetworkError(error);
+        });
       }
     } finally {
-      _loadingMore = false;
+      if (generation == _generation) _loadingMore = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    controller.dispose();
+    super.dispose();
   }
 
   @override
@@ -502,6 +522,20 @@ class _CommentsPageState extends State<_CommentsPage> {
               itemBuilder: (context, index) {
                 if (index == _comments!.length) {
                   if (_page < (maxPage ?? _page + 1)) {
+                    if (_paginationError != null) {
+                      return Center(
+                        child: TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _paginationError = null;
+                            });
+                            unawaited(loadMore());
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: Text(_paginationError!),
+                        ),
+                      );
+                    }
                     unawaited(loadMore());
                     return const ListLoadingIndicator();
                   } else {
@@ -509,10 +543,11 @@ class _CommentsPageState extends State<_CommentsPage> {
                   }
                 }
 
-                bool enableReply = _comments![index].replyCount != null;
+                final comment = _comments![index];
+                bool enableReply = comment.replyCount != null;
 
                 return CommentTile(
-                  leading: _comments![index].avatar == null
+                  leading: comment.avatar == null
                       ? null
                       : Container(
                           width: 40,
@@ -526,18 +561,18 @@ class _CommentsPageState extends State<_CommentsPage> {
                           child: AnimatedImage(
                             image: StreamImageProvider(
                               () => ImageManager().getCustomThumbnail(
-                                _comments![index].avatar!,
+                                comment.avatar!,
                                 widget.data.sourceKey,
                               ),
-                              _comments![index].avatar!,
+                              comment.avatar!,
                             ),
                           ),
                         ),
                   avatarUrl: null,
-                  name: _comments![index].userName,
-                  time: _comments![index].time,
-                  content: _comments![index].content,
-                  comments: _comments![index].replyCount,
+                  name: comment.userName,
+                  time: comment.time,
+                  content: comment.content,
+                  comments: comment.replyCount,
                   onTap: enableReply
                       ? () {
                           showSideBar(
@@ -545,7 +580,7 @@ class _CommentsPageState extends State<_CommentsPage> {
                             _CommentsPage(
                               data: widget.data,
                               source: widget.source,
-                              replyId: _comments![index].id,
+                              replyId: comment.id,
                             ),
                             title: "回复".tl,
                           );
@@ -607,7 +642,8 @@ class _CommentsPageState extends State<_CommentsPage> {
                       )
                     : IconButton(
                         onPressed: () async {
-                          if (controller.text.isEmpty) {
+                          final content = controller.text;
+                          if (sending || content.trim().isEmpty) {
                             return;
                           }
                           setState(() {
@@ -617,15 +653,22 @@ class _CommentsPageState extends State<_CommentsPage> {
                             var b = await widget.source.sendCommentFunc!(
                                 widget.data.comicId,
                                 widget.data.subId,
-                                controller.text,
+                                content,
                                 widget.replyId);
                             if (!mounted) return;
                             if (!b.error) {
-                              controller.text = "";
+                              if (controller.text == content) {
+                                controller.clear();
+                              }
                               setState(() {
+                                _generation++;
                                 sending = false;
                                 _loading = true;
-                                _comments?.clear();
+                                _loadingInitial = false;
+                                _loadingMore = false;
+                                _comments = null;
+                                _error = null;
+                                _paginationError = null;
                                 _page = 1;
                                 maxPage = null;
                               });
