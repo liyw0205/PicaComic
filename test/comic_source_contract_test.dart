@@ -10,9 +10,14 @@ import 'package:pica_comic/comic_source/contract.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/local_favorites.dart';
+import 'package:pica_comic/foundation/state_controller.dart';
 import 'package:pica_comic/network/base_comic.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
+import 'package:pica_comic/comic_source/built_in/picacg.dart';
+import 'package:pica_comic/network/cache_network.dart';
+import 'package:pica_comic/network/cookie_jar.dart';
+import 'package:pica_comic/network/picacg_network/methods.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_main_network.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
 import 'package:pica_comic/network/htmanga_network/htmanga_main_network.dart';
@@ -20,6 +25,8 @@ import 'package:pica_comic/network/htmanga_network/models.dart';
 import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
 import 'package:pica_comic/network/custom_download_model.dart';
 import 'package:pica_comic/network/http_client.dart';
+import 'package:pica_comic/pages/comic_page.dart';
+import 'package:pica_comic/pages/hitomi/hitomi_comic_page.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 
 class _LastRandom implements math.Random {
@@ -71,6 +78,27 @@ class _FixtureComic extends BaseComic {
 
   @override
   String get description => 'fixture';
+}
+
+class _FixtureCachedNetwork extends CachedNetwork {
+  _FixtureCachedNetwork(this.responses);
+
+  final Map<String, Map<String, dynamic>> responses;
+  final List<Uri> requests = [];
+
+  @override
+  Future<CachedNetworkRes<String>> get(String url, BaseOptions options,
+      {CacheExpiredTime expiredTime = CacheExpiredTime.short,
+      CookieJarSql? cookieJar,
+      bool log = true,
+      bool http2 = false,
+      CancelToken? cancelToken}) async {
+    final uri = Uri.parse(url);
+    requests.add(uri);
+    final response = responses[uri.path];
+    if (response == null) throw StateError('Unexpected fixture request: $uri');
+    return CachedNetworkRes(jsonEncode(response), 200, url);
+  }
 }
 
 // These payloads contain only synthetic values. Keep all source error cases
@@ -153,6 +181,80 @@ void main() {
   });
 
   tearDownAll(() => htmangaTestRoot.delete(recursive: true));
+
+  test('PICACG detail keeps the uploader identity separate from the comic',
+      () async {
+    final oldData = picacg.data;
+    final oldSettings = List<String>.from(appdata.settings);
+    final oldOverrides = HttpOverrides.current;
+    final oldProxyOverrides = proxyHttpOverrides;
+    addTearDown(() {
+      picacg.data = oldData;
+      appdata.settings = oldSettings;
+      proxyHttpOverrides = oldProxyOverrides;
+      HttpOverrides.global = oldOverrides;
+    });
+    picacg.data = {'token': 'fixture-token'};
+    appdata.settings[8] = '';
+    appdata.settings[58] = '0';
+    final cachedNetwork = _FixtureCachedNetwork({
+      '/comics/comic-1': {
+        'data': {
+          'comic': {
+            '_id': 'comic-1',
+            '_creator': {
+              '_id': 'uploader-2',
+              'name': 'Fixture uploader',
+              'exp': 100,
+              'level': 2,
+              'avatar': null,
+            },
+            'title': 'Fixture comic',
+            'thumb': {
+              'fileServer': 'https://fixture.test',
+              'path': 'cover.jpg'
+            },
+            'tags': ['fixture'],
+            'categories': ['fixture category'],
+            'pagesCount': 2,
+            'epsCount': 1,
+            'updated_at': '2026-11-19T00:00:00Z',
+          },
+        },
+      },
+      '/comics/comic-1/eps': {
+        'data': {
+          'eps': {
+            'pages': 1,
+            'docs': [
+              {'title': 'Chapter 1'},
+            ],
+          },
+        },
+      },
+      '/comics/comic-1/recommendation': {
+        'data': {'comics': []},
+      },
+    });
+    final network =
+        PicacgNetwork.forTesting(cachedNetworkFactory: () => cachedNetwork);
+
+    final result = await network.getComicInfo('comic-1');
+
+    expect(result.success, isTrue, reason: result.errorMessage);
+    expect(result.data.id, 'comic-1');
+    expect(result.data.creator.id, 'uploader-2');
+    expect(result.data.creator.name, 'Fixture uploader');
+    expect(result.data.creator.avatarUrl, defaultAvatarUrl);
+    expect(result.data.eps, ['Chapter 1']);
+    expect(result.data.toJson()['creator']['id'], 'uploader-2');
+    expect(cachedNetwork.requests.map((uri) => uri.path), [
+      '/comics/comic-1',
+      '/comics/comic-1/eps',
+      '/comics/comic-1/recommendation',
+    ]);
+    expect(cachedNetwork.requests[1].queryParameters, {'page': '1'});
+  });
 
   test('random categories bound the sample and include the final legal start',
       () {
@@ -272,6 +374,41 @@ void main() {
     part.categories.clear();
     expect(tags, ['one', 'two']);
     expect(part.categories, tags);
+  });
+
+  test('Hitomi detail reports its page count from the image files', () {
+    const page =
+        HitomiComicPage.fromLink('https://hitomi.la/galleries/42.html');
+    HitomiComic comicWithFiles(List<HitomiFile> files) => HitomiComic(
+          '42',
+          'Fixture',
+          [],
+          '',
+          [],
+          '',
+          [],
+          [],
+          [],
+          '',
+          files,
+          [],
+          'cover',
+        );
+    final logic = StateController.put(
+      ComicPageLogic<HitomiComic>()..data = comicWithFiles([]),
+      tag: page.tag,
+    );
+    addTearDown(() {
+      logic.controller.dispose();
+      StateController.remove<ComicPageLogic<HitomiComic>>(page.tag);
+    });
+
+    expect(page.pages, isNull);
+    logic.data = comicWithFiles([
+      HitomiFile('1.jpg', 'a', false, false, 1, 1, '42'),
+      HitomiFile('2.jpg', 'b', false, false, 1, 1, '42'),
+    ]);
+    expect(page.pages, 2);
   });
 
   test('Hitomi and Htmanga parsers accept current source URL variants', () {

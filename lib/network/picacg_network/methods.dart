@@ -23,13 +23,19 @@ class PicacgNetwork {
 
   static PicacgNetwork? cache;
 
-  PicacgNetwork._create() {
+  PicacgNetwork._create() : _cachedNetworkFactory = CachedNetwork.new {
     if (picacg.data['user'] != null) {
       try {
         user = Profile.fromJson(picacg.data['user']);
       } finally {}
     }
   }
+
+  PicacgNetwork.forTesting({
+    required CachedNetwork Function() cachedNetworkFactory,
+  }) : _cachedNetworkFactory = cachedNetworkFactory;
+
+  final CachedNetwork Function() _cachedNetworkFactory;
 
   final String apiUrl = "https://picaapi.picacomic.com";
 
@@ -45,7 +51,7 @@ class PicacgNetwork {
       return const Res(null, errorMessage: "未登录");
     }
     await setNetworkProxy();
-    var dio = CachedNetwork();
+    var dio = _cachedNetworkFactory();
     var options = getHeaders("get", token, url.replaceAll("$apiUrl/", ""));
     options.validateStatus = (i) => i == 200 || i == 400 || i == 401;
 
@@ -363,7 +369,7 @@ class PicacgNetwork {
             res["data"]["comic"]["_creator"]["avatar"]["path"];
       }
       var creator = Profile(
-          res["data"]["comic"]["_id"],
+          res["data"]["comic"]["_creator"]["_id"],
           url,
           "",
           res["data"]["comic"]["_creator"]["exp"],

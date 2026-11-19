@@ -41,6 +41,7 @@ class _TileRequests {
 
   Future<void> show(WidgetTester tester, int id) =>
       tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: Center(
           child: SizedBox(
             width: 360,

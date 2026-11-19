@@ -80,7 +80,10 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
   }
 
   @override
-  int? get pages => null;
+  int? get pages {
+    final pageCount = data?.files.length ?? 0;
+    return pageCount > 0 ? pageCount : null;
+  }
 
   @override
   void read(History? history) {
