@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:pica_comic/comic_source/built_in/ht_manga.dart';
-import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/cache_network.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
@@ -11,7 +10,6 @@ import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/network/network_logging.dart';
 import 'package:html/parser.dart';
-import 'package:pica_comic/pages/pre_search_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/translations.dart';
 import '../../base.dart';
@@ -381,14 +379,6 @@ class HtmangaNetwork {
   }
 
   Future<Res<List<HtComicBrief>>> search(String keyword, int page) async {
-    if (keyword != "") {
-      appdata.searchHistory.remove(keyword);
-      appdata.searchHistory.add(keyword);
-      await appdata.writeHistory();
-    }
-    Future.delayed(const Duration(milliseconds: 300),
-            () => StateController.find<PreSearchController>().update())
-        .onError((error, stackTrace) => null);
     return getComicList(
         "$baseUrl/search/?q=${Uri.encodeComponent(keyword)}&f=_all&s=create_time_DESC&syn=yes",
         page,

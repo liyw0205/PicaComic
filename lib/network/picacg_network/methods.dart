@@ -5,8 +5,6 @@ import 'dart:convert' as convert;
 import 'package:pica_comic/network/picacg_network/headers.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/pages/pre_search_page.dart';
-import '../../base.dart';
-import '../../foundation/app.dart';
 import '../../foundation/log.dart';
 import '../app_dio.dart';
 import '../network_logging.dart';
@@ -289,13 +287,11 @@ class PicacgNetwork {
   Future<Res<List<ComicItemBrief>>> search(
       String keyWord, String sort, int page,
       {bool addToHistory = false}) async {
+    if (page == 1 && addToHistory) {
+      await PreSearchController.addSearchHistory(keyWord);
+    }
     var response = await post('$apiUrl/comics/advanced-search?page=$page',
         {"keyword": keyWord, "sort": sort});
-    if (page == 1 && addToHistory && keyWord != "") {
-      appdata.searchHistory.remove(keyWord);
-      appdata.searchHistory.add(keyWord);
-      await appdata.writeHistory();
-    }
     if (response.error) {
       return Res(null, errorMessage: response.errorMessage);
     }
@@ -325,15 +321,6 @@ class PicacgNetwork {
         } catch (e) {
           continue;
         }
-      }
-      if (addToHistory) {
-        Future.delayed(const Duration(microseconds: 500), () {
-          try {
-            StateController.find<PreSearchController>().update();
-          } catch (e) {
-            //忽视
-          }
-        });
       }
       return Res(comics, subData: pages);
     } catch (e, s) {

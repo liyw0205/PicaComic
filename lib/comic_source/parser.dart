@@ -413,21 +413,28 @@ class ComicSourceParser {
       }
       options.add(SearchOptions(map, element["label"]));
     }
-    return SearchPageData(options, (keyword, page, searchOption) async {
-      try {
-        var res = await JsEngine().runCode("""
+    return SearchPageData.named(
+        searchOptions: options,
+        enableLanguageFilter: _getValue("search.enableLanguageFilter") == true,
+        enableTagsSuggestions:
+            _getValue("search.enableTagsSuggestions") == true,
+        loadPage: (keyword, page, searchOption) async {
+          try {
+            var res = await JsEngine().runCode("""
           ComicSource.sources.$_key.search.load(
             ${jsonEncode(keyword)}, ${jsonEncode(searchOption)}, ${jsonEncode(page)})
         """);
-        return Res(
-            List.generate(res["comics"].length,
-                (index) => CustomComic.fromJson(res["comics"][index], _key!)),
-            subData: res["maxPage"]);
-      } catch (e, s) {
-        log("${safeNetworkError(e)}\n$s", "Network", LogLevel.error);
-        return Res.error(e.toString());
-      }
-    });
+            return Res(
+                List.generate(
+                    res["comics"].length,
+                    (index) =>
+                        CustomComic.fromJson(res["comics"][index], _key!)),
+                subData: res["maxPage"]);
+          } catch (e, s) {
+            log("${safeNetworkError(e)}\n$s", "Network", LogLevel.error);
+            return Res.error(e.toString());
+          }
+        });
   }
 
   LoadComicFunc? _parseLoadComicFunc() {

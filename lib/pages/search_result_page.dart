@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
 import 'package:pica_comic/pages/nhentai/tag_stack_bar.dart';
 import 'package:pica_comic/pages/ehentai/tag_stack_bar.dart';
 import 'package:pica_comic/network/search_language.dart';
+import 'package:pica_comic/pages/pre_search_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/tags_translation.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -125,7 +127,7 @@ class SearchResultPage extends StatefulWidget {
 class _SearchResultPageState extends State<SearchResultPage> {
   var controller = TextEditingController();
   bool _showFab = true;
-  late String keyword = widget.keyword;
+  late String keyword = widget.keyword.trim();
   late int languageIndex = int.tryParse(appdata.settings[69]) ?? 0;
 
   OverlayEntry? get suggestionOverlay => suggestionsController.entry;
@@ -141,6 +143,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
     SearchPageContext._pages.add(this);
     NhentaiTagSettings.changes.addListener(_refreshNhentaiTags);
     super.initState();
+    unawaited(PreSearchController.addSearchHistory(keyword));
   }
 
   @override
@@ -168,7 +171,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
     ];
     final next = ehKeywordFromTerms(rest);
     controller.text = next;
-    setState(() => keyword = next);
+    _search(next);
   }
 
   void updateDefaultLanguage(int index) {
@@ -209,11 +212,14 @@ class _SearchResultPageState extends State<SearchResultPage> {
   }
 
   void update() {
-    if (controller.text != keyword) {
-      setState(() {
-        keyword = controller.text;
-      });
-    }
+    _search(controller.text);
+  }
+
+  void _search(String value) {
+    final next = value.trim();
+    if (next == keyword) return;
+    setState(() => keyword = next);
+    unawaited(PreSearchController.addSearchHistory(next));
   }
 
   @override
@@ -271,8 +277,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
       onSearch: (s) {
         suggestionsController.suggestions.clear();
         suggestionsController.remove();
-        if (s == keyword) return;
-        setState(() => keyword = s);
+        _search(s);
       },
       controller: controller,
       onChanged: onChanged,
@@ -321,13 +326,8 @@ class _SearchResultPageState extends State<SearchResultPage> {
     return Scaffold(
       floatingActionButton: _showFab
           ? FloatingActionButton(
+              onPressed: update,
               child: const Icon(Icons.search),
-              onPressed: () {
-                var s = controller.text;
-                setState(() {
-                  keyword = s;
-                });
-              },
             )
           : null,
       body: NotificationListener<ScrollUpdateNotification>(
@@ -426,19 +426,9 @@ class _SearchResultPageState extends State<SearchResultPage> {
                     options = (searchData.searchOptions ?? [])
                         .map((e) => e.defaultValue)
                         .toList();
-                    if (searchData.overrideSearchResultBuilder != null) {
-                      this.context.off(() {
-                        return SearchResultPage(
-                          keyword: keyword,
-                          options: options,
-                          sourceKey: sourceKey!,
-                        );
-                      });
-                    } else {
-                      this.setState(() {
-                        this.sourceKey = sourceKey!;
-                      });
-                    }
+                    this.setState(() {
+                      this.sourceKey = sourceKey!;
+                    });
                   }
                 },
               )

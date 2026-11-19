@@ -411,6 +411,8 @@ class _SearchOptionsState extends State<_SearchOptions> {
   int? ehEndPage;
   int? ehMinStars;
   int? ehExpunged;
+  late final TextEditingController startPageController;
+  late final TextEditingController endPageController;
 
   @override
   void initState() {
@@ -419,7 +421,18 @@ class _SearchOptionsState extends State<_SearchOptions> {
     ehEndPage = int.tryParse(widget.initialValues.elementAtOrNull(2) ?? '');
     ehMinStars = int.tryParse(widget.initialValues.elementAtOrNull(3) ?? '');
     ehExpunged = int.tryParse(widget.initialValues.elementAtOrNull(4) ?? '');
+    startPageController =
+        TextEditingController(text: ehStartPage?.toString() ?? '');
+    endPageController =
+        TextEditingController(text: ehEndPage?.toString() ?? '');
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    startPageController.dispose();
+    endPageController.dispose();
+    super.dispose();
   }
 
   void update() {
@@ -506,6 +519,7 @@ class _SearchOptionsState extends State<_SearchOptions> {
             SizedBox(
               width: 68,
               child: TextField(
+                controller: startPageController,
                 onChanged: (s) {
                   ehStartPage = int.tryParse(s);
                   update();
@@ -522,6 +536,7 @@ class _SearchOptionsState extends State<_SearchOptions> {
             SizedBox(
               width: 68,
               child: TextField(
+                controller: endPageController,
                 onChanged: (s) {
                   ehEndPage = int.tryParse(s);
                   update();

@@ -321,6 +321,7 @@ void main() {
     appdata.settings[58] = '0';
     appdata.settings[69] = '1';
     appdata.settings[91] = '0';
+    appdata.searchHistory = ['user search', 'later search'];
     addTearDown(() {
       network.cookieJar = savedCookieJar;
       appdata.settings = savedSettings;
@@ -351,6 +352,7 @@ void main() {
     await nhentai.categoryComicsData!.load('yaoi', '/tag/yaoi', [''], 1);
     expect(adapter.requests.last.uri.queryParameters['query'],
         'tag:"yaoi" language:chinese');
+    expect(appdata.searchHistory, ['user search', 'later search']);
   });
 
   test('HTML category fallback preserves query, sort and page count', () async {

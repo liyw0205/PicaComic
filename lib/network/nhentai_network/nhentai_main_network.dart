@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart';
 import 'package:pica_comic/base.dart';
-import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/cloudflare.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
@@ -13,7 +12,6 @@ import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/time.dart';
 import 'package:pica_comic/tools/translations.dart';
-import 'package:pica_comic/pages/pre_search_page.dart';
 import '../app_dio.dart';
 import '../http_client.dart';
 import '../network_logging.dart';
@@ -1035,14 +1033,6 @@ class NhentaiNetwork {
       var comicDoms = document.querySelectorAll("div.gallery");
       final lastPage = _lastHtmlPage(document, page);
 
-      Future.microtask(() {
-        try {
-          StateController.find<PreSearchController>().update();
-        } catch (e) {
-          // The search page may not be mounted during a background refresh.
-        }
-      });
-
       if (comicDoms.isEmpty) return const Res([], subData: 0);
 
       return Res(
@@ -1058,11 +1048,6 @@ class NhentaiNetwork {
 
   Future<Res<List<NhentaiComicBrief>>> search(String keyword, int page,
       [NhentaiSort sort = NhentaiSort.recent]) async {
-    if (appdata.searchHistory.contains(keyword)) {
-      appdata.searchHistory.remove(keyword);
-    }
-    appdata.searchHistory.add(keyword);
-    await appdata.writeHistory();
     return _search(keyword, page, sort);
   }
 
@@ -1343,14 +1328,6 @@ class NhentaiNetwork {
           .querySelector("section.pagination > a.last")
           ?.attributes["href"]
           ?.nums;
-
-      Future.microtask(() {
-        try {
-          StateController.find<PreSearchController>().update();
-        } catch (e) {
-          //
-        }
-      });
 
       if (comicDoms.isEmpty) {
         return const Res([], subData: 0);

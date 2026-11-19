@@ -467,6 +467,49 @@ void main() {
     if (root.existsSync()) await root.delete(recursive: true);
   });
 
+  test('custom source search flags are parsed and default to disabled',
+      () async {
+    ComicSource.sources.clear();
+    JsEngine().runCode('ComicSource.sources = {};');
+    const configuredScript = '''
+class SearchFlagsFixture extends ComicSource {
+  name = "Search Flags Fixture"
+  key = "search_flags_fixture"
+  version = "1.0.0"
+  comic = {}
+  search = {
+    enableLanguageFilter: true,
+    enableTagsSuggestions: true,
+    optionList: [],
+    load: async () => ({ comics: [], maxPage: 1 })
+  }
+}
+''';
+    final configured = await ComicSourceParser()
+        .parse(configuredScript, 'fixture/search-flags.js');
+    expect(configured.searchPageData?.enableLanguageFilter, isTrue);
+    expect(configured.searchPageData?.enableTagsSuggestions, isTrue);
+
+    ComicSource.sources.clear();
+    JsEngine().runCode('ComicSource.sources = {};');
+    const defaultScript = '''
+class SearchDefaultsFixture extends ComicSource {
+  name = "Search Defaults Fixture"
+  key = "search_defaults_fixture"
+  version = "1.0.0"
+  comic = {}
+  search = {
+    optionList: [],
+    load: async () => ({ comics: [], maxPage: 1 })
+  }
+}
+''';
+    final defaults = await ComicSourceParser()
+        .parse(defaultScript, 'fixture/search-defaults.js');
+    expect(defaults.searchPageData?.enableLanguageFilter, isFalse);
+    expect(defaults.searchPageData?.enableTagsSuggestions, isFalse);
+  });
+
   test('pinned remote rules satisfy the offline source contract', () async {
     for (final fixture in _rules) {
       ComicSource.sources.clear();

@@ -164,8 +164,7 @@ final picacg = ComicSource.named(
   ),
   searchPageData: SearchPageData.named(
     loadPage: (keyword, page, options) {
-      return PicacgNetwork()
-          .search(keyword, options[0], page, addToHistory: true);
+      return PicacgNetwork().search(keyword, options[0], page);
     },
     searchOptions: [
       SearchOptions.named(

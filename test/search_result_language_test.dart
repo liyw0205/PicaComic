@@ -12,6 +12,7 @@ import 'package:pica_comic/network/search_language.dart';
 import 'package:pica_comic/pages/hitomi/hitomi_search.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/translations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> _finishSearchTransition(WidgetTester tester) async {
   // Start the route ticker before advancing time; the loading spinner prevents
@@ -23,6 +24,13 @@ Future<void> _finishSearchTransition(WidgetTester tester) async {
 
 void main() {
   AppTranslation.translations = const {};
+  late List<String> savedHistory;
+  setUp(() {
+    savedHistory = appdata.searchHistory;
+    appdata.searchHistory = [];
+    SharedPreferences.setMockInitialValues({});
+  });
+  tearDown(() => appdata.searchHistory = savedHistory);
   test('defaults apply to initial, repeated and empty searches', () {
     for (final keyword in ['first', 'second', '']) {
       expect(withDefaultSearchLanguage(keyword, 1),
@@ -84,6 +92,7 @@ void main() {
     testWidgets('changing the default language rebuilds the active query',
         (tester) async {
       await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: SearchResultPage(
           keyword: 'artist:test',
           sourceKey: source.key,
@@ -106,6 +115,7 @@ void main() {
         'an explicit language remains authoritative after a setting change',
         (tester) async {
       await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: SearchResultPage(
           keyword: 'artist:test language:japanese',
           sourceKey: source.key,
@@ -140,7 +150,8 @@ void main() {
         searchPageData: SearchPageData.named(
           enableLanguageFilter: true,
           searchOptions: hitomi.searchPageData!.searchOptions,
-          customResultsBuilder: (keyword, options, header) => HitomiSearchResults(
+          customResultsBuilder: (keyword, options, header) =>
+              HitomiSearchResults(
             keyword: keyword,
             sort: HitomiSearchSort.fromOption(options.firstOrNull),
             header: header,
@@ -159,7 +170,8 @@ void main() {
       appdata.settings = oldSettings;
     });
 
-    test('built-in source supplies all seven sorts and shared results body', () {
+    test('built-in source supplies all seven sorts and shared results body',
+        () {
       final data = hitomi.searchPageData!;
       expect(data.overrideSearchResultBuilder, isNull);
       expect(data.searchOptions!.single.options.keys,
@@ -167,12 +179,14 @@ void main() {
       final results = data.customResultsBuilder!(
           'title language:chinese', ['year'], const SliverToBoxAdapter());
       expect(results, isA<HitomiSearchResults>());
-      expect((results as HitomiSearchResults).keyword, 'title language:chinese');
+      expect(
+          (results as HitomiSearchResults).keyword, 'title language:chinese');
       expect(results.sort, HitomiSearchSort.year);
       expect(ComicSourceContract.validateDefinition(hitomi), isEmpty);
     });
 
-    testWidgets('mobile menu keeps controls available through loading and failure',
+    testWidgets(
+        'mobile menu keeps controls available through loading and failure',
         (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -180,8 +194,9 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final pending = Completer<Res<List<int>>>();
       loader = (_, __) => pending.future;
-      await tester.pumpWidget(const MaterialApp(
-        home: SearchResultPage(keyword: 'title', sourceKey: 'hitomi'),
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: const SearchResultPage(keyword: 'title', sourceKey: 'hitomi'),
       ));
       await tester.pump();
       expect(calls, [('title', HitomiSearchSort.dateAdded)]);
@@ -235,10 +250,14 @@ void main() {
       loader = (_, sort) => sort == HitomiSearchSort.dateAdded
           ? pending.future
           : Future.value(const Res([]));
-      await tester.pumpWidget(const MaterialApp(
-        home: SearchResultPage(keyword: 'title', sourceKey: 'hitomi'),
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: const SearchResultPage(keyword: 'title', sourceKey: 'hitomi'),
       ));
       await tester.pump();
+      expect(appdata.searchHistory, ['title']);
+      appdata.searchHistory.add('later search');
+      await appdata.writeHistory();
       await tester.tap(find.byIcon(Icons.tune));
       await _finishSearchTransition(tester);
       await tester.tap(find.text('随机'));
@@ -259,10 +278,15 @@ void main() {
       SearchResultPage.updateDefaultLanguage(1);
       await tester.pumpAndSettle();
       expect(calls.last, ('title language:chinese', HitomiSearchSort.random));
+      expect(appdata.searchHistory, ['title', 'later search']);
       await tester.enterText(find.byType(TextField), 'next language:japanese');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
       expect(calls.last, ('next language:japanese', HitomiSearchSort.random));
+      expect(appdata.searchHistory,
+          ['title', 'later search', 'next language:japanese']);
+      appdata.searchHistory.add('another search');
+      await appdata.writeHistory();
       await tester.tap(find.byIcon(Icons.dataset_outlined));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Other fixture'));
@@ -271,6 +295,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(otherCalls.last.$1, 'next language:japanese');
       expect(otherCalls.last.$2, ['dateAdded']);
+      expect(appdata.searchHistory, [
+        'title',
+        'later search',
+        'next language:japanese',
+        'another search'
+      ]);
       expect(find.text('Other results'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

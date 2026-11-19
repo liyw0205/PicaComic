@@ -11,9 +11,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:html/parser.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/built_in/jm.dart';
-import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/network/cache_network.dart';
-import 'package:pica_comic/pages/pre_search_page.dart';
 import 'package:pointycastle/api.dart';
 import 'package:pointycastle/block/aes.dart';
 import 'package:pointycastle/block/modes/ecb.dart';
@@ -619,13 +617,10 @@ class JmNetwork {
 
   Future<Res<List<JmComicBrief>>> searchNew(
       String keyword, int page, ComicsOrder order) async {
-    appdata.searchHistory.remove(keyword);
-    appdata.searchHistory.add(keyword);
     keyword = keyword.trim();
     keyword = keyword.replaceAll('  ', ' ');
     keyword = Uri.encodeComponent(keyword);
     keyword = keyword.replaceAll('%20', '+');
-    await appdata.writeHistory();
     Res res;
     if (page != 1) {
       res = await get(
@@ -659,13 +654,6 @@ class JmNetwork {
           continue;
         }
       }
-      Future.delayed(const Duration(microseconds: 500), () {
-        try {
-          StateController.find<PreSearchController>().update();
-        } catch (e) {
-          //跳过
-        }
-      });
       // return Res(comics,
       //     subData: comics.isEmpty
       //         ? 0
@@ -679,8 +667,6 @@ class JmNetwork {
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analysis", "${safeNetworkError(e)}\n$s");
-      Future.delayed(const Duration(microseconds: 500),
-          () => StateController.find<PreSearchController>().update());
       return Res(null, errorMessage: e.toString());
     }
   }

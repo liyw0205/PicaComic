@@ -8,7 +8,6 @@ import 'package:dio/dio.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart';
 import 'package:pica_comic/comic_source/built_in/ehentai.dart';
-import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/app_dio.dart';
 import 'package:pica_comic/network/network_logging.dart';
@@ -17,7 +16,6 @@ import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/eh_network/get_gallery_id.dart';
 import 'package:pica_comic/network/res.dart';
-import 'package:pica_comic/pages/pre_search_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/js.dart';
 import 'package:pica_comic/tools/translations.dart';
@@ -1064,11 +1062,6 @@ class EhNetwork {
       int? endPages,
       int? minStars,
       int? expunged}) async {
-    if (keyword != "") {
-      appdata.searchHistory.remove(keyword);
-      appdata.searchHistory.add(keyword);
-      await appdata.writeHistory();
-    }
     keyword = keyword.replaceAll(RegExp(r"\s+"), " ").trim();
     keyword = withDefaultSearchLanguage(
         keyword, int.tryParse(appdata.settings[69]) ?? 0);
@@ -1110,15 +1103,7 @@ class EhNetwork {
     if (expunged != null && expunged == 1) {
       requestUrl += "&f_sh=on";
     }
-    var res = await getGalleries(requestUrl);
-    Future.delayed(const Duration(microseconds: 500), () {
-      try {
-        StateController.find<PreSearchController>().update();
-      } catch (e) {
-        //忽视
-      }
-    });
-    return res;
+    return getGalleries(requestUrl);
   }
 
   Future<Res<List<EhGalleryBrief>>> getLeaderBoardByPage(

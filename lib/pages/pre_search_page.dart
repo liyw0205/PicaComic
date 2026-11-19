@@ -5,8 +5,10 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/foundation/app.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/foundation/pair.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/app_links.dart';
@@ -113,10 +115,26 @@ class _FloatingSearchBarState extends State<_FloatingSearchBar> {
 }
 
 class PreSearchController extends StateController {
+  static Future<void> addSearchHistory(String keyword) async {
+    final value = keyword.trim();
+    if (value.isEmpty) return;
+    appdata.searchHistory.removeWhere((entry) => entry.trim() == value);
+    appdata.searchHistory.add(value);
+    try {
+      await appdata.writeHistory();
+    } catch (e, s) {
+      LogManager.addLog(LogLevel.error, 'Search History',
+          'Failed to save search history.\n${safeNetworkError(e)}\n$s');
+    }
+    for (final controller in StateController.findAll<PreSearchController>()) {
+      controller.update(['history']);
+    }
+  }
+
   String target = '';
 
-  SearchPageData get searchPageData =>
-      ComicSource.find(target)!.searchPageData!;
+  SearchPageData? get searchPageData =>
+      ComicSource.find(target)?.searchPageData;
 
   var options = <String>[];
 
@@ -127,15 +145,10 @@ class PreSearchController extends StateController {
   bool limitHistory = true;
 
   void updateOptions() {
-    for (var source in ComicSource.sources) {
-      if (source.key == target &&
-          source.searchPageData?.searchOptions != null) {
-        options = List.generate(
-          source.searchPageData!.searchOptions!.length,
-          (index) => source.searchPageData!.searchOptions![index].defaultValue,
-        );
-      }
-    }
+    options = [
+      for (final option in searchPageData?.searchOptions ?? <SearchOptions>[])
+        option.defaultValue,
+    ];
   }
 
   void updateTarget(String i) {
@@ -147,8 +160,9 @@ class PreSearchController extends StateController {
   PreSearchController() {
     var searchSource = <String>[];
     for (var source in ComicSource.sources) {
-      searchSource.add(source.key);
+      if (source.searchPageData != null) searchSource.add(source.key);
     }
+    if (searchSource.isEmpty) return;
     if (!searchSource.contains(appdata.appSettings.initialSearchTarget)) {
       appdata.appSettings.initialSearchTarget = searchSource.first;
       appdata.updateSettings();
@@ -166,16 +180,21 @@ class PreSearchPage extends StatelessWidget {
 
   final searchController = StateController.put(PreSearchController());
 
-  final comicSources =
+  Iterable<ComicSource> get comicSources =>
       ComicSource.sources.where((element) => element.searchPageData != null);
 
   final FocusNode _focusNode = FocusNode();
 
   void search([String? s, String? type]) {
+    final sourceKey = type ?? searchController.target;
+    final searchData = ComicSource.find(sourceKey)?.searchPageData;
+    if (searchData == null) {
+      showToast(message: "没有可用的搜索源".tl);
+      return;
+    }
     var keyword = (s ?? controller.text).trim();
 
-    if (searchController.language != null &&
-        searchController.searchPageData.enableLanguageFilter) {
+    if (searchController.language != null && searchData.enableLanguageFilter) {
       // 在添加语言筛选前，先移除掉可能存在的 language: 部分
       // 主要是为了解决强迫症
       final languagePattern = RegExp(r'\s*language:\w+');
@@ -183,12 +202,18 @@ class PreSearchPage extends StatelessWidget {
       keyword += " language:${searchController.language}";
     }
 
+    final options = sourceKey == searchController.target
+        ? List<String>.of(searchController.options)
+        : [
+            for (final option in searchData.searchOptions ?? <SearchOptions>[])
+              option.defaultValue,
+          ];
     var context = App.mainNavigatorKey!.currentContext!;
     context.to(
       () => SearchResultPage(
         keyword: keyword,
-        sourceKey: type ?? searchController.target,
-        options: searchController.options,
+        sourceKey: sourceKey,
+        options: options,
       ),
     );
   }
@@ -212,7 +237,7 @@ class PreSearchPage extends StatelessWidget {
       }
     }
 
-    if (!searchController.searchPageData.enableTagsSuggestions) return;
+    if (searchController.searchPageData?.enableTagsSuggestions != true) return;
 
     bool check(String text, String key, String value) {
       if (text.removeAllBlank == "") {
@@ -549,14 +574,18 @@ class PreSearchPage extends StatelessWidget {
 
     return StateBuilder<PreSearchController>(
       builder: (logic) {
+        final sources = comicSources.toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: Text("目标".tl)),
+            ListTile(
+              title: Text("目标".tl),
+              subtitle: sources.isEmpty ? Text("没有可用的搜索源".tl) : null,
+            ),
             Wrap(
               children: [
-                for (var source in comicSources)
+                for (var source in sources)
                   buildItem(logic, source.key, source.name.tl)
               ],
             ).paddingHorizontal(12),
@@ -595,16 +624,18 @@ class PreSearchPage extends StatelessWidget {
     return StateBuilder<PreSearchController>(
       id: "mode",
       builder: (logic) {
+        final searchData = logic.searchPageData;
+        if (searchData == null) return const SizedBox.shrink();
         var children = <Widget>[];
-        if (logic.searchPageData.customOptionsBuilder != null) {
+        if (searchData.customOptionsBuilder != null) {
           children.add(
-            logic.searchPageData.customOptionsBuilder!(context, [], (options) {
+            searchData.customOptionsBuilder!(context, List.of(logic.options),
+                (options) {
               logic.options = options;
             }),
           );
         } else {
-          final searchOptions =
-              logic.searchPageData.searchOptions ?? <SearchOptions>[];
+          final searchOptions = searchData.searchOptions ?? <SearchOptions>[];
           for (int i = 0; i < searchOptions.length; i++) {
             final option = searchOptions[i];
             children.add(ListTile(
@@ -626,7 +657,7 @@ class PreSearchPage extends StatelessWidget {
             ).paddingHorizontal(16));
           }
         }
-        if (logic.searchPageData.enableLanguageFilter) {
+        if (searchData.enableLanguageFilter) {
           children.add(buildLangSelector());
         }
         return Column(

@@ -295,9 +295,6 @@ class HiNetwork {
   Future<Res<List<int>>> search(String keyword,
       {HitomiSearchSort sort = HitomiSearchSort.dateAdded}) async {
     await setNetworkProxy();
-    appdata.searchHistory.remove(keyword);
-    appdata.searchHistory.add(keyword);
-    await appdata.writeHistory();
     try {
       var searchEngine = HitomiSearch(
           withDefaultSearchLanguage(
