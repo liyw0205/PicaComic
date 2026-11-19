@@ -356,22 +356,30 @@ class WindowButtons extends StatefulWidget {
 class _WindowButtonsState extends State<WindowButtons> with WindowListener {
   bool isMaximized = false;
 
+  int _windowStateGeneration = 0;
+
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
-    unawaited(() async {
-      try {
-        final value = await windowManager.isMaximized();
-        if (mounted && value) {
-          setState(() {
-            isMaximized = true;
-          });
-        }
-      } catch (_) {
-        // Window state is optional; keep the default when unavailable.
+    unawaited(_updateMaximizedState());
+  }
+
+  Future<void> _updateMaximizedState() async {
+    final generation = ++_windowStateGeneration;
+    try {
+      final value = await windowManager.isMaximized();
+      if (!mounted ||
+          generation != _windowStateGeneration ||
+          isMaximized == value) {
+        return;
       }
-    }());
+      setState(() {
+        isMaximized = value;
+      });
+    } catch (_) {
+      // Window state is optional; retain the last known state when unavailable.
+    }
   }
 
   @override
@@ -382,6 +390,7 @@ class _WindowButtonsState extends State<WindowButtons> with WindowListener {
 
   @override
   void onWindowMaximize() {
+    _windowStateGeneration++;
     setState(() {
       isMaximized = true;
     });
@@ -390,10 +399,17 @@ class _WindowButtonsState extends State<WindowButtons> with WindowListener {
 
   @override
   void onWindowUnmaximize() {
+    _windowStateGeneration++;
     setState(() {
       isMaximized = false;
     });
     super.onWindowUnmaximize();
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    unawaited(_updateMaximizedState());
+    super.onWindowLeaveFullScreen();
   }
 
   @override
