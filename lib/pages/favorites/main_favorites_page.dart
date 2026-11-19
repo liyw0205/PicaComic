@@ -519,7 +519,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
           PopupMenuItem(
             child: Text("删除".tl),
             onTap: () {
-              deleteFolder(folder);
+              unawaited(deleteFolder(folder));
             },
           ),
           PopupMenuItem(
@@ -570,7 +570,7 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
       DesktopMenuEntry(
           text: "删除".tl,
           onClick: () {
-            deleteFolder(folder);
+            unawaited(deleteFolder(folder));
           }),
       DesktopMenuEntry(
           text: "排序".tl,
@@ -611,17 +611,23 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
 }
 
 mixin class _LocalFavoritesManager {
-  void deleteFolder(String folder) {
-    showConfirmDialog(App.globalContext!, "确认删除".tl, "此操作无法撤销, 是否继续?".tl, () {
-      App.globalBack();
-      unawaited(LocalFavoritesManager().deleteFolder(folder));
-      final controller = StateController.find<FavoritesPageController>();
-      if (controller.current == folder && !controller.isNetwork!) {
-        controller.current = null;
-        controller.isNetwork = null;
-      }
-      controller.update();
-    });
+  Future<void> deleteFolder(String folder) {
+    final manager = LocalFavoritesManager();
+    final controller = StateController.findOrNull<FavoritesPageController>();
+    return showDialog<void>(
+      context: App.globalContext!,
+      builder: (_) => _FolderRemovalDialog(onRemove: () async {
+        await manager.deleteFolder(folder);
+        if (controller == null || controller.isDisposed) return;
+        if (controller.current == folder && controller.isNetwork == false) {
+          controller.current = null;
+          controller.isNetwork = null;
+          controller.selectingFolder = true;
+          controller.selectedComics.clear();
+        }
+        controller.update();
+      }),
+    );
   }
 
   Future<void> rename(String folder) async {
@@ -886,6 +892,87 @@ class _ComicsPageViewState extends StateWithController<ComicsPageView> {
   refresh() {
     comics = LocalFavoritesManager().getAllComics(folder);
     update();
+  }
+}
+
+class _FolderRemovalDialog extends StatefulWidget {
+  const _FolderRemovalDialog({required this.onRemove});
+
+  final Future<void> Function() onRemove;
+
+  @override
+  State<_FolderRemovalDialog> createState() => _FolderRemovalDialogState();
+}
+
+class _FolderRemovalDialogState extends State<_FolderRemovalDialog> {
+  bool _removing = false;
+  bool _failed = false;
+
+  Future<void> _remove() async {
+    if (_removing) return;
+    setState(() {
+      _removing = true;
+      _failed = false;
+    });
+    try {
+      await widget.onRemove();
+    } catch (error, stack) {
+      log('Failed to delete favorite folder.\n$error\n$stack', 'Favorite',
+          LogLevel.error);
+      if (!mounted) return;
+      setState(() {
+        _removing = false;
+        _failed = true;
+      });
+      return;
+    }
+    if (!mounted) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    if (route.isCurrent) {
+      navigator.pop();
+    } else if (route.isActive) {
+      navigator.removeRoute(route);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_removing,
+      child: AlertDialog(
+        title: Text('确认删除'.tl),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('此操作无法撤销, 是否继续?'.tl),
+            if (_failed)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('操作失败'.tl,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _removing ? null : () => Navigator.of(context).pop(),
+            child: Text('取消'.tl),
+          ),
+          TextButton(
+            onPressed: _removing ? null : () => unawaited(_remove()),
+            child: _removing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text('确认'.tl),
+          ),
+        ],
+      ),
+    );
   }
 }
 
