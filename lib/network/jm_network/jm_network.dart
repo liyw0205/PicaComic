@@ -407,14 +407,26 @@ class JmNetwork {
     }
   }
 
+  int _imageUrlRevision = 0;
+
   Future<void> updateImgUrl(int index, {bool allowReLogin = true}) async {
+    final revision = ++_imageUrlRevision;
+    final loginRevision = _loginRevision;
+    final data = appdata;
+    final selectedStream = data.settings[37];
     try {
       var res = await get("$baseUrl/setting?app_img_shunt=$index",
           isRetry: !allowReLogin);
-      if (res.error) return;
+      if (res.error ||
+          revision != _imageUrlRevision ||
+          loginRevision != _loginRevision ||
+          !identical(data, appdata) ||
+          selectedStream != appdata.settings[37]) {
+        return;
+      }
       var url = res.data["img_host"];
       appdata.settings[86] = url;
-      appdata.updateSettings();
+      await appdata.updateSettings();
       LogManager.addLog(LogLevel.info, "Network",
           "Updated JM Image URL: ${safeNetworkUrl(url)}");
     } on DioException catch (e) {
@@ -479,6 +491,20 @@ class JmNetwork {
     }
   }
 
+  static int _parseListTotal(Object? value) {
+    final total = switch (value) {
+      int count => count,
+      num count when count.isFinite && count == count.truncateToDouble() =>
+        count.toInt(),
+      String count => int.tryParse(count),
+      _ => null,
+    };
+    if (total == null || total < 0) {
+      throw const FormatException('Invalid JM list total');
+    }
+    return total;
+  }
+
   Future<Res<PromoteList>> getPromoteList(String id) async {
     var res = await get("$baseUrl/promote_list?$baseData&id=$id&page=0",
         expiredTime: CacheExpiredTime.no);
@@ -487,7 +513,7 @@ class JmNetwork {
     }
     try {
       var list = PromoteList(id, []);
-      list.total = int.parse(res.data["total"]);
+      list.total = _parseListTotal(res.data["total"]);
       for (var comic in (res.data["list"])) {
         var categories = <ComicCategoryInfo>[];
         if (comic["category"]["id"] != null &&
@@ -654,15 +680,11 @@ class JmNetwork {
           continue;
         }
       }
-      // return Res(comics,
-      //     subData: comics.isEmpty
-      //         ? 0
-      //         : (int.parse(res.data["total"]) / res.data["content"].length)
-      //             .ceil());
       return Res(comics,
           subData: comics.isEmpty
               ? 0
-              : ((res.data["total"] as num) / res.data["content"].length)
+              : (_parseListTotal(res.data["total"]) /
+                      res.data["content"].length)
                   .ceil());
     } catch (e, s) {
       LogManager.addLog(
@@ -723,14 +745,11 @@ class JmNetwork {
           continue;
         }
       }
-      Object total = res.data["total"];
-      if (total is String) {
-        total = int.parse(total);
-      }
+      final total = _parseListTotal(res.data["total"]);
       var current = res.data["content"].length;
       var pagesCount = 1;
       if (current != 0) {
-        pagesCount = ((total as int) / current).ceil();
+        pagesCount = (total / current).ceil();
       }
       return Res(comics, subData: pagesCount);
     } catch (e, s) {
@@ -933,7 +952,7 @@ class JmNetwork {
       }
       int pages;
       if (comics.isNotEmpty) {
-        pages = (int.parse(res.data["total"]) / comics.length).ceil();
+        pages = (_parseListTotal(res.data["total"]) / comics.length).ceil();
       } else {
         pages = 0;
       }
@@ -998,8 +1017,7 @@ class JmNetwork {
           res2 = await moveToFolder(id, folder);
         }
         if (res.error || res2.error) {
-          return Res(null,
-              errorMessage: res.errorMessage ?? res2.errorMessage);
+          return Res(null, errorMessage: res.errorMessage ?? res2.errorMessage);
         } else {
           return const Res(true);
         }

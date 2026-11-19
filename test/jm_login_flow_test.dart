@@ -62,17 +62,37 @@ class _LoginNetwork extends JmNetwork {
   }
 }
 
-class _ComicInfoNetwork extends JmNetwork {
-  _ComicInfoNetwork(this.payload) : super.create();
+class _ResponseNetwork extends JmNetwork {
+  _ResponseNetwork(this.payload) : super.create();
 
   final Map<String, dynamic> payload;
+  final requests = <Uri>[];
 
   @override
   Future<Res<dynamic>> get(String url,
       {Map<String, String>? header,
       CacheExpiredTime expiredTime = CacheExpiredTime.long,
       bool isRetry = false}) async {
+    requests.add(Uri.parse(url));
     return Res(payload);
+  }
+}
+
+class _ImageNetwork extends JmNetwork {
+  _ImageNetwork() : super.create();
+
+  final requests = <Uri>[];
+  final responses = <Completer<Res<dynamic>>>[];
+
+  @override
+  Future<Res<dynamic>> get(String url,
+      {Map<String, String>? header,
+      CacheExpiredTime expiredTime = CacheExpiredTime.long,
+      bool isRetry = false}) {
+    requests.add(Uri.parse(url));
+    final response = Completer<Res<dynamic>>();
+    responses.add(response);
+    return response.future;
   }
 }
 
@@ -218,7 +238,7 @@ void main() {
   });
 
   test('comic details accept numeric counters from JSON', () async {
-    final network = _ComicInfoNetwork({
+    final network = _ResponseNetwork({
       'name': 'Fixture comic',
       'author': ['Fixture author'],
       'description': 'Description',
@@ -239,6 +259,189 @@ void main() {
     expect(result.data.likes, 12);
     expect(result.data.views, 345);
     expect(result.data.comments, 6);
+  });
+
+  test('newer image stream selection wins over a late response', () async {
+    final network = _ImageNetwork();
+    appdata.settings[37] = '0';
+    appdata.settings[86] = 'original.example';
+    final first = network.updateImgUrl(1);
+    appdata.settings[37] = '1';
+    final second = network.updateImgUrl(2);
+    expect(network.requests.map((uri) => uri.queryParameters['app_img_shunt']),
+        ['1', '2']);
+
+    network.responses[1].complete(const Res({'img_host': 'new.example'}));
+    await second;
+    await appdata.waitForSettingsWrites();
+    expect(appdata.settings[86], 'new.example');
+    network.responses[0].complete(const Res({'img_host': 'old.example'}));
+    await first;
+    await appdata.waitForSettingsWrites();
+    expect(appdata.settings[86], 'new.example');
+    final stored =
+        jsonDecode(await File('${root.path}/settings').readAsString()) as List;
+    expect(stored[37], '1');
+    expect(stored[86], 'new.example');
+  });
+
+  test('logout invalidates an unfinished image stream update', () async {
+    final network = _ImageNetwork();
+    appdata.settings[37] = '0';
+    appdata.settings[86] = 'original.example';
+    final pending = network.updateImgUrl(1);
+    await network.logout();
+    network.responses.single.complete(const Res({'img_host': 'late.example'}));
+    await pending;
+    await appdata.waitForSettingsWrites();
+    expect(appdata.settings[86], 'original.example');
+  });
+
+  test('changing the selected stream invalidates an unfinished update',
+      () async {
+    final network = _ImageNetwork();
+    appdata.settings[37] = '0';
+    appdata.settings[86] = 'original.example';
+    final pending = network.updateImgUrl(1);
+    appdata.settings[37] = '1';
+    network.responses.single.complete(const Res({'img_host': 'late.example'}));
+    await pending;
+    expect(appdata.settings[86], 'original.example');
+  });
+
+  test('replacing settings invalidates an unfinished image stream update',
+      () async {
+    final network = _ImageNetwork();
+    final original = appdata;
+    original.settings[37] = '0';
+    final pending = network.updateImgUrl(1);
+    try {
+      appdata = Appdata();
+      appdata.settings[37] = '0';
+      appdata.settings[86] = 'imported.example';
+      network.responses.single
+          .complete(const Res({'img_host': 'late.example'}));
+      await pending;
+      expect(appdata.settings[86], 'imported.example');
+    } finally {
+      appdata = original;
+    }
+  });
+
+  test('failed image stream retry cannot revive an older response', () async {
+    final network = _ImageNetwork();
+    appdata.settings[37] = '0';
+    appdata.settings[86] = 'original.example';
+    final first = network.updateImgUrl(1);
+    final second = network.updateImgUrl(1);
+    network.responses[1].complete(const Res.error('Offline'));
+    await second;
+    network.responses[0].complete(const Res({'img_host': 'stale.example'}));
+    await first;
+    expect(appdata.settings[86], 'original.example');
+
+    final retry = network.updateImgUrl(1);
+    network.responses[2].complete(const Res({'img_host': 'retry.example'}));
+    await retry;
+    expect(appdata.settings[86], 'retry.example');
+    final stored =
+        jsonDecode(await File('${root.path}/settings').readAsString()) as List;
+    expect(stored[86], 'retry.example');
+  });
+
+  Map<String, dynamic> listPayload(Object? total, {bool empty = false}) {
+    final comics = empty
+        ? <Map<String, dynamic>>[]
+        : [
+            for (final id in ['42', '43'])
+              {
+                'id': id,
+                'author': 'Author',
+                'name': 'Comic $id',
+                'category': <String, dynamic>{},
+                'category_sub': <String, dynamic>{},
+              }
+          ];
+    return {'total': total, 'content': comics, 'list': comics};
+  }
+
+  Future<Map<String, Res<dynamic>>> loadLists(_ResponseNetwork network) async =>
+      {
+        'promote': await network.getPromoteList('promote'),
+        'search': await network.searchNew('query', 2, ComicsOrder.latest),
+        'category':
+            await network.getCategoryComics('category', ComicsOrder.update, 3),
+        'favorites': await network.getFolderComicsPage('folder', 2),
+      };
+
+  for (final total in <Object>['23', 23, 23.0]) {
+    test('JM lists accept ${total.runtimeType} total without losing pagination',
+        () async {
+      final network = _ResponseNetwork(listPayload(total));
+      final results = await loadLists(network);
+      expect(results.map((key, value) => MapEntry(key, value.success)), {
+        'promote': true,
+        'search': true,
+        'category': true,
+        'favorites': true,
+      });
+      final promoted = results['promote']!.data;
+      expect(promoted.total, 23);
+      expect(promoted.loaded, 2);
+      expect(promoted.page, 1);
+      expect(promoted.comics.map((comic) => comic.id), ['42', '43']);
+      for (final endpoint in ['search', 'category', 'favorites']) {
+        expect(results[endpoint]!.subData, 12, reason: endpoint);
+        expect((results[endpoint]!.data as List).map((comic) => comic.id),
+            ['42', '43'],
+            reason: endpoint);
+      }
+      expect(network.requests.map((uri) => uri.path), [
+        '/promote_list',
+        '/search',
+        '/categories/filter',
+        '/favorite',
+      ]);
+      expect(network.requests[1].queryParameters['page'], '2');
+      expect(network.requests[2].queryParameters['page'], '3');
+      expect(network.requests.last.queryParameters['folder_id'], 'folder');
+    });
+  }
+
+  for (final total in <Object>[0, '0']) {
+    test(
+        'JM empty lists retain their page conventions with ${total.runtimeType} total',
+        () async {
+      final results =
+          await loadLists(_ResponseNetwork(listPayload(total, empty: true)));
+      expect(results.values.every((result) => result.success), isTrue);
+      expect(results['promote']!.data.total, 0);
+      expect(results['promote']!.data.loaded, 0);
+      expect(results['search']!.subData, 0);
+      expect(results['favorites']!.subData, 0);
+      expect(results['category']!.subData, 1);
+    });
+  }
+
+  for (final total in [null, 'invalid']) {
+    test('JM malformed total=$total remains a parsing error', () async {
+      final results = await loadLists(_ResponseNetwork(listPayload(total)));
+      expect(results.map((key, value) => MapEntry(key, value.error)), {
+        'promote': true,
+        'search': true,
+        'category': true,
+        'favorites': true,
+      });
+    });
+  }
+
+  test('JM non-integer, negative, and non-numeric totals remain errors',
+      () async {
+    for (final total in <Object>[-1, 23.5, double.nan, double.infinity, true]) {
+      final results = await loadLists(_ResponseNetwork(listPayload(total)));
+      expect(results.values.every((result) => result.error), isTrue,
+          reason: 'total=$total');
+    }
   });
 
   test('unavailable lines never receive credentials', () async {

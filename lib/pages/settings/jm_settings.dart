@@ -20,42 +20,6 @@ class JmSettings extends StatefulWidget {
   @override
   State<JmSettings> createState() => _JmSettingsState();
 
-  static Future<void> updateApiDomains([bool showLoading = false]) async {
-    var title = "";
-    var msg = "";
-    List<String> domains = JmNetwork.builtInApiDomains;
-    final context = App.globalContext;
-    if (showLoading && (context == null || !context.mounted)) return;
-    var controller = showLoading ? showLoadingDialog(context!) : null;
-    final Res<dynamic> res;
-    try {
-      res = await JmNetwork().getApiDomains();
-    } finally {
-      controller?.close();
-    }
-    if (res.error) {
-      title += "更新失败".tl;
-      msg += "${"使用内置域名:".tl}\n";
-    } else {
-      title += "更新成功".tl;
-      domains = res.data;
-    }
-    for (var i = 0; i < domains.length; i++) {
-      msg += "${"域名".tl}${i + 1}: ${domains[i]}\n";
-    }
-    msg = msg.trim();
-    if (context == null || !context.mounted) return;
-    showConfirmDialog(context, title, msg, () async {
-      appdata.appSettings.jmApiDomains = domains;
-      var index = int.tryParse(appdata.settings[17]) ?? 0;
-      if (index < 0 || index >= domains.length) {
-        appdata.settings[17] = "0";
-      }
-      await updateAppVersionCode();
-      await JmNetwork().loginFromAppdata();
-    });
-  }
-
   static Future<void> daily([bool showLoading = false]) async {
     if (!jm.isLogin && showLoading) {
       showToast(message: "未登录".tl);
@@ -89,6 +53,91 @@ class JmSettings extends StatefulWidget {
 class _JmSettingsState extends State<JmSettings> {
   bool autoSelectStream = appdata.settings[15] == "1";
   bool autoCheckIn = appdata.settings[88] == "1";
+  bool _updatingDomains = false;
+
+  Future<void> _updateApiDomains() async {
+    if (_updatingDomains) return;
+    setState(() => _updatingDomains = true);
+    final network = JmNetwork();
+    final ownerRoute = ModalRoute.of(context);
+    final controller = showLoadingDialog(context);
+    var dismissed = false;
+    try {
+      Res<dynamic> res;
+      try {
+        res = await network.getApiDomains();
+      } catch (error, stack) {
+        Log.error(
+            'JM',
+            'Failed to discover API domains: '
+                '${safeNetworkError(error)}\n$stack');
+        res = const Res.error('Failed to get JM api domains');
+      } finally {
+        dismissed = controller.closed;
+        controller.close();
+      }
+      if (!mounted || ownerRoute?.isActive == false || dismissed) return;
+      final domains = List<String>.of(res.error
+          ? JmNetwork.builtInApiDomains
+          : List<String>.from(res.data));
+      final message = [
+        if (res.error) "使用内置域名:".tl,
+        for (var i = 0; i < domains.length; i++)
+          '${"域名".tl}${i + 1}: ${domains[i]}',
+      ].join('\n');
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(res.error ? "更新失败".tl : "更新成功".tl),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text("取消".tl),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text("确认".tl),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || ownerRoute?.isActive == false) {
+        return;
+      }
+      final oldDomains = appdata.settings[85];
+      final oldIndex = appdata.settings[17];
+      appdata.appSettings.jmApiDomains = domains;
+      final index = int.tryParse(oldIndex) ?? 0;
+      if (index < 0 || index >= domains.length) appdata.settings[17] = "0";
+      try {
+        await appdata.updateSettings();
+      } catch (error, stack) {
+        appdata.settings[85] = oldDomains;
+        appdata.settings[17] = oldIndex;
+        Log.error(
+            'JM',
+            'Failed to save API domains: '
+                '${safeNetworkError(error)}\n$stack');
+        if (mounted && ownerRoute?.isActive != false) {
+          showDialogMessage(context, "保存失败".tl, "操作失败".tl);
+        }
+        return;
+      }
+      if (mounted) setState(() {});
+      try {
+        await JmSettings.updateAppVersionCode();
+        await network.loginFromAppdata();
+      } catch (error, stack) {
+        Log.error(
+            'JM',
+            'Failed to refresh JM after saving API domains: '
+                '${safeNetworkError(error)}\n$stack');
+      }
+    } finally {
+      if (mounted) setState(() => _updatingDomains = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -176,7 +225,7 @@ class _JmSettingsState extends State<JmSettings> {
         ListTile(
           leading: const Icon(Icons.update_outlined),
           title: Text("更新API域名".tl),
-          onTap: () => unawaited(JmSettings.updateApiDomains(true)),
+          onTap: _updatingDomains ? null : () => unawaited(_updateApiDomains()),
           trailing: const Icon(Icons.arrow_right),
         ),
         ListTile(
