@@ -3,10 +3,16 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/network/custom_download_model.dart';
 import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/network/eh_network/eh_download_model.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/nhentai_network/download.dart';
+import 'package:pica_comic/network/download_model.dart';
+import 'package:pica_comic/network/picacg_network/models.dart';
+import 'package:pica_comic/network/picacg_network/picacg_download_model.dart';
+import 'package:pica_comic/network/jm_network/jm_download.dart';
+import 'package:pica_comic/network/jm_network/jm_models.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
@@ -28,6 +34,7 @@ void main() {
 
   tearDown(() async {
     await manager.dispose();
+    manager.path = null;
     appdata.settings[22] = oldDownloadPath;
     if (await directory.exists()) await directory.delete(recursive: true);
   });
@@ -87,6 +94,47 @@ void main() {
     }
     db.dispose();
   }
+
+  ComicItem picacgComic() => ComicItem(
+        Profile('creator', '', '', 0, 0, 'author', '', false, null, null),
+        'Fixture comic',
+        '',
+        '',
+        'author',
+        '',
+        const [],
+        const [],
+        0,
+        0,
+        false,
+        false,
+        2,
+        'abcdef1234567890abcdef12',
+        0,
+        '',
+        const [],
+        const [],
+      );
+
+  JmComicInfo jmComic(Map<int, String> series, List<String> epNames,
+          {String id = '123'}) =>
+      JmComicInfo(
+        'Fixture JM',
+        id,
+        const ['author'],
+        '',
+        0,
+        0,
+        series,
+        const [],
+        const [],
+        const [],
+        const [],
+        false,
+        false,
+        0,
+        epNames,
+      );
 
   test('NH downloaded tags survive JSON round trips and legacy records', () {
     final original = NhentaiDownloadedComic('nhentai123', 'Fixture', 1.5,
@@ -186,7 +234,9 @@ void main() {
         'other': [],
       },
       <String, List<String>>{},
-      <String, List<String>>{'key': ['legacy unclassified tag']},
+      <String, List<String>>{
+        'key': ['legacy unclassified tag']
+      },
     ]) {
       final original = galleryFixture('123', tags);
       var restored = original;
@@ -618,6 +668,342 @@ void main() {
     expect(manager.total, 0);
   });
 
+  test('metadata updates preserve downloaded directory and original time',
+      () async {
+    const id = 'fixture-comic-1';
+    final originalTime = DateTime(2026, 1, 1);
+    createDownloadDatabase(directory, [
+      [
+        id,
+        'Fixture comic',
+        'Fixture author',
+        originalTime.millisecondsSinceEpoch,
+        'stable-directory',
+        2,
+        jsonEncode({
+          'comicSize': 2.0,
+          'downloadedEps': <int>[1],
+          'chapters': <String, String>{
+            'chapter-1': 'Chapter 1',
+            'chapter-2': 'Chapter 2',
+          },
+          'id': id,
+          'name': 'Fixture comic',
+          'subTitle': 'Fixture author',
+          'tags': <String>[],
+          'sourceKey': 'fixture_source',
+          'sourceName': 'Fixture source',
+          'cover': 'https://fixture.test/cover.jpg',
+          'comicId': 'comic-1',
+        }),
+      ],
+    ]);
+
+    await manager.init();
+    final updated = CustomDownloadedItem(
+      2,
+      [1],
+      const {
+        'chapter-1': 'Chapter 1',
+        'chapter-2': 'Chapter 2',
+        'chapter-3': 'Chapter 3',
+      },
+      id,
+      'Fixture comic',
+      'Fixture author',
+      const [],
+      'fixture_source',
+      'Fixture source',
+      'https://fixture.test/cover.jpg',
+      'comic-1',
+    )
+      ..directory = 'replacement-directory'
+      ..time = DateTime(2030, 1, 1);
+
+    manager.updateComic(id, (_) => updated);
+
+    expect(updated.directory, 'stable-directory');
+    expect(updated.time, originalTime);
+    await manager.dispose();
+    await manager.init();
+    final restored = await manager.getComicOrNull(id) as CustomDownloadedItem;
+    expect(restored.chapters, {
+      'chapter-1': 'Chapter 1',
+      'chapter-2': 'Chapter 2',
+      'chapter-3': 'Chapter 3',
+    });
+    expect(restored.directory, 'stable-directory');
+    expect(restored.time, originalTime);
+  });
+
+  test('PICACG chapter refresh accepts an append without moving downloads', () {
+    final originalTime = DateTime(2025, 3, 4);
+    final item = DownloadedComic(
+      picacgComic(),
+      ['Chapter 1', 'Chapter 2'],
+      12,
+      [0, 1],
+    )
+      ..directory = 'picacg-stable'
+      ..time = originalTime;
+    expect(refreshPicacgDownloadedChapters(item, item.chapters), same(item));
+
+    final updated = refreshPicacgDownloadedChapters(
+      item,
+      ['Chapter 1', 'Chapter 2', 'Chapter 3'],
+    );
+
+    expect(updated.chapters, ['Chapter 1', 'Chapter 2', 'Chapter 3']);
+    expect(updated.downloadedChapters, [0, 1]);
+    expect(updated.directory, 'picacg-stable');
+    expect(updated.time, originalTime);
+    expect(item.chapters, ['Chapter 1', 'Chapter 2']);
+  });
+
+  test('custom chapter refresh rejects invalid downloaded positions and IDs',
+      () {
+    CustomDownloadedItem item(List<int> downloaded) => CustomDownloadedItem(
+        2,
+        downloaded,
+        {'ep-1': 'First', 'ep-2': 'Second'},
+        'fixture-1',
+        'Fixture',
+        '',
+        [],
+        'fixture',
+        'Fixture',
+        '',
+        '1');
+    for (final downloaded in [
+      [-1],
+      [2],
+      [0, 0]
+    ]) {
+      expect(
+          () => refreshCustomDownloadedChapters(
+              item(downloaded), {'ep-1': 'First', 'ep-2': 'Second'}),
+          throwsStateError);
+    }
+    expect(
+        () => refreshCustomDownloadedChapters(
+            item([0]), {'ep-1': 'First', '': 'Invalid'}),
+        throwsStateError);
+  });
+
+  test('PICACG chapter refresh rejects changed downloaded positions', () {
+    final item = DownloadedComic(
+      picacgComic(),
+      ['Chapter 1', 'Chapter 2'],
+      12,
+      [1],
+    );
+
+    for (final chapters in [
+      ['New chapter', 'Chapter 1', 'Chapter 2'],
+      ['Chapter 2', 'Chapter 1'],
+      ['Chapter 1'],
+      ['', 'Chapter 2'],
+      <String>[],
+    ]) {
+      expect(
+        () => refreshPicacgDownloadedChapters(item, chapters),
+        throwsA(isA<StateError>()),
+        reason: '$chapters must not change downloaded directory mappings',
+      );
+    }
+    item.downloadedChapters = [-1];
+    expect(() => refreshPicacgDownloadedChapters(item, item.chapters),
+        throwsStateError);
+    item.downloadedChapters = [2];
+    expect(() => refreshPicacgDownloadedChapters(item, item.chapters),
+        throwsStateError);
+  });
+
+  test('JM chapter refresh accepts appended IDs and preserves local identity',
+      () {
+    final originalTime = DateTime(2025, 4, 5);
+    final item = DownloadedJmComic(
+      jmComic({1: 'ep-1', 2: 'ep-2'}, ['Chapter 1', 'Chapter 2']),
+      12,
+      [1],
+    )
+      ..directory = 'jm-stable'
+      ..time = originalTime;
+    expect(refreshJmDownloadedChapters(item, item.comic), same(item));
+
+    final updated = refreshJmDownloadedChapters(
+      item,
+      jmComic(
+        {1: 'ep-1', 2: 'ep-2', 3: 'ep-3'},
+        ['Renamed chapter 1', 'Chapter 2', 'Chapter 3'],
+      ),
+    );
+
+    expect(updated.comic.series, {1: 'ep-1', 2: 'ep-2', 3: 'ep-3'});
+    expect(updated.comic.epNames.first, 'Renamed chapter 1');
+    expect(updated.downloadedChapters, [1]);
+    expect(updated.directory, 'jm-stable');
+    expect(updated.time, originalTime);
+    expect(item.comic.series, {1: 'ep-1', 2: 'ep-2'});
+  });
+
+  test('JM chapter refresh rejects a changed downloaded chapter ID', () {
+    final item = DownloadedJmComic(
+      jmComic({1: 'ep-1', 2: 'ep-2'}, ['Chapter 1', 'Chapter 2']),
+      12,
+      [1],
+    );
+
+    for (final latest in [
+      jmComic({1: 'ep-2', 2: 'ep-1'}, ['Chapter 2', 'Chapter 1']),
+      jmComic({1: 'ep-1'}, ['Chapter 1']),
+      jmComic({}, []),
+      jmComic({1: 'ep-1', 3: 'ep-2'}, ['Chapter 1', 'Chapter 2']),
+      jmComic({2: 'ep-2', 1: 'ep-1'}, ['Chapter 2', 'Chapter 1']),
+      jmComic({1: 'ep-1', 2: ''}, ['Chapter 1', 'Chapter 2']),
+      jmComic({1: 'ep-1', 2: 'ep-2', 3: 'ep-1'}, []),
+      jmComic({1: 'ep-1', 2: 'ep-2'}, ['Only one name']),
+      jmComic({1: 'ep-1', 2: 'ep-2'}, [], id: '456'),
+    ]) {
+      expect(
+        () => refreshJmDownloadedChapters(item, latest),
+        throwsA(isA<StateError>()),
+        reason: '${latest.id}: ${latest.series} must preserve old downloads',
+      );
+    }
+    item.downloadedChapters = [-1];
+    expect(
+        () => refreshJmDownloadedChapters(item, item.comic), throwsStateError);
+    item.downloadedChapters = [2];
+    expect(
+        () => refreshJmDownloadedChapters(item, item.comic), throwsStateError);
+  });
+
+  test('JM single chapter refresh retains the original chapter identity', () {
+    final item = DownloadedJmComic(jmComic({}, []), 1, [0]);
+    final updated =
+        refreshJmDownloadedChapters(item, jmComic({}, ['Single chapter']));
+    expect(updated.comic.series, {1: item.comic.id});
+    expect(updated.eps, ['Single chapter']);
+    expect(updated.downloadedEps, [0]);
+    expect(
+      () => refreshJmDownloadedChapters(
+          item, jmComic({1: 'different-chapter'}, ['Single chapter'])),
+      throwsStateError,
+    );
+    final appended = refreshJmDownloadedChapters(item,
+        jmComic({1: item.comic.id, 2: 'ep-2'}, ['Single chapter', 'New']));
+    expect(appended.comic.series.values, [item.comic.id, 'ep-2']);
+    expect(appended.downloadedEps, [0]);
+  });
+
+  for (final source in ['PICACG', 'JM']) {
+    test('$source chapter refresh survives reopening without changing files',
+        () async {
+      final DownloadedItem original = source == 'PICACG'
+          ? DownloadedComic(picacgComic(), ['Chapter 1', 'Chapter 2'], 12, [1])
+          : DownloadedJmComic(
+              jmComic({1: 'ep-1', 2: 'ep-2'}, ['Chapter 1', 'Chapter 2']),
+              12,
+              [1]);
+      final originalTime = DateTime(2025, 6, 7);
+      createDownloadDatabase(directory, [
+        [
+          original.id,
+          original.name,
+          original.subTitle,
+          originalTime.millisecondsSinceEpoch,
+          'stable-directory',
+          12,
+          jsonEncode(original.toJson()),
+        ],
+      ]);
+      final image = File('${directory.path}/stable-directory/2/0.jpg');
+      await image.create(recursive: true);
+      await image.writeAsBytes([1, 2, 3]);
+      await manager.init();
+      final stored = (await manager.getComicOrNull(original.id))!;
+      final updated = stored is DownloadedComic
+          ? refreshPicacgDownloadedChapters(
+              stored, ['Chapter 1', 'Chapter 2', 'Chapter 3'])
+          : refreshJmDownloadedChapters(
+              stored as DownloadedJmComic,
+              jmComic({1: 'ep-1', 2: 'ep-2', 3: 'ep-3'},
+                  ['Chapter 1', 'Chapter 2', 'Chapter 3']));
+      manager.updateComic(original.id, (_) => updated);
+
+      await manager.dispose();
+      await manager.init();
+      final restored = (await manager.getComicOrNull(original.id))!;
+      expect(restored.eps, ['Chapter 1', 'Chapter 2', 'Chapter 3']);
+      expect(restored.downloadedEps, [1]);
+      expect(restored.comicSize, 12);
+      expect(restored.directory, 'stable-directory');
+      expect(restored.time, originalTime);
+      expect(await image.readAsBytes(), [1, 2, 3]);
+      expect(Directory('${directory.path}/stable-directory/3').existsSync(),
+          isFalse);
+    });
+  }
+
+  test('deleting an episode preserves the comic download timestamp', () async {
+    const id = 'fixture-comic-2';
+    final originalTime = DateTime(2024, 5, 6);
+    createDownloadDatabase(directory, [
+      [
+        id,
+        'Fixture comic',
+        'Fixture author',
+        originalTime.millisecondsSinceEpoch,
+        'stable-directory',
+        2,
+        jsonEncode({
+          'comicSize': 2.0,
+          'downloadedEps': <int>[0, 1],
+          'chapters': <String, String>{
+            'chapter-1': 'Chapter 1',
+            'chapter-2': 'Chapter 2',
+          },
+          'id': id,
+          'name': 'Fixture comic',
+          'subTitle': 'Fixture author',
+          'tags': <String>[],
+          'sourceKey': 'fixture_source',
+          'sourceName': 'Fixture source',
+          'cover': 'https://fixture.test/cover.jpg',
+          'comicId': 'comic-2',
+        }),
+      ],
+    ]);
+    await Directory('${directory.path}/stable-directory/1')
+        .create(recursive: true);
+    await Directory('${directory.path}/stable-directory/2')
+        .create(recursive: true);
+
+    await manager.init();
+    final comic = await manager.getComicOrNull(id);
+    final db = sqlite3.open('${directory.path}/download.db');
+    final data = comic!.toJson()
+      ..['downloadedEps'] = [0, 1, 2]
+      ..['chapters'] = {
+        'chapter-1': 'Chapter 1',
+        'chapter-2': 'Chapter 2',
+        'chapter-3': 'Chapter 3',
+      };
+    db.execute(
+        'update download set json = ? where id = ?', [jsonEncode(data), id]);
+    db.dispose();
+    final result = await manager.deleteEpisode(comic, 0);
+
+    expect(result, isNull);
+    await manager.dispose();
+    await manager.init();
+    final restored = await manager.getComicOrNull(id) as CustomDownloadedItem;
+    expect(restored.downloadedEps, [1, 2]);
+    expect(restored.eps, ['Chapter 1', 'Chapter 2', 'Chapter 3']);
+    expect(restored.time, originalTime);
+  });
+
   test('deleting a record without a directory removes the orphaned row',
       () async {
     createDownloadDatabase(directory, [
@@ -656,6 +1042,7 @@ void main() {
       expect(manager.getDirectory(id), 'second-root');
     } finally {
       await manager.dispose();
+      manager.path = null;
       if (await secondDirectory.exists()) {
         await secondDirectory.delete(recursive: true);
       }

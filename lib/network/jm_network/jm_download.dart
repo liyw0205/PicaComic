@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:pica_comic/network/download.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'jm_image.dart';
@@ -70,6 +71,65 @@ class DownloadedJmComic extends DownloadedItem {
 
   @override
   List<String> get tags => comic.tags;
+}
+
+/// Refreshes JM chapter metadata only when downloaded positions retain their
+/// chapter IDs. `series` keys are display positions; values are stable IDs.
+DownloadedJmComic refreshJmDownloadedChapters(
+    DownloadedJmComic item, JmComicInfo latestComic) {
+  if (latestComic.id != item.comic.id) {
+    throw StateError('漫画身份已变化，已保留旧下载章节');
+  }
+  final latestChapterCount =
+      latestComic.series.isEmpty ? 1 : latestComic.series.length;
+  if (latestComic.epNames.isNotEmpty &&
+      latestComic.epNames.length != latestChapterCount) {
+    throw StateError('章节信息不完整，已保留旧下载章节');
+  }
+
+  List<String> orderedIds(JmComicInfo comic) {
+    if (comic.series.isEmpty) return [comic.id];
+    // The reader consumes insertion order, so keys must already be 1-based
+    // and sequential. Sorting only for validation would hide a wrong mapping.
+    final keys = comic.series.keys.toList();
+    final seenIds = <String>{};
+    for (var index = 0; index < keys.length; index++) {
+      final id = comic.series[keys[index]]!;
+      if (keys[index] != index + 1 || id.trim().isEmpty || !seenIds.add(id)) {
+        throw StateError('章节序号异常，已保留旧下载章节');
+      }
+    }
+    return [for (final key in keys) comic.series[key]!];
+  }
+
+  final storedIds = orderedIds(item.comic);
+  final latestIds = orderedIds(latestComic);
+  final seenIndexes = <int>{};
+  for (final index in item.downloadedChapters) {
+    if (index < 0 ||
+        index >= storedIds.length ||
+        index >= latestIds.length ||
+        !seenIndexes.add(index) ||
+        storedIds[index] != latestIds[index]) {
+      throw StateError('章节顺序已变化，已保留旧下载章节');
+    }
+  }
+
+  final sameSeries = listEquals(storedIds, latestIds);
+  final sameNames = listEquals(item.comic.epNames, latestComic.epNames);
+  if (sameSeries && sameNames) return item;
+
+  final refreshedComic = JmComicInfo.fromMap(item.comic.toJson())
+    ..series = Map<int, String>.from(
+        latestComic.series.isEmpty ? {1: latestComic.id} : latestComic.series)
+    ..epNames = List<String>.of(latestComic.epNames);
+  return DownloadedJmComic(
+    refreshedComic,
+    item.size,
+    List<int>.of(item.downloadedChapters),
+  )
+    ..time = item.time
+    ..directory = item.directory;
 }
 
 class JmDownloadingItem extends DownloadingItem {

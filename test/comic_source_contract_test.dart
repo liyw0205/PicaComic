@@ -605,6 +605,53 @@ void main() {
     expect(emptyReading.buildImageKey(1, 0, 'page.jpg'),
         'single-episodesingle-episodepage.jpg');
 
+    final downloadedSeries = CustomDownloadedItem(
+      2,
+      [1],
+      const {'chapter-1': 'Chapter 1', 'chapter-2': 'Chapter 2'},
+      'fixture-comic-1',
+      'Fixture comic',
+      'Fixture author',
+      const [],
+      'fixture_source',
+      'Fixture source',
+      'https://fixture.test/cover.jpg',
+      'comic-1',
+    )
+      ..directory = 'Fixture comic'
+      ..time = DateTime(2026, 1, 1);
+    final refreshedSeries = refreshCustomDownloadedChapters(
+      downloadedSeries,
+      const {
+        'chapter-1': 'Chapter 1 updated',
+        'chapter-2': 'Chapter 2',
+        'chapter-3': 'Chapter 3',
+      },
+    );
+    expect(refreshedSeries.downloadedEps, [1]);
+    expect(
+        refreshedSeries.eps, ['Chapter 1 updated', 'Chapter 2', 'Chapter 3']);
+    expect(refreshedSeries.directory, 'Fixture comic');
+    expect(refreshedSeries.time, DateTime(2026, 1, 1));
+    expect(
+      () => refreshCustomDownloadedChapters(
+        downloadedSeries,
+        const {
+          'chapter-new': 'New chapter',
+          'chapter-1': 'Chapter 1',
+          'chapter-2': 'Chapter 2',
+        },
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      () => refreshCustomDownloadedChapters(
+        emptyDownloadedItem,
+        const {'chapter-1': 'Chapter 1'},
+      ),
+      throwsA(isA<StateError>()),
+    );
+
     expect(
       HtmangaNetwork.parseImageList(
         r'''document.writeln("var imglist = [{ url: fast_img_host+\"//img.example/data/01.jpg?verify=token&sig=abc\", caption: \"[01]\"}];");''',

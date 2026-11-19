@@ -1,12 +1,12 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/network/download_model.dart';
 import 'package:pica_comic/tools/extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import '../download.dart';
 import 'methods.dart';
-import 'models.dart';
-import 'dart:io';
 
 class DownloadedComic extends DownloadedItem {
   ComicItem comicItem;
@@ -66,6 +66,42 @@ class DownloadedComic extends DownloadedItem {
 
   @override
   List<String> get tags => comicItem.tags;
+}
+
+/// Refreshes chapter labels only while every downloaded position still has
+/// the same non-empty label. PICACG does not expose stable chapter IDs here.
+DownloadedComic refreshPicacgDownloadedChapters(
+    DownloadedComic item, List<String> latestChapters) {
+  if (latestChapters.isEmpty) {
+    throw StateError('漫画源没有返回章节信息');
+  }
+  // Blank titles are removed by `eps`, which would shift directory indexes.
+  if (item.chapters.any((title) => title.trim().isEmpty) ||
+      latestChapters.any((title) => title.trim().isEmpty)) {
+    throw StateError('章节信息不完整，已保留旧下载章节');
+  }
+
+  final seenIndexes = <int>{};
+  for (final index in item.downloadedChapters) {
+    if (index < 0 ||
+        index >= item.chapters.length ||
+        index >= latestChapters.length ||
+        !seenIndexes.add(index) ||
+        item.chapters[index] != latestChapters[index]) {
+      throw StateError('章节顺序已变化，已保留旧下载章节');
+    }
+  }
+
+  if (listEquals(item.chapters, latestChapters)) return item;
+
+  return DownloadedComic(
+    item.comicItem,
+    List<String>.of(latestChapters),
+    item.size,
+    List<int>.of(item.downloadedChapters),
+  )
+    ..time = item.time
+    ..directory = item.directory;
 }
 
 ///picacg的下载进程模型

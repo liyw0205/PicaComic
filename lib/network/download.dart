@@ -1067,6 +1067,34 @@ class DownloadManager with _DownloadDb implements Listenable {
     return _getComicWithDb(id);
   }
 
+  /// Reads, transforms and saves the latest record without an async gap.
+  DownloadedItem updateComic(
+      String id, DownloadedItem Function(DownloadedItem) update) {
+    if (_db == null || _lifecycleOperation != null) {
+      throw StateError('下载目录正在切换，请稍后重试');
+    }
+    final existing = _getComicWithDb(id);
+    if (existing == null) {
+      throw StateError('下载记录已删除，请重新打开下载详情');
+    }
+    final directory = existing.directory;
+    if (directory == null) {
+      throw StateError('下载目录信息不完整，请重新打开下载详情');
+    }
+    final safeDirectory = _findAccurateDirectory(directory);
+    final time = existing.time;
+    final item = update(existing);
+    if (item.id != id || item.type != existing.type) {
+      throw StateError('下载记录已变化，已保留当前状态');
+    }
+    if (identical(item, existing)) return item;
+    item
+      ..directory = safeDirectory
+      ..time = time;
+    _addToDb(item, safeDirectory, time);
+    return item;
+  }
+
   ///删除已下载的漫画
   Future<void> delete(List<String> ids) async {
     for (var id in ids) {
@@ -1102,18 +1130,40 @@ class DownloadManager with _DownloadDb implements Listenable {
   /// return error message when error, or null if success.
   Future<String?> deleteEpisode(DownloadedItem comic, int ep) async {
     try {
-      if (comic.downloadedEps.length == 1) {
+      final db = _db;
+      final downloadPath = path;
+      final current = _getComicWithDb(comic.id);
+      if (current == null || _lifecycleOperation != null) {
+        throw StateError('下载记录已变化，请重新打开下载详情');
+      }
+      if (!current.downloadedEps.contains(ep)) return null;
+      if (current.downloadedEps.length == 1) {
         return "Delete Error: only one downloaded episode";
       }
-      final episodeDirectory =
-          Directory("$path/${getDirectory(comic.id)}/${ep + 1}");
+      final comicDirectory = "$downloadPath/${getDirectory(comic.id)}";
+      final episodeDirectory = Directory("$comicDirectory/${ep + 1}");
       if (await episodeDirectory.exists()) {
         await episodeDirectory.delete(recursive: true);
       }
-      var size = await Directory("$path/${getDirectory(comic.id)}").getMBSize();
-      comic.downloadedEps.remove(ep);
+      var size = await Directory(comicDirectory).getMBSize();
+      if (!identical(_db, db) ||
+          path != downloadPath ||
+          _lifecycleOperation != null) {
+        throw StateError('下载目录已变化，请重新打开下载详情');
+      }
+      final latest = _getComicWithDb(comic.id);
+      if (latest == null ||
+          latest.directory != current.directory ||
+          latest.time != current.time) {
+        throw StateError('下载记录已变化，请重新打开下载详情');
+      }
+      latest.downloadedEps.remove(ep);
+      latest.comicSize = size;
+      _addToDb(latest, latest.directory!, latest.time);
+      comic.downloadedEps
+        ..clear()
+        ..addAll(latest.downloadedEps);
       comic.comicSize = size;
-      _addToDb(comic, comic.directory ?? getDirectory(comic.id));
       return null;
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "IO", "${safeNetworkError(e)}\n$s");

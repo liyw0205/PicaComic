@@ -90,6 +90,65 @@ class CustomDownloadedItem extends DownloadedItem {
         comicId = json["comicId"];
 }
 
+/// Applies refreshed source chapters only when downloaded directories keep
+/// pointing at the same chapter IDs.
+CustomDownloadedItem refreshCustomDownloadedChapters(
+    CustomDownloadedItem item, Map<String, String> latestChapters) {
+  final storedChapters = item.chapters;
+  if (storedChapters == null || storedChapters.isEmpty) {
+    throw StateError('单话下载记录不能切换为分章节目录');
+  }
+  if (latestChapters.isEmpty) {
+    throw StateError('漫画源没有返回章节信息');
+  }
+
+  final storedEntries = storedChapters.entries.toList();
+  final latestEntries = latestChapters.entries.toList();
+  if (storedChapters.keys.any((id) => id.trim().isEmpty) ||
+      latestChapters.keys.any((id) => id.trim().isEmpty)) {
+    throw StateError('章节信息不完整，已保留旧下载章节');
+  }
+  final seenIndexes = <int>{};
+  for (final index in item.downloadedEps) {
+    if (index < 0 ||
+        index >= storedEntries.length ||
+        index >= latestEntries.length ||
+        !seenIndexes.add(index) ||
+        storedEntries[index].key != latestEntries[index].key) {
+      throw StateError('章节顺序已变化，已保留旧下载章节');
+    }
+  }
+
+  var unchanged = storedChapters.length == latestChapters.length;
+  if (unchanged) {
+    for (var index = 0; index < storedEntries.length; index++) {
+      final stored = storedEntries[index];
+      final latest = latestEntries[index];
+      if (stored.key != latest.key || stored.value != latest.value) {
+        unchanged = false;
+        break;
+      }
+    }
+  }
+  if (unchanged) return item;
+
+  return CustomDownloadedItem(
+    item.comicSize,
+    List<int>.of(item.downloadedEps),
+    Map<String, String>.from(latestChapters),
+    item.id,
+    item.name,
+    item.subTitle,
+    item.tags,
+    item.sourceKey,
+    item.sourceName,
+    item.cover,
+    item.comicId,
+  )
+    ..time = item.time
+    ..directory = item.directory;
+}
+
 class CustomDownloadingItem extends DownloadingItem {
   CustomDownloadingItem(this.comic, this._downloadEps, super.whenFinish,
       super.whenError, super.updateInfo, super.id,

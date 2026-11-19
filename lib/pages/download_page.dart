@@ -16,6 +16,8 @@ import 'package:pica_comic/network/download_model.dart';
 import 'package:pica_comic/network/htmanga_network/ht_download_model.dart';
 import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/picacg_network/methods.dart';
+import 'package:pica_comic/network/jm_network/jm_network.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/picacg/comic_page.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
@@ -437,9 +439,10 @@ class DownloadPage extends StatelessWidget {
     try {
       await exportCbzComics(comics, cancellation: cancellation);
     } on CbzExportException catch (error) {
-      showToast(message: error.saved == 0
-          ? "导出失败".tl
-          : "已导出@count本，剩余导出失败".tlParams({'count': '${error.saved}'}));
+      showToast(
+          message: error.saved == 0
+              ? "导出失败".tl
+              : "已导出@count本，剩余导出失败".tlParams({'count': '${error.saved}'}));
     } catch (_) {
       showToast(message: "导出失败".tl);
     } finally {
@@ -1021,7 +1024,8 @@ class _DownloadedComicInfoViewState extends State<DownloadedComicInfoView> {
   String name = "";
   List<String> eps = [];
   List<int> downloadedEps = [];
-  late final comic = widget.item;
+  late DownloadedItem comic = widget.item;
+  bool _refreshingChapters = false;
 
   deleteEpisode(int i) {
     showConfirmDialog(context, "确认删除".tl, "要删除这个章节吗".tl, () async {
@@ -1044,9 +1048,29 @@ class _DownloadedComicInfoViewState extends State<DownloadedComicInfoView> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(0, 16, 0, 16),
-            child: Text(
-              name,
-              style: const TextStyle(fontSize: 22),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(fontSize: 22),
+                  ),
+                ),
+                if (comic is CustomDownloadedItem ||
+                    comic is DownloadedComic ||
+                    comic is DownloadedJmComic)
+                  IconButton(
+                    tooltip: "刷新章节".tl,
+                    onPressed:
+                        _refreshingChapters ? null : _refreshLatestChapters,
+                    icon: _refreshingChapters
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -1145,6 +1169,107 @@ class _DownloadedComicInfoViewState extends State<DownloadedComicInfoView> {
 
   void readSpecifiedEps(int i) {
     unawaited(comic.read(ep: i + 1));
+  }
+
+  Future<void> _refreshLatestChapters() async {
+    if (_refreshingChapters ||
+        (comic is! CustomDownloadedItem &&
+            comic is! DownloadedComic &&
+            comic is! DownloadedJmComic)) {
+      return;
+    }
+    setState(() => _refreshingChapters = true);
+    try {
+      final current = comic;
+      final manager = DownloadManager();
+      final downloadPath = manager.path;
+      late DownloadedItem updated;
+      var changed = false;
+
+      void refresh(DownloadedItem Function(DownloadedItem) transform) {
+        if (!identical(manager, DownloadManager()) ||
+            manager.path != downloadPath) {
+          throw StateError('下载目录已变化，请重新打开下载详情');
+        }
+        updated = manager.updateComic(current.id, (latest) {
+          if (latest.runtimeType != current.runtimeType ||
+              latest.directory != current.directory ||
+              latest.time != current.time) {
+            throw StateError('下载记录已变化，已保留当前状态');
+          }
+          final item = transform(latest);
+          changed = !identical(item, latest);
+          return item;
+        });
+      }
+
+      if (current is CustomDownloadedItem) {
+        final source = ComicSource.find(current.sourceKey);
+        if (source == null) throw '请先添加对应漫画源'.tl;
+        final loadComicInfo = source.loadComicInfo;
+        if (loadComicInfo == null) throw '漫画源不支持加载详情'.tl;
+
+        final result = await loadComicInfo(current.comicId);
+        if (!mounted) return;
+        if (result.error) throw result.errorMessageWithoutNull;
+        if (!identical(source, ComicSource.find(current.sourceKey))) {
+          throw '请先添加对应漫画源'.tl;
+        }
+        if (result.data.sourceKey != current.sourceKey ||
+            result.data.comicId != current.comicId) {
+          throw StateError('漫画身份已变化，已保留旧下载章节');
+        }
+        final chapters = result.data.chapters;
+        if (chapters == null || chapters.isEmpty) {
+          throw '漫画源没有返回章节信息'.tl;
+        }
+        refresh((latest) {
+          if (latest is! CustomDownloadedItem ||
+              latest.sourceKey != current.sourceKey ||
+              latest.comicId != current.comicId) {
+            throw StateError('下载记录已变化，已保留当前状态');
+          }
+          return refreshCustomDownloadedChapters(latest, chapters);
+        });
+      } else if (current is DownloadedComic) {
+        final result = await network.getEps(current.id);
+        if (!mounted) return;
+        if (result.error) throw result.errorMessageWithoutNull;
+        refresh((latest) => refreshPicacgDownloadedChapters(
+            latest as DownloadedComic, result.data));
+      } else if (current is DownloadedJmComic) {
+        final result = await JmNetwork().getComicInfo(current.comic.id);
+        if (!mounted) return;
+        if (result.error) throw result.errorMessageWithoutNull;
+        refresh((latest) => refreshJmDownloadedChapters(
+            latest as DownloadedJmComic, result.data));
+      } else {
+        return;
+      }
+
+      for (final items in [widget.logic.comics, widget.logic.baseComics]) {
+        final index = items.indexWhere((item) => item.id == updated.id);
+        if (index >= 0) items[index] = updated;
+      }
+      setState(() {
+        comic = updated;
+        name = updated.name;
+        eps = updated.eps;
+        downloadedEps = updated.downloadedEps;
+      });
+      showToast(message: changed ? '章节信息已更新'.tl : '章节信息没有变化'.tl);
+    } catch (error) {
+      if (mounted) {
+        final message = error is StateError
+            ? error.message.toString().tl
+            : error is String
+                ? error
+                : '刷新章节失败，请重试'.tl;
+        showToast(message: message);
+      }
+    } finally {
+      if (mounted) setState(() => _refreshingChapters = false);
+    }
   }
 }
 
