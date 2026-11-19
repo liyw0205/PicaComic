@@ -137,6 +137,7 @@ void main() {
     ComicSource.sources = [source];
     await tester.pumpWidget(MaterialApp(
       navigatorKey: App.navigatorKey,
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
       home: const Scaffold(body: CategoryPage('nhentai')),
     ));
     await tester.pumpAndSettle();
@@ -170,6 +171,7 @@ void main() {
       'removing a stacked tag keeps sorting and narrows the tile context',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
       home: CategoryComicsPage(
         category: 'glasses',
         categoryKey: 'nhentai',
@@ -205,6 +207,7 @@ void main() {
       (tester) async {
     for (final keyword in ['tag:glasses', 'title tag:glasses']) {
       await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
         home: SearchResultPage(
           key: ValueKey(keyword),
           keyword: keyword,
@@ -228,6 +231,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       navigatorKey: App.navigatorKey,
       navigatorObservers: [observer],
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
       home: NhentaiTagScope(
         terms: const [chinese, glasses],
         child: Builder(builder: (context) {
@@ -255,8 +259,10 @@ void main() {
     var saves = 0;
     NhentaiTagSettings.saver = () async => saves++;
     addTearDown(() => NhentaiTagSettings.saver = previousSaver);
-    await tester
-        .pumpWidget(const MaterialApp(home: Scaffold(body: NhSettings(false))));
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      home: const Scaffold(body: NhSettings(false)),
+    ));
     await tester.tap(find.text('默认排除标签'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), 'free text');

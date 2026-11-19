@@ -415,6 +415,41 @@ void main() {
     working.close();
   });
 
+  test('legacy favorites database without folder order can be imported',
+      () async {
+    final source = LocalFavoritesManager.create();
+    await source.init(
+        databasePath: '${directory.path}/legacy-order-source.db',
+        importLegacy: false);
+    final folder = source.createFolder('legacy-order');
+    await source.addComic(
+        folder, favorite('legacy-order-comic', 0), null, false);
+    final snapshot = '${directory.path}/legacy-order-snapshot.db';
+    await source.snapshotTo(snapshot);
+    source.close();
+
+    final legacy = sqlite3.open(snapshot);
+    legacy.execute('DROP TABLE folder_order;');
+    legacy.dispose();
+
+    final destination = LocalFavoritesManager.create();
+    await destination.init(
+        databasePath: '${directory.path}/legacy-order-destination.db',
+        importLegacy: false);
+    try {
+      await destination.mergeFrom(snapshot);
+      expect(destination.folderNames, contains(folder));
+      expect(
+        destination
+            .getComic(folder, 'legacy-order-comic', const FavoriteType(0))
+            .target,
+        'legacy-order-comic',
+      );
+    } finally {
+      destination.close();
+    }
+  });
+
   test('legacy JSON merge retains existing data and failed inputs', () async {
     final manager = LocalFavoritesManager.create();
     await manager.init(
