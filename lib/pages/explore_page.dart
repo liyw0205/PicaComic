@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
@@ -21,38 +22,71 @@ class ExplorePage extends StatefulWidget {
 
 class _ExplorePageState extends State<ExplorePage>
     with TickerProviderStateMixin {
-  late TabController controller;
-
   bool showFB = true;
 
   double location = 0;
 
-  var pages = appdata.appSettings.explorePages;
+  late List<String> pages;
 
-  @override
-  void initState() {
-    pages = appdata.appSettings.explorePages;
+  late TabController controller;
+
+  List<String> _resolvePages() {
     var all = ComicSource.sources
         .map((e) => e.explorePages)
         .expand((e) => e.map((e) => e.title))
         .toList();
-    pages = pages.where((e) => all.contains(e)).toList();
-    if (pages.isEmpty && appdata.appSettings.explorePages.isNotEmpty) {
-      if (appdata.appSettings.explorePages.first.isNum) {
+    final configuredPages = appdata.appSettings.explorePages;
+    final resolved = configuredPages.where((e) => all.contains(e)).toList();
+    if (resolved.isEmpty && configuredPages.isNotEmpty) {
+      if (configuredPages.first.isNum) {
         // is odd data, update
         appdata.appSettings.explorePages = all;
-        pages = all;
         appdata.updateSettings();
+        return all;
       }
     }
+    return resolved;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    pages = _resolvePages();
     controller = TabController(
       length: pages.length,
       vsync: this,
     );
-    super.initState();
+  }
+
+  @override
+  void didUpdateWidget(covariant ExplorePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextPages = _resolvePages();
+    if (listEquals(pages, nextPages)) return;
+
+    final currentPage = pages.isEmpty ? null : pages[controller.index];
+    final selectedIndex =
+        currentPage == null ? 0 : nextPages.indexOf(currentPage);
+    final previousController = controller;
+    pages = nextPages;
+    controller = TabController(
+      length: pages.length,
+      vsync: this,
+      initialIndex: selectedIndex < 0 ? 0 : selectedIndex,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      previousController.dispose();
+    });
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
   }
 
   void refresh() {
+    if (pages.isEmpty || controller.index >= pages.length) return;
     int page = controller.index;
     String currentPageId = pages[page];
     StateController.find<SimpleController>(tag: currentPageId).refresh();
@@ -77,6 +111,7 @@ class _ExplorePageState extends State<ExplorePage>
   Widget build(BuildContext context) {
     Widget tabBar = Material(
       child: FilledTabBar(
+        key: ValueKey(pages.length),
         tabs: pages.map((e) => buildTab(e)).toList(),
         controller: controller,
       ),
@@ -133,7 +168,7 @@ class _ExplorePageState extends State<ExplorePage>
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 150),
             reverseDuration: const Duration(milliseconds: 150),
-            child: showFB ? buildFAB() : const SizedBox(),
+            child: showFB && pages.isNotEmpty ? buildFAB() : const SizedBox(),
             transitionBuilder: (widget, animation) {
               var tween = Tween<Offset>(
                   begin: const Offset(0, 1), end: const Offset(0, 0));
