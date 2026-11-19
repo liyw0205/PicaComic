@@ -373,12 +373,93 @@ void main() {
 
     page.precacheComicImage(logic, context, 1, data.id);
     expect(logic.requestedLoadingItems[1], isTrue);
+    logic.readerImages.setScrolling(true);
     result.completeError(StateError('First image request failed'));
     await tester.pump();
     // The old precache implementation reports this through FlutterError.
     tester.takeException();
 
     expect(logic.requestedLoadingItems[1], isFalse);
+  });
+
+  testWidgets('scroll end retries a failed preload in the retained window',
+      (tester) async {
+    final oldMode = appdata.settings[9];
+    final oldPreload = appdata.settings[28];
+    appdata.settings[9] = '4';
+    appdata.settings[28] = '1';
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      appdata.settings[9] = oldMode;
+      appdata.settings[28] = oldPreload;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final bytes = Uint8List.fromList(
+      image.encodePng(image.Image(width: 400, height: 480)),
+    );
+    final visibleProviders = [
+      _RetryBaseImageProvider(bytes, id: 'visible-0', failFirst: false),
+      _RetryBaseImageProvider(bytes, id: 'visible-1', failFirst: false),
+    ];
+    final failGate = Completer<void>();
+    final retryProvider = _RetryBaseImageProvider(
+      bytes,
+      id: 'preload-2',
+      firstLoadGate: failGate,
+    );
+    final data = _ContinuousReadingData([
+      ...visibleProviders,
+      retryProvider,
+      _RetryBaseImageProvider(bytes, id: 'page-3', failFirst: false),
+      _RetryBaseImageProvider(bytes, id: 'page-4', failFirst: false),
+    ]);
+    final page = ComicReadingPage(data, 1, 1);
+    final logic = StateController.find<ComicReadingPageLogic>()
+      ..urls = List.generate(5, (index) => 'page-$index');
+    addTearDown(() {
+      logic.releaseImageTasks();
+      logic.pageController.dispose();
+      logic.scrollController.dispose();
+      logic.clearPhotoViewControllers();
+      StateController.remove<ComicReadingPageLogic>();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: StateBuilder<ComicReadingPageLogic>(
+        init: logic,
+        builder: (value) => Builder(
+          builder: (context) => Stack(
+            children: [page.buildComicView(value, context, data.id)],
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(retryProvider.loads, 1);
+    expect(logic.requestedLoadingItems[2], isTrue);
+
+    final imageElement = tester.element(find.byType(ComicImage).first);
+    ScrollEndNotification(
+      metrics: FixedScrollMetrics(
+        minScrollExtent: 0,
+        maxScrollExtent: 1000,
+        pixels: 0,
+        viewportDimension: 800,
+        axisDirection: AxisDirection.down,
+        devicePixelRatio: 1,
+      ),
+      context: imageElement,
+    ).dispatch(imageElement);
+    failGate.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    expect(retryProvider.loads, 2);
+    expect(logic.requestedLoadingItems[2], isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('twenty builds schedule three concurrent preloads once',
@@ -437,6 +518,7 @@ void main() {
           createProvider: (_, __) => provider,
         );
     configure();
+    controller.setScrolling(true);
     await tester.pumpAndSettle();
     expect(controller.requested[1], isFalse);
 
@@ -711,13 +793,19 @@ void main() {
 
 class _RetryBaseImageProvider
     extends BaseImageProvider<_RetryBaseImageProvider> {
-  _RetryBaseImageProvider(this.bytes);
+  _RetryBaseImageProvider(this.bytes,
+      {this.id = 'reader-retry-provider',
+      this.failFirst = true,
+      this.firstLoadGate});
 
   final Uint8List bytes;
+  final String id;
+  final bool failFirst;
+  final Completer<void>? firstLoadGate;
   int loads = 0;
 
   @override
-  String get key => 'reader-retry-provider';
+  String get key => id;
 
   @override
   Future<_RetryBaseImageProvider> obtainKey(ImageConfiguration configuration) =>
@@ -726,7 +814,8 @@ class _RetryBaseImageProvider
   @override
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents) async {
     loads++;
-    if (loads == 1) {
+    if (failFirst && loads == 1) {
+      await firstLoadGate?.future;
       throw StateError('Maximum image loading limit reached');
     }
     return bytes;

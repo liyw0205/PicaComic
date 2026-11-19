@@ -16,6 +16,8 @@ class ReaderImageController {
   final _active = <_ReaderImage>{};
   final _pendingReleases = <Future<void>>{};
   final _queue = <int>[];
+  final _retryTimers = <int, Timer>{};
+  final _retryCounts = <int, int>{};
   final _imageSizes = <int, Size>{};
   var _retained = <int>{};
   List<bool> requested = [];
@@ -23,6 +25,7 @@ class ReaderImageController {
   int _firstVisible = 0;
   int _visibleCount = 1;
   int _preloadCount = 0;
+  bool _isScrolling = false;
   bool _disposed = false;
   BuildContext? _context;
   ReaderImageProviderBuilder? _createProvider;
@@ -81,6 +84,8 @@ class ReaderImageController {
         final image = _images.remove(index)!;
         _active.remove(image);
         requested[index] = false;
+        _retryTimers.remove(index)?.cancel();
+        _retryCounts.remove(index);
         _release(image);
       }
     }
@@ -88,7 +93,7 @@ class ReaderImageController {
       ..clear()
       ..addAll([
         for (var i = visibleEnd; i < preloadEnd; i++)
-          if (!requested[i]) i,
+          if (!requested[i] && (_retryCounts[i] ?? 0) <= 1) i,
       ]);
     _drain();
     return changed;
@@ -115,6 +120,14 @@ class ReaderImageController {
         identical(_images[image.index], image);
   }
 
+  bool setScrolling(bool scrolling) {
+    _isScrolling = scrolling;
+    if (!scrolling) {
+      return updateWindow(_firstVisible, visibleCount: _visibleCount);
+    }
+    return false;
+  }
+
   void _drain() {
     final context = _context;
     if (context == null || !context.mounted || _disposed) return;
@@ -125,13 +138,35 @@ class ReaderImageController {
       final requestGeneration = generation;
       requested[index] = true;
       _active.add(image);
+      var didFail = false;
       void failed(Object error, StackTrace? stackTrace) {
-        if (_isCurrent(image, requestGeneration)) requested[index] = false;
+        if (!_isCurrent(image, requestGeneration)) return;
+        didFail = true;
+        requested[index] = false;
+        final failures = (_retryCounts[index] ?? 0) + 1;
+        _retryCounts[index] = failures;
+        if (!_isScrolling && failures == 1 && _isPreloadCandidate(index)) {
+          _retryTimers.remove(index)?.cancel();
+          _retryTimers[index] = Timer(const Duration(milliseconds: 250), () {
+            _retryTimers.remove(index);
+            if (!_isCurrent(image, requestGeneration) ||
+                requested[index] ||
+                !_isPreloadCandidate(index)) {
+              return;
+            }
+            if (!_queue.contains(index)) _queue.add(index);
+            _drain();
+          });
+        }
       }
 
       void finished() {
         if (!_isCurrent(image, requestGeneration)) return;
         _active.remove(image);
+        if (!didFail) {
+          _retryCounts.remove(index);
+          _retryTimers.remove(index)?.cancel();
+        }
         _drain();
       }
 
@@ -148,6 +183,13 @@ class ReaderImageController {
         finished();
       }
     }
+  }
+
+  bool _isPreloadCandidate(int index) {
+    final visibleEnd =
+        (_firstVisible + _visibleCount).clamp(0, requested.length);
+    final preloadEnd = (visibleEnd + _preloadCount).clamp(0, requested.length);
+    return index >= visibleEnd && index < preloadEnd;
   }
 
   void _release(_ReaderImage image) {
@@ -178,6 +220,12 @@ class ReaderImageController {
     _images.clear();
     _active.clear();
     _queue.clear();
+    for (final timer in _retryTimers.values) {
+      timer.cancel();
+    }
+    _retryTimers.clear();
+    _retryCounts.clear();
+    _isScrolling = false;
     _imageSizes.clear();
     _retained.clear();
     requested = [];

@@ -385,29 +385,45 @@ extension ImageExt on ComicReadingPage {
           }
         },
         onPointerDown: (details) => logic.mouseScroll = false,
-        child: NotificationListener<ScrollUpdateNotification>(
-          child: body,
-          onNotification: (notification) {
-            TapController.lastScrollTime = DateTime.now();
-            // update floating button
-            var length = logic.data.eps?.length ?? 1;
-            if (!logic.scrollController.hasClients) return false;
-            if (logic.scrollController.position.pixels -
-                        logic.scrollController.position.minScrollExtent <=
-                    0 &&
-                logic.order != 0) {
-              logic.showFloatingButton(-1);
-            } else if (logic.scrollController.position.pixels -
-                        logic.scrollController.position.maxScrollExtent >=
-                    0 &&
-                logic.order < length) {
-              logic.showFloatingButton(1);
-            } else {
-              logic.showFloatingButton(0);
+        child: NotificationListener<ScrollEndNotification>(
+          onNotification: (_) {
+            if (logic.readingMethod == ReadingMethod.topToBottomContinuously) {
+              final (first, count) = logic.visibleImageRange;
+              final changed =
+                  logic.readerImages.updateWindow(first, visibleCount: count);
+              logic.readerImages.setScrolling(false);
+              if (changed) logic.update();
             }
-
-            return true;
+            return false;
           },
+          child: NotificationListener<ScrollUpdateNotification>(
+            child: body,
+            onNotification: (notification) {
+              TapController.lastScrollTime = DateTime.now();
+              if (logic.readingMethod ==
+                  ReadingMethod.topToBottomContinuously) {
+                logic.readerImages.setScrolling(true);
+              }
+              // update floating button
+              var length = logic.data.eps?.length ?? 1;
+              if (!logic.scrollController.hasClients) return false;
+              if (logic.scrollController.position.pixels -
+                          logic.scrollController.position.minScrollExtent <=
+                      0 &&
+                  logic.order != 0) {
+                logic.showFloatingButton(-1);
+              } else if (logic.scrollController.position.pixels -
+                          logic.scrollController.position.maxScrollExtent >=
+                      0 &&
+                  logic.order < length) {
+                logic.showFloatingButton(1);
+              } else {
+                logic.showFloatingButton(0);
+              }
+
+              return true;
+            },
+          ),
         ),
       ),
     );
