@@ -246,19 +246,8 @@ class _ReadingSettingsState extends State<ReadingSettings> {
                 ],
                 onChange: (int i) {
                   appdata.settings[76] = i.toString();
-                  logic.update();
+                  unawaited(logic.applyFixedOrientation(i));
                   appdata.updateSettings();
-                  if (i == 1) {
-                    SystemChrome.setPreferredOrientations([
-                      DeviceOrientation.landscapeLeft,
-                      DeviceOrientation.landscapeRight
-                    ]);
-                  } else if (i == 2) {
-                    SystemChrome.setPreferredOrientations([
-                      DeviceOrientation.portraitUp,
-                      DeviceOrientation.portraitDown,
-                    ]);
-                  }
                   setState(() {});
                 },
               ),

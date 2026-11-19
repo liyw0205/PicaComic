@@ -170,6 +170,24 @@ class ComicReadingPageLogic extends StateController {
   ///旋转方向: null-跟随系统, false-竖向, true-横向
   bool? rotation;
 
+  Future<void> applyFixedOrientation(int setting) {
+    final orientations = switch (setting) {
+      0 => DeviceOrientation.values,
+      1 => [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+      2 => [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ],
+      _ => throw ArgumentError.value(setting, 'setting'),
+    };
+    rotation = null;
+    update();
+    return SystemChrome.setPreferredOrientations(orientations);
+  }
+
   ///是否应该显示悬浮按钮, 为-1表示显示上一章, 为0表示不显示, 为1表示显示下一章
   int showFloatingButtonValue = 0;
 
