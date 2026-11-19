@@ -22,9 +22,29 @@ class HtmangaNetwork {
 
   static HtmangaNetwork? _cache;
 
-  HtmangaNetwork._create();
+  HtmangaNetwork._create()
+      : _cachedNetworkFactory = CachedNetwork.new,
+        _dioFactory = _loggedDio;
+
+  HtmangaNetwork.forTesting({
+    required Dio Function(BaseOptions?) dioFactory,
+    CachedNetwork Function()? cachedNetworkFactory,
+  })  : _dioFactory = dioFactory,
+        _cachedNetworkFactory = cachedNetworkFactory ?? CachedNetwork.new;
+
+  final Dio Function(BaseOptions?) _dioFactory;
+  final CachedNetwork Function() _cachedNetworkFactory;
+
+  static Dio _loggedDio(BaseOptions? options) => logDio(options);
 
   static String get baseUrl => appdata.settings[31];
+
+  static String? _wwwFallbackUrl(String url, int? statusCode) {
+    if (statusCode != 403) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host.toLowerCase() != 'www.wnacg.com') return null;
+    return uri.replace(host: 'wnacg.com').toString();
+  }
 
   /// WNACG has served both the paged and unpaged detail URL forms.
   static List<String> detailUrls(String id, {String? base}) {
@@ -139,14 +159,17 @@ class HtmangaNetwork {
   ///基本的Get请求
   Future<Res<String>> get(String url,
       {bool cache = true, Map<String, String>? headers}) async {
-    var dio = CachedNetwork();
-    try {
-      var res = await dio.get(
-          url,
+    final dio = _cachedNetworkFactory();
+    Future<CachedNetworkRes<String>> request(String requestUrl) => dio.get(
+          requestUrl,
           BaseOptions(
               headers: {"User-Agent": webUA, if (headers != null) ...headers}),
           cookieJar: SingleInstanceCookieJar.instance,
-          expiredTime: cache ? CacheExpiredTime.short : CacheExpiredTime.no);
+          expiredTime: cache ? CacheExpiredTime.short : CacheExpiredTime.no,
+        );
+
+    try {
+      final res = await request(url);
       if (res.url.contains("users-login")) {
         return Res(null, errorMessage: "未登录或登录到期".tl);
       }
@@ -156,8 +179,17 @@ class HtmangaNetwork {
           e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
         return const Res(null, errorMessage: "连接超时");
-      } else {
-        return Res(null, errorMessage: e.toString());
+      }
+      final retryUrl = _wwwFallbackUrl(url, e.response?.statusCode);
+      if (retryUrl == null) return Res(null, errorMessage: e.toString());
+      try {
+        final res = await request(retryUrl);
+        if (res.url.contains("users-login")) {
+          return Res(null, errorMessage: "未登录或登录到期".tl);
+        }
+        return Res(res.data);
+      } catch (retryError) {
+        return Res(null, errorMessage: retryError.toString());
       }
     } catch (e) {
       return Res(null, errorMessage: e.toString());
@@ -166,7 +198,7 @@ class HtmangaNetwork {
 
   ///基本的Post请求
   Future<Res<String>> post(String url, String data) async {
-    var dio = logDio(BaseOptions(headers: {
+    final dio = _dioFactory(BaseOptions(headers: {
       "User-Agent": webUA,
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
     }));
@@ -179,8 +211,17 @@ class HtmangaNetwork {
           e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
         return const Res(null, errorMessage: "连接超时");
-      } else {
-        return Res(null, errorMessage: e.toString());
+      }
+      final uri = Uri.tryParse(url);
+      final retryUrl = uri?.path == '/users-check_login.html'
+          ? _wwwFallbackUrl(url, e.response?.statusCode)
+          : null;
+      if (retryUrl == null) return Res(null, errorMessage: e.toString());
+      try {
+        final res = await dio.post(retryUrl, data: data);
+        return Res(res.data);
+      } catch (retryError) {
+        return Res(null, errorMessage: retryError.toString());
       }
     } catch (e) {
       return Res(null, errorMessage: e.toString());
