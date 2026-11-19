@@ -164,10 +164,19 @@ class NhentaiNetwork {
         ),
       );
       final data = _jsonData(response.data);
+      var accessTokenReturned = false;
       if (data is Map) {
-        _saveTokenCookies(data);
+        accessTokenReturned = _saveTokenCookies(data);
       }
-      logged = _authorizationHeader() != null;
+      for (final value in response.headers["set-cookie"] ?? const <String>[]) {
+        final cookie = Cookie.fromSetCookieValue(value);
+        if (cookie.name.toLowerCase() == accessTokenCookie &&
+            cookie.value.isNotEmpty) {
+          accessTokenReturned = true;
+          break;
+        }
+      }
+      logged = accessTokenReturned && _authorizationHeader() != null;
       return logged;
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "Nhentai Auth",
@@ -176,8 +185,8 @@ class NhentaiNetwork {
     }
   }
 
-  void _saveTokenCookies(Map data) {
-    void saveToken(String name, List<String> aliases) {
+  bool _saveTokenCookies(Map data) {
+    bool saveToken(String name, List<String> aliases) {
       String value = "";
       for (final key in [name, ...aliases]) {
         final v = data[key];
@@ -197,16 +206,19 @@ class NhentaiNetwork {
         }
       }
       if (value.isEmpty) {
-        return;
+        return false;
       }
       final cookie = Cookie(name, value)
         ..domain = ".nhentai.net"
         ..path = "/";
       cookieJar?.saveFromResponse(Uri.parse(baseUrl), [cookie]);
+      return true;
     }
 
-    saveToken(accessTokenCookie, const ["accessToken", "access", "token"]);
+    final accessTokenReturned =
+        saveToken(accessTokenCookie, const ["accessToken", "access", "token"]);
     saveToken(refreshTokenCookie, const ["refreshToken", "refresh"]);
+    return accessTokenReturned;
   }
 
   Future<Res<bool>> validateLogin() async {
@@ -1418,6 +1430,7 @@ class _NhentaiAuthInterceptor extends Interceptor {
     return path.startsWith("/api/v2/user") ||
         path.startsWith("/api/v2/favorites") ||
         path.startsWith("/api/v2/blacklist") ||
-        path.startsWith("/api/v2/auth/");
+        path.startsWith("/api/v2/auth/") ||
+        RegExp(r"^/api/v2/galleries/[^/]+/favorite$").hasMatch(path);
   }
 }
