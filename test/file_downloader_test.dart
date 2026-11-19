@@ -1,12 +1,26 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
+import 'package:pica_comic/foundation/image_manager.dart' show ImageManager;
 import 'package:pica_comic/network/download_model.dart';
 import 'package:pica_comic/network/download_progress.dart';
 
 import 'file_downloader_regression.dart';
+
+class _ImageCacheFixture implements ImageManager {
+  final deletedKeys = <String>[];
+
+  @override
+  Future<void> delete(String key) async {
+    deletedKeys.add(key);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 class _LinksFixtureDownloadingItem extends DownloadingItem {
   _LinksFixtureDownloadingItem(this._responses)
@@ -150,6 +164,65 @@ void main() {
 
     expect(error, isA<StateError>());
   });
+
+  for (final inline in [false, true]) {
+    for (final validated in [false, true]) {
+      test(
+          'empty image payload fails without writing (inline=$inline, validated=$validated)',
+          () async {
+        final temp = await Directory.systemTemp.createTemp('image-task-empty-');
+        final cache = _ImageCacheFixture();
+        final previousCache = ImageManager.cache;
+        ImageManager.cache = cache;
+        addTearDown(() async {
+          ImageManager.cache = previousCache;
+          if (await temp.exists()) await temp.delete(recursive: true);
+        });
+
+        const cacheKey = 'empty-image-cache-key';
+        var readCalls = 0;
+        var finishCalls = 0;
+        var completed = false;
+        final callbackStarted = Completer<void>();
+        final callbackGate = Completer<void>();
+        addTearDown(() {
+          if (!callbackGate.isCompleted) callbackGate.complete();
+        });
+        final completion = runImageDownloadTaskForTesting(
+          Stream<DownloadProgress>.value(
+            DownloadProgress(1, 1, 'https://example.test/empty-image', '',
+                inline ? Uint8List(0) : null, null, cacheKey, validated),
+          ),
+          temp.path,
+          '0',
+          readData: (_) async {
+            readCalls++;
+            return Uint8List(0);
+          },
+          onFinished: () async {
+            finishCalls++;
+            callbackStarted.complete();
+            await callbackGate.future;
+          },
+        );
+        completion.then((_) => completed = true);
+        await callbackStarted.future.timeout(const Duration(seconds: 5));
+        try {
+          await Future<void>.delayed(Duration.zero);
+          expect(completed, isFalse);
+        } finally {
+          callbackGate.complete();
+        }
+        final error = await completion;
+
+        expect(await Directory(temp.path).list().toList(), isEmpty);
+        expect(error, isA<FormatException>());
+        expect(cache.deletedKeys, [cacheKey]);
+        expect(finishCalls, 1);
+        expect(readCalls, inline ? 0 : 1);
+      });
+    }
+  }
 
   test('download progress reserves completion for a separate event', () {
     final exactLength =

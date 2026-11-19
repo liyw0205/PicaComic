@@ -642,7 +642,8 @@ class _ImageDownloadWrapper {
               await (_readData?.call(progress) ??
                   progress.getFile().readAsBytes());
           if (_canceled) break;
-          if (!progress.imageValidated && !isValidImageData(data)) {
+          if (data.isEmpty ||
+              (!progress.imageValidated && !isValidImageData(data))) {
             await ImageManager().delete(progress.cacheKey);
             throw const FormatException('Downloaded data is not a valid image');
           }
