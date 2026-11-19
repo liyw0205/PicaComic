@@ -18,6 +18,10 @@ class _SelectDownloadChapterState extends State<SelectDownloadChapter> {
 
   @override
   Widget build(BuildContext context) {
+    final available = <int>[
+      for (var i = 0; i < widget.eps.length; i++)
+        if (!widget.downloadedEps.contains(i)) i,
+    ];
     return Padding(
       padding: const EdgeInsets.only(left: 16, right: 16),
       child: Column(
@@ -99,15 +103,11 @@ class _SelectDownloadChapterState extends State<SelectDownloadChapter> {
                 ),
                 Expanded(
                   child: FilledButton.tonal(
-                      onPressed: () {
-                        var res = <int>[];
-                        for (int i = 0; i < widget.eps.length; i++) {
-                          if (!widget.downloadedEps.contains(i)) {
-                            res.add(i);
-                          }
-                        }
-                        widget.finishSelect(res);
-                      },
+                      onPressed: available.isEmpty
+                          ? null
+                          : () {
+                              widget.finishSelect(available);
+                            },
                       child: Text("下载全部".tl)),
                 ),
                 const SizedBox(
@@ -115,9 +115,11 @@ class _SelectDownloadChapterState extends State<SelectDownloadChapter> {
                 ),
                 Expanded(
                   child: FilledButton.tonal(
-                      onPressed: () {
-                        widget.finishSelect(selected);
-                      },
+                      onPressed: selected.isEmpty
+                          ? null
+                          : () {
+                              widget.finishSelect(selected);
+                            },
                       child: Text("下载选择".tl)),
                 ),
                 const SizedBox(
