@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/components/app_shortcuts.dart';
 import 'package:pica_comic/components/window_frame.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
@@ -318,18 +319,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             if (widget != null) {
               widget = OverlayWidget(widget);
               if (App.isDesktop) {
-                widget = Shortcuts(
-                  shortcuts: {
-                    LogicalKeySet(
-                      LogicalKeyboardKey.escape,
-                    ): VoidCallbackIntent(() {
-                      if (App.canPop) {
-                        App.globalBack();
-                      } else {
-                        App.mainNavigatorKey?.currentContext?.pop();
-                      }
-                    }),
-                  },
+                widget = AppShortcuts(
                   child: WindowFrame(widget),
                 );
               }

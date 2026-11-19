@@ -5,6 +5,8 @@ class PopUpWidget<T> extends PopupRoute<T> {
 
   final Widget widget;
 
+  final _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   Color? get barrierColor => Colors.black54;
 
@@ -30,9 +32,14 @@ class PopUpWidget<T> extends PopupRoute<T> {
         width: showPopUp ? 500 : double.infinity,
         height: showPopUp ? height : double.infinity,
         child: ClipRect(
-          child: Navigator(
-            onGenerateRoute: (settings) => MaterialPageRoute(
-              builder: (context) => widget,
+          child: NavigatorPopHandler<T>(
+            onPopWithResult: (result) =>
+                unawaited(_navigatorKey.currentState?.maybePop(result)),
+            child: Navigator(
+              key: _navigatorKey,
+              onGenerateRoute: (settings) => MaterialPageRoute(
+                builder: (context) => widget,
+              ),
             ),
           ),
         ),
@@ -40,7 +47,12 @@ class PopUpWidget<T> extends PopupRoute<T> {
     );
     if (App.isIOS) {
       body = IOSBackGestureDetector(
-        enabledCallback: () => true,
+        enabledCallback: () =>
+            popGestureEnabled &&
+            isCurrent &&
+            secondaryAnimation.status == AnimationStatus.dismissed &&
+            !navigator!.userGestureInProgress &&
+            !App.temporaryDisablePopGesture,
         gestureWidth: 20.0,
         onStartPopGesture: () =>
             IOSBackGestureController(controller!, navigator!),
@@ -104,6 +116,17 @@ class PopUpWidgetScaffold extends StatefulWidget {
 class _PopUpWidgetScaffoldState extends State<PopUpWidgetScaffold> {
   bool top = true;
 
+  Future<void> _back() async {
+    if (await Navigator.of(context).maybePop() || !mounted) return;
+    final popupContext =
+        context.getElementForInheritedWidgetOfExactType<PopupIndicatorWidget>();
+    if (popupContext != null) {
+      await Navigator.of(popupContext).maybePop();
+    } else {
+      await App.maybeBack();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -127,9 +150,7 @@ class _PopUpWidgetScaffoldState extends State<PopUpWidgetScaffold> {
                   message: "返回".tl,
                   child: IconButton(
                       icon: const Icon(Icons.arrow_back_sharp),
-                      onPressed: () => Navigator.of(context).canPop()
-                          ? Navigator.of(context).pop()
-                          : App.globalBack()),
+                      onPressed: () => unawaited(_back())),
                 ),
                 const SizedBox(
                   width: 16,

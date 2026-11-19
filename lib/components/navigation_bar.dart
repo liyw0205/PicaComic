@@ -150,12 +150,8 @@ class _NaviPaneState extends State<NaviPane>
   Widget build(BuildContext context) {
     onRebuild(context);
     return _NaviPopScope(
-      action: () {
-        if (App.mainNavigatorKey!.currentState!.canPop()) {
-          App.mainNavigatorKey!.currentState!.pop();
-        } else {
-          SystemNavigator.pop();
-        }
+      action: (result) {
+        unawaited(App.mainNavigatorKey?.currentState?.maybePop(result));
       },
       popGesture: App.isIOS && !UiMode.m1(context),
       child: AnimatedBuilder(
@@ -608,21 +604,16 @@ class _NaviPopScope extends StatelessWidget {
 
   final Widget child;
   final bool popGesture;
-  final VoidCallback action;
+  final PopResultCallback<Object?> action;
 
   static bool panStartAtEdge = false;
 
   @override
   Widget build(BuildContext context) {
-    Widget res = App.isIOS
-        ? child
-        : PopScope(
-            canPop: App.isAndroid ? false : true,
-            onPopInvokedWithResult: (value, result) {
-              action();
-            },
-            child: child,
-          );
+    Widget res = NavigatorPopHandler<Object?>(
+      onPopWithResult: action,
+      child: child,
+    );
     if (popGesture) {
       res = GestureDetector(
           onPanStart: (details) {
@@ -634,7 +625,7 @@ class _NaviPopScope extends StatelessWidget {
             if (details.velocity.pixelsPerSecond.dx < 0 ||
                 details.velocity.pixelsPerSecond.dx > 0) {
               if (panStartAtEdge) {
-                action();
+                action(null);
               }
             }
             panStartAtEdge = false;

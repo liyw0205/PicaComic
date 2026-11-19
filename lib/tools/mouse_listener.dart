@@ -6,11 +6,7 @@ import 'package:pica_comic/network/network_logging.dart';
 import '../foundation/app.dart';
 
 void mouseSideButtonCallback() {
-  if (App.canPop) {
-    App.globalBack();
-  } else if (App.mainNavigatorKey?.currentState?.canPop() ?? false) {
-    App.mainNavigatorKey!.currentState!.pop();
-  }
+  unawaited(App.maybeBack());
 }
 
 ///监听鼠标侧键, 若为下键, 则调用返回

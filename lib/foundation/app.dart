@@ -74,6 +74,19 @@ class App {
     }
   }
 
+  /// Handles user back input without closing a navigator's final route.
+  static Future<bool> maybeBack() async {
+    final rootNavigator = navigatorKey.currentState;
+    if (rootNavigator != null && rootNavigator.canPop()) {
+      return rootNavigator.maybePop();
+    }
+    final mainNavigator = mainNavigatorKey?.currentState;
+    if (mainNavigator != null && mainNavigator.canPop()) {
+      return mainNavigator.maybePop();
+    }
+    return false;
+  }
+
   static off(BuildContext context, Widget Function() page) {
     LogManager.addLog(LogLevel.info, "App Status",
         "Going to Page /${page.runtimeType.toString().replaceFirst("() => ", "")}");
