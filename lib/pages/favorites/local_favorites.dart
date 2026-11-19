@@ -232,8 +232,6 @@ class CreateFolderDialog extends StatelessWidget {
                       await LocalFavoritesManager().loadFolderData(data);
                   if (error) {
                     showToast(message: message);
-                  } else {
-                    StateController.find(tag: "me page").update();
                   }
                 },
               ),
@@ -1074,6 +1072,7 @@ class _LocalFavoritesFolderState extends State<LocalFavoritesFolder> {
   late var comics = LocalFavoritesManager().getAllComics(widget.name);
   double? width;
   bool changed = false;
+  bool _savingOrder = false;
 
   Color lightenColor(Color color, double lightenValue) {
     int red = (color.red + ((255 - color.red) * lightenValue)).round();
@@ -1091,11 +1090,31 @@ class _LocalFavoritesFolderState extends State<LocalFavoritesFolder> {
 
   @override
   void dispose() {
-    if (changed) {
-      unawaited(LocalFavoritesManager().reorder(comics, widget.name));
-    }
     LocalFavoriteTile.cache.clear();
     super.dispose();
+  }
+
+  Future<void> _saveOrderAndPop() async {
+    if (_savingOrder) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    setState(() => _savingOrder = true);
+    try {
+      await LocalFavoritesManager().reorder(List.of(comics), widget.name);
+    } catch (error, stack) {
+      log('Failed to save local favorite order.\n$error\n$stack', 'Favorite',
+          LogLevel.error);
+      if (!mounted) return;
+      setState(() => _savingOrder = false);
+      showToast(message: '保存排序失败'.tl);
+      return;
+    }
+    if (!mounted) return;
+    if (route.isCurrent) {
+      navigator.pop();
+    } else if (route.isActive) {
+      navigator.removeRoute(route);
+    }
   }
 
   @override
@@ -1114,39 +1133,46 @@ class _LocalFavoritesFolderState extends State<LocalFavoritesFolder> {
               false,
               key: Key(comics[index].target),
             ));
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.name)),
-      body: Column(
-        children: [
-          Expanded(
-            child: ReorderableBuilder(
-              key: reorderWidgetKey,
-              scrollController: _scrollController,
-              longPressDelay: App.isDesktop
-                  ? const Duration(milliseconds: 100)
-                  : const Duration(milliseconds: 500),
-              onReorder: (reorderFunc) {
-                changed = true;
-                setState(() {
-                  comics = reorderFunc(comics) as List<FavoriteItem>;
-                });
-              },
-              dragChildBoxDecoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: lightenColor(
-                      Theme.of(context).splashColor.withOpacity(1), 0.2)),
-              builder: (children) {
-                return GridView(
-                  key: _key,
-                  controller: _scrollController,
-                  gridDelegate: SliverGridDelegateWithComics(),
-                  children: children,
-                );
-              },
-              children: tiles,
-            ),
-          )
-        ],
+    return PopScope(
+      canPop: !changed,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && changed) unawaited(_saveOrderAndPop());
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.name)),
+        body: Column(
+          children: [
+            Expanded(
+              child: ReorderableBuilder(
+                key: reorderWidgetKey,
+                scrollController: _scrollController,
+                longPressDelay: App.isDesktop
+                    ? const Duration(milliseconds: 100)
+                    : const Duration(milliseconds: 500),
+                onReorder: (reorderFunc) {
+                  if (_savingOrder) return;
+                  changed = true;
+                  setState(() {
+                    comics = reorderFunc(comics) as List<FavoriteItem>;
+                  });
+                },
+                dragChildBoxDecoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: lightenColor(
+                        Theme.of(context).splashColor.withOpacity(1), 0.2)),
+                builder: (children) {
+                  return GridView(
+                    key: _key,
+                    controller: _scrollController,
+                    gridDelegate: SliverGridDelegateWithComics(),
+                    children: children,
+                  );
+                },
+                children: tiles,
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
