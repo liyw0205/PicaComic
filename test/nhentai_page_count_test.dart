@@ -10,13 +10,30 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/comic_source/built_in/nhentai.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/components/components.dart';
+import 'package:pica_comic/foundation/state_controller.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
 import 'package:pica_comic/network/nhentai_network/page_parser.dart';
 import 'package:pica_comic/network/nhentai_network/tag_query.dart';
 import 'package:pica_comic/network/nhentai_network/tag_stack.dart';
+import 'package:pica_comic/pages/comic_page.dart';
+import 'package:pica_comic/pages/nhentai/comic_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+int? _detailPageCount(NhentaiComic comic) {
+  const page = NhentaiComicPage('42');
+  final logic = StateController.put(
+    ComicPageLogic<NhentaiComic>()..data = comic,
+    tag: page.tag,
+  );
+  try {
+    return page.pages;
+  } finally {
+    logic.controller.dispose();
+    StateController.remove<ComicPageLogic<NhentaiComic>>(page.tag);
+  }
+}
 
 class _UnusedCookieJar implements SingleInstanceCookieJar {
   @override
@@ -67,6 +84,29 @@ class _GalleryAdapter implements HttpClientAdapter {
             : [gallery],
         if (pageCount != null) 'num_pages': pageCount,
       }),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _ComicInfoApiAdapter implements HttpClientAdapter {
+  _ComicInfoApiAdapter(this.gallery);
+
+  final Map<String, dynamic> gallery;
+  final requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    requests.add(options);
+    return ResponseBody.fromString(
+      jsonEncode(gallery),
       200,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
@@ -149,6 +189,8 @@ class _HtmlDetailFallbackAdapter implements HttpClientAdapter {
       'data-url="https://nhentai.net/api/v2/galleries/42">$embedded</script>'
       '<div id="cover"><a><img src="cover.jpg"></a></div>'
       '<h1 class="title"><span>Fixture gallery</span></h1>'
+      '<div class="tag-container">Pages: '
+      '<span class="name">106</span></div>'
       '<button id="favorite" aria-pressed="false">'
       '<span class="text">Favorite</span></button>',
       200,
@@ -568,10 +610,95 @@ void main() {
     final result = await network.getComicInfo('42');
     expect(result.success, isTrue, reason: result.errorMessage);
     expect(result.data.favorite, isTrue);
+    expect(result.data.pages, 106);
+    expect(_detailPageCount(result.data), 106);
     expect(adapter.requests.map((request) => request.uri.path), [
       '/api/v2/galleries/42',
       '/g/42/',
     ]);
+  });
+
+  for (final fixture
+      in <({String name, Map<String, dynamic> fields, int? pages})>[
+    (name: 'numeric count', fields: {'num_pages': 106}, pages: 106),
+    (name: 'string count', fields: {'num_pages': '106'}, pages: 106),
+    (
+      name: 'page list',
+      fields: {
+        'pages': [
+          {'t': 'j'},
+          {'t': 'j'}
+        ],
+      },
+      pages: 2,
+    ),
+    (
+      name: 'count precedes page list',
+      fields: {
+        'num_pages': 106,
+        'pages': [
+          {'t': 'j'}
+        ],
+      },
+      pages: 106,
+    ),
+    (name: 'missing count', fields: {}, pages: null),
+    (name: 'empty list', fields: {'num_pages': 0, 'pages': []}, pages: null),
+  ]) {
+    test('API detail persists and displays ${fixture.name}', () async {
+      final network = NhentaiNetwork();
+      final savedCookieJar = network.cookieJar;
+      final savedLogged = network.logged;
+      final savedSettings = List<String>.from(appdata.settings);
+      final savedOverrides = HttpOverrides.current;
+      final savedProxyOverrides = proxyHttpOverrides;
+      final adapter = _ComicInfoApiAdapter({
+        'id': 42,
+        'english_title': 'Fixture gallery',
+        'thumbnail': 'galleries/456/thumb.jpg',
+        'tags': [
+          {'name': 'english', 'type': 'language'},
+        ],
+        ...fixture.fields,
+      });
+      final dio = Dio()..httpClientAdapter = adapter;
+      network.cookieJar = _UnusedCookieJar();
+      network.dio = dio;
+      network.logged = false;
+      appdata.settings[8] = '';
+      appdata.settings[58] = '0';
+      proxyHttpOverrides = null;
+      addTearDown(() {
+        network.cookieJar = savedCookieJar;
+        network.logged = savedLogged;
+        appdata.settings = savedSettings;
+        HttpOverrides.global = savedOverrides;
+        proxyHttpOverrides = savedProxyOverrides;
+        dio.close();
+      });
+
+      final result = await network.getComicInfo('42');
+      expect(result.success, isTrue, reason: result.errorMessage);
+      expect(result.data.pages, fixture.pages);
+      expect(_detailPageCount(result.data), fixture.pages);
+      final restored = NhentaiComic.fromMap(result.data.toMap());
+      expect(restored.id, '42');
+      expect(restored.title, 'Fixture gallery');
+      expect(_detailPageCount(restored), fixture.pages);
+      expect(adapter.requests.single.uri.path, '/api/v2/galleries/42');
+    });
+  }
+
+  test('old detail records without a page count remain readable', () {
+    final comic = NhentaiComic.fromMap({
+      'id': '42',
+      'title': 'Old gallery',
+      'subTitle': '',
+      'cover': '',
+    });
+    expect(_detailPageCount(comic), isNull);
+    comic.tags['Pages'] = ['34'];
+    expect(_detailPageCount(comic), 34);
   });
 
   test('HTML image fallback rejects an empty gallery', () async {

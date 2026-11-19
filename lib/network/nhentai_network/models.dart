@@ -51,15 +51,18 @@ class NhentaiComic with HistoryMixin {
   List<String> thumbnails;
   List<NhentaiComicBrief> recommendations;
   String token;
+  final int? pages;
 
   NhentaiComic(this.id, this.title, this.subTitle, this.cover, this.tags,
-      this.favorite, this.thumbnails, this.recommendations, this.token);
+      this.favorite, this.thumbnails, this.recommendations, this.token,
+      {this.pages});
 
   Map<String, dynamic> toMap() => {
         "id": id,
         "title": title,
         "subTitle": subTitle,
         "cover": cover,
+        "pages": pages,
       };
 
   NhentaiComic.fromMap(Map<String, dynamic> map)
@@ -71,7 +74,8 @@ class NhentaiComic with HistoryMixin {
         favorite = false,
         thumbnails = [],
         recommendations = [],
-        token = "";
+        token = "",
+        pages = map["pages"] is num ? (map["pages"] as num).toInt() : null;
 
   @override
   HistoryType get historyType => HistoryType.nhentai;

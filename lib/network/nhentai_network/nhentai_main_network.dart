@@ -744,6 +744,9 @@ class NhentaiNetwork {
         : _fallbackImageUrl("t", mediaId, "cover",
             _extensionFromImage(gallery["cover"], coverPath));
     final tags = _readTagGroups(gallery);
+    final apiPageCount = _readInt(gallery["num_pages"]);
+    final apiPages = _asList(gallery["pages"]);
+    final pageCount = apiPageCount > 0 ? apiPageCount : apiPages?.length;
     final favorite = logged &&
         (gallery["favorite"] == true ||
             gallery["is_favorite"] == true ||
@@ -761,6 +764,7 @@ class NhentaiNetwork {
       thumbnails,
       recommendations,
       "",
+      pages: pageCount != null && pageCount > 0 ? pageCount : null,
     );
   }
 
@@ -1130,6 +1134,8 @@ class NhentaiNetwork {
       for (var t in document.querySelectorAll("a.gallerythumb > img")) {
         thumbnails.add(t.attributes["src"]!);
       }
+      final pageCount = int.tryParse(tags["Pages"]?.firstOrNull ?? "");
+      final pages = pageCount != null && pageCount > 0 ? pageCount : null;
 
       var recommendations = <NhentaiComicBrief>[];
       for (var comic in document.querySelectorAll("div.gallery")) {
@@ -1148,7 +1154,8 @@ class NhentaiNetwork {
       }
 
       return Res(NhentaiComic(id, title, subTitle, cover, tags, favorite,
-          thumbnails, recommendations, token));
+          thumbnails, recommendations, token,
+          pages: pages));
     } catch (e, s) {
       LogManager.addLog(
           LogLevel.error, "Data Analyse", "${safeNetworkError(e)}\n$s");
