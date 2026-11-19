@@ -13,6 +13,7 @@ import 'package:pica_comic/network/jm_network/jm_models.dart';
 import 'package:pica_comic/network/nhentai_network/download.dart';
 import 'package:pica_comic/tools/cbz.dart';
 import 'package:pica_comic/tools/cbz_export.dart';
+import 'package:pica_comic/tools/io_extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:xml/xml.dart';
 
@@ -62,6 +63,19 @@ void main() {
           .toList(),
       isEmpty,
     );
+  }
+
+  Future<bool> supportsFullLengthName() async {
+    final probe = File('${root.path}/${List.filled(255, 'p').join()}');
+    try {
+      await probe.writeAsBytes([]);
+      await probe.delete();
+      return true;
+    } on FileSystemException catch (error) {
+      if (error.osError?.errorCode != 36) rethrow;
+      markTestSkipped('The test runtime rejects 255-byte file names.');
+      return false;
+    }
   }
 
   test('CBZ keeps original pages in chapter order with valid ComicInfo XML',
@@ -399,6 +413,51 @@ void main() {
       await expectNoTemporaryFiles();
     }
   });
+
+  test('file name truncation preserves complete Unicode code points', () {
+    final prefix = List.filled(252, 'x').join();
+    expect(sanitizeFileName('$prefix\u{1f600}'), prefix);
+    expect(sanitizeFileName(List.filled(64, '\u{1f600}').join()),
+        List.filled(63, '\u{1f600}').join());
+    expect(sanitizeFileName('  Title: one/two?  '), 'Title  one two');
+    expect(() => sanitizeFileName('  /:*?  '), throwsException);
+  });
+
+  for (final fixture in [
+    (name: 'ASCII', title: List.filled(255, 'x').join()),
+    (name: 'Chinese', title: List.filled(90, '\u4e2d').join()),
+    (name: 'emoji', title: List.filled(64, '\u{1f600}').join()),
+  ]) {
+    test('ZIP exports long ${fixture.name} titles within the file name limit',
+        () async {
+      if (fixture.name == 'ASCII' && !await supportsFullLengthName()) return;
+      final source = await page('long-title/0.png');
+      var saves = 0;
+      final result = await exportComicArchives(
+        [
+          ExportComicData(
+              'long-title', root.path, fixture.title, null, 'long-title')
+        ],
+        temporaryRoot: root,
+        saveFile: (path) async {
+          saves++;
+          final basename = File(path).name;
+          expect(basename, endsWith('.zip'));
+          expect(utf8.encode(basename).length, lessThanOrEqualTo(255));
+          expect(utf8.decode(utf8.encode(basename)), basename);
+          final archive = readArchive(File(path));
+          expect(archive.files, hasLength(1));
+          expect(archive.files.single.content, await source.readAsBytes());
+          return true;
+        },
+      );
+
+      expect(result, ComicExportResult.saved);
+      expect(saves, 1);
+      expect(await source.exists(), isTrue);
+      await expectNoTemporaryFiles();
+    });
+  }
 
   test('ZIP export distinguishes cancel and failure and cleans every exit',
       () async {

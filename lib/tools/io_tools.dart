@@ -71,8 +71,9 @@ Future<ComicExportResult> exportComicArchives(
   try {
     work = await (temporaryRoot ?? Directory(App.cachePath))
         .createTemp('zip-export-');
-    final name =
-        comics.length == 1 ? sanitizeFileName(comics.single.name) : 'comics';
+    final name = comics.length == 1
+        ? sanitizeFileName(comics.single.name, maxLength: 251)
+        : 'comics';
     final output = '${work.path}/$name.zip';
     await compute(_writeComicArchive, (comics: comics, output: output));
     return await (saveFile ?? _saveComicArchive)(output)

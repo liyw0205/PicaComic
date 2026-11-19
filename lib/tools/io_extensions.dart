@@ -86,24 +86,28 @@ extension DirectoryExtension on Directory {
   }
 }
 
-String sanitizeFileName(String fileName) {
-  const maxLength = 255;
+String sanitizeFileName(String fileName, {int maxLength = 255}) {
   final invalidChars = RegExp(r'[<>:"/\\|?*]');
   final sanitizedFileName = fileName.replaceAll(invalidChars, ' ');
-  var trimmedFileName = sanitizedFileName.trim();
+  final trimmedFileName = sanitizedFileName.trim();
   if (trimmedFileName.isEmpty) {
     throw Exception('Invalid File Name: Empty length.');
   }
-  while (true) {
-    final bytes = utf8.encode(trimmedFileName);
-    if (bytes.length > maxLength) {
-      trimmedFileName =
-          trimmedFileName.substring(0, trimmedFileName.length - 1);
-    } else {
-      break;
-    }
+
+  final buffer = StringBuffer();
+  var byteLength = 0;
+  for (final rune in trimmedFileName.runes) {
+    final character = String.fromCharCode(rune);
+    final characterLength = utf8.encode(character).length;
+    if (byteLength + characterLength > maxLength) break;
+    buffer.write(character);
+    byteLength += characterLength;
   }
-  return trimmedFileName;
+  final result = buffer.toString().trimRight();
+  if (result.isEmpty) {
+    throw Exception('Invalid File Name: Empty length.');
+  }
+  return result;
 }
 
 String findValidDirectoryName(String path, String directory) {

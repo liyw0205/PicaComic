@@ -53,19 +53,18 @@ Future<void> writeTextFileAtomically(File target, String contents) async {
 
 /// Writes binary data without exposing a partially-written destination.
 ///
-/// The temporary sibling is deliberately kept next to [target] so that the
-/// final rename is on the same filesystem. This is used for generated files
-/// such as PDF exports where a truncated destination must never look complete.
+/// Staging stays under [target]'s parent so the final rename is on the same
+/// filesystem. Short staging names also support a full-length target name.
 Future<void> writeBytesFileAtomically(File target, List<int> bytes) async {
   await target.parent.create(recursive: true);
-  final temporary =
-      File('${target.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp');
+  // Keep temporary and backup names short even when the target fills NAME_MAX.
+  final work = await target.parent.createTemp('.pica-export-');
+  final temporary = File('${work.path}/output.tmp');
   File? backup;
   try {
     await temporary.writeAsBytes(bytes, flush: true);
     if (Platform.isWindows && await target.exists()) {
-      backup = File(
-          '${target.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.bak');
+      backup = File('${work.path}/previous.bak');
       await target.rename(backup.path);
     }
     try {
@@ -96,6 +95,11 @@ Future<void> writeBytesFileAtomically(File target, List<int> bytes) async {
       } catch (_) {
         // Retain the temporary artifact if storage cleanup is unavailable.
       }
+    }
+    try {
+      await work.delete();
+    } catch (_) {
+      // A retained backup must survive failed recovery or cleanup.
     }
   }
 }

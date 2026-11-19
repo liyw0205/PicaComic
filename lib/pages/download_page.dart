@@ -20,6 +20,7 @@ import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/picacg/comic_page.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
 import 'package:pica_comic/tools/extensions.dart';
+import 'package:pica_comic/tools/io_extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/tools/pdf.dart';
@@ -388,9 +389,9 @@ class DownloadPage extends StatelessWidget {
         onCancel: cancellation.cancel,
         allowCancel: true,
       );
-      var fileName = "${comic.name}.pdf";
-      fileName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '');
+      late final String fileName;
       try {
+        fileName = "${sanitizeFileName(comic.name, maxLength: 251)}.pdf";
         await createPdfFromComicWithIsolate(
             title: comic.name,
             comicPath:
