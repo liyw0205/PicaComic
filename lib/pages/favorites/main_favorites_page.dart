@@ -519,14 +519,12 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
           PopupMenuItem(
             child: Text("删除".tl),
             onTap: () {
-              App.globalBack();
               deleteFolder(folder);
             },
           ),
           PopupMenuItem(
             child: Text("排序".tl),
             onTap: () {
-              App.globalBack();
               App.globalTo(() => LocalFavoritesFolder(folder))
                   .then((value) => controller.update());
             },
@@ -534,14 +532,12 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
           PopupMenuItem(
             child: Text("重命名".tl),
             onTap: () {
-              App.globalBack();
               unawaited(rename(folder));
             },
           ),
           PopupMenuItem(
             child: Text("检查漫画存活".tl),
             onTap: () {
-              App.globalBack();
               checkFolder(folder).then((value) {
                 controller.update();
               });
@@ -550,21 +546,18 @@ class FavoritesPage extends StatelessWidget with _LocalFavoritesManager {
           PopupMenuItem(
             child: Text("导出".tl),
             onTap: () {
-              App.globalBack();
               unawaited(export(folder));
             },
           ),
           PopupMenuItem(
             child: Text("下载全部".tl),
             onTap: () {
-              App.globalBack();
               addDownload(folder);
             },
           ),
           PopupMenuItem(
             child: Text("更新漫画信息".tl),
             onTap: () {
-              App.globalBack();
               var comics = LocalFavoritesManager().getAllComics(folder);
               UpdateFavoritesInfoDialog.show(comics, folder);
             },
