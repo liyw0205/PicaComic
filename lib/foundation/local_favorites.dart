@@ -773,24 +773,38 @@ class LocalFavoritesManager {
     return name;
   }
 
-  Future<String> createFolderAndSave(String name) =>
-      DataMaintenance.run(() async {
-        final folderName = _availableFolderName(name, false);
-        _transaction(() => _createFolderTable(folderName));
-        _modifiedAfterLastCache = true;
-        updateUI();
-        await saveData();
-        return folderName;
-      }, operationName: 'favorites-folder-create');
+  Future<String> createFolderAndSave(String name,
+      {List<FavoriteItem> comics = const [],
+      bool renameWhenInvalidName = false}) {
+    final items = List<FavoriteItem>.of(comics);
+    return DataMaintenance.run(() async {
+      late String folderName;
+      _transaction(() {
+        folderName = _availableFolderName(name, renameWhenInvalidName);
+        _createFolderTable(folderName);
+        for (var i = 0; i < items.length; i++) {
+          _insertComic(folderName, items[i], order: i);
+        }
+      });
+      _modifiedAfterLastCache = true;
+      updateUI();
+      await saveData();
+      return folderName;
+    }, operationName: 'favorites-folder-create');
+  }
 
   String _availableFolderName(String name, bool renameWhenInvalidName) {
+    bool exists(String candidate) => _db.select('''
+          select 1 from sqlite_master
+          where type = 'table' and name = ? collate nocase;
+        ''', [candidate]).isNotEmpty;
     if (name.isEmpty ||
         name.contains('\u0000') ||
         name.toLowerCase().startsWith('sqlite_') ||
         const ['folder_sync', 'folder_order'].contains(name.toLowerCase())) {
       if (renameWhenInvalidName) {
         int i = 0;
-        while (folderNames.contains(i.toString())) {
+        while (exists(i.toString())) {
           i++;
         }
         name = i.toString();
@@ -798,11 +812,11 @@ class LocalFavoritesManager {
         throw "name is empty!";
       }
     }
-    if (folderNames.contains(name)) {
+    if (exists(name)) {
       if (renameWhenInvalidName) {
         var prevName = name;
         int i = 0;
-        while (folderNames.contains(i.toString())) {
+        while (exists('$prevName$i')) {
           i++;
         }
         name = prevName + i.toString();
