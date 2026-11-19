@@ -270,58 +270,93 @@ class CreateFolderDialog extends StatelessWidget {
   }
 }
 
-class RenameFolderDialog extends StatelessWidget {
-  const RenameFolderDialog(this.before, {Key? key}) : super(key: key);
+class RenameFolderDialog extends StatefulWidget {
+  const RenameFolderDialog(this.before, {super.key});
 
   final String before;
 
   @override
+  State<RenameFolderDialog> createState() => _RenameFolderDialogState();
+}
+
+class _RenameFolderDialogState extends State<RenameFolderDialog> {
+  late final _controller = TextEditingController(text: widget.before);
+  final _focusNode = FocusNode();
+  late final _manager = LocalFavoritesManager();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    final name = _controller.text;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    setState(() => _saving = true);
+    try {
+      if (name != widget.before) {
+        await _manager.rename(widget.before, name);
+      }
+    } catch (error, stack) {
+      log('Failed to rename favorite folder.\n${safeNetworkError(error)}\n$stack',
+          'Favorite', LogLevel.error);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      showToast(message: error is String ? error.tl : '操作失败'.tl);
+      return;
+    }
+    if (!mounted) return;
+    if (route.isCurrent) {
+      navigator.pop(name);
+    } else if (route.isActive) {
+      navigator.removeRoute(route, name);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final controller = TextEditingController(text: before);
-    final FocusNode focusNode = FocusNode();
-    focusNode.requestFocus();
-    return SimpleDialog(
-      title: Text("重命名".tl),
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            onEditingComplete: () async {
-              try {
-                await LocalFavoritesManager().rename(before, controller.text);
-                if (context.mounted) context.pop();
-              } catch (e) {
-                showToast(message: e.toString());
-              }
-            },
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: "名称".tl,
+    return PopScope(
+      canPop: !_saving,
+      child: SimpleDialog(
+        title: Text("重命名".tl),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            child: TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              autofocus: true,
+              enabled: !_saving,
+              onEditingComplete: () => unawaited(_submit()),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: "名称".tl,
+              ),
             ),
           ),
-        ),
-        const SizedBox(
-          width: 200,
-          height: 10,
-        ),
-        SizedBox(
-            height: 35,
-            child: Center(
-              child: TextButton(
-                  onPressed: () async {
-                    try {
-                      await LocalFavoritesManager()
-                          .rename(before, controller.text);
-                      if (context.mounted) context.pop();
-                    } catch (e) {
-                      showToast(message: e.toString());
-                    }
-                  },
-                  child: Text("提交".tl)),
-            ))
-      ],
+          const SizedBox(
+            width: 200,
+            height: 10,
+          ),
+          SizedBox(
+              height: 35,
+              child: Center(
+                child: TextButton(
+                    onPressed: _saving ? null : () => unawaited(_submit()),
+                    child: _saving
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text("提交".tl)),
+              ))
+        ],
+      ),
     );
   }
 }

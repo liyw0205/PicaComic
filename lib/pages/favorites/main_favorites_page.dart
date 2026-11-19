@@ -631,12 +631,33 @@ mixin class _LocalFavoritesManager {
   }
 
   Future<void> rename(String folder) async {
-    await showDialog<void>(
+    final controller = StateController.findOrNull<FavoritesPageController>();
+    final name = await showDialog<String>(
         context: App.globalContext!,
         builder: (context) => RenameFolderDialog(folder));
-    final controller = StateController.findOrNull<FavoritesPageController>();
-    if (controller != null && !controller.isDisposed) {
-      controller.update();
+    if (name == null ||
+        name == folder ||
+        controller == null ||
+        controller.isDisposed) return;
+    if (controller.current == folder && controller.isNetwork == false) {
+      controller.current = name;
+      controller.selectedComics.clear();
+    }
+    controller.update();
+    final selection = appdata.implicitData[0].split(';');
+    if (selection.length >= 3 &&
+        selection[1] == '0' &&
+        selection.sublist(2).join(';') == folder) {
+      appdata.implicitData[0] = '${selection[0]};0;$name';
+      try {
+        await appdata.writeImplicitData();
+      } catch (error, stack) {
+        log(
+            'Failed to save renamed favorite selection.\n'
+                '${safeNetworkError(error)}\n$stack',
+            'Favorite',
+            LogLevel.error);
+      }
     }
   }
 
