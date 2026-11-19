@@ -120,7 +120,14 @@ class FavoriteItem {
         // DownloadManager.addHtDownload and DownloadedHtComic.id.
         ComicType.htManga => "Ht$target",
         ComicType.nhentai => "nhentai$target",
-        _ => DownloadManager().generateId(type.comicSource.key, target)
+        _ => () {
+            final source = ComicSource.fromIntKey(type.key);
+            if (source != null) {
+              return DownloadManager().generateId(source.key, target);
+            }
+            return DownloadManager().findCustomDownloadId(type.key, target) ??
+                "**Invalid ID**";
+          }(),
       };
     } catch (e) {
       return "**Invalid ID**";

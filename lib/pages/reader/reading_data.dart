@@ -354,13 +354,22 @@ class NhentaiReadingData extends ReadingData {
 }
 
 class CustomReadingData extends ReadingData {
-  CustomReadingData(this.id, this.title, this.source, Map<String, String>? eps)
+  CustomReadingData(this.id, this.title, this.source, Map<String, String>? eps,
+      {this.sourceKeyOverride, this.downloadIdOverride})
       : eps = eps?.isEmpty == true ? null : eps;
 
   final ComicSource? source;
+  final String? sourceKeyOverride;
+  final String? downloadIdOverride;
 
   @override
-  String get downloadId => DownloadManager().generateId(sourceKey, id);
+  String get downloadId {
+    if (downloadIdOverride != null) return downloadIdOverride!;
+    if (source == null && sourceKeyOverride != null) {
+      return "$sourceKeyOverride-$id";
+    }
+    return DownloadManager().generateId(sourceKey, id);
+  }
 
   @override
   final Map<String, String>? eps;
@@ -394,7 +403,7 @@ class CustomReadingData extends ReadingData {
   }
 
   @override
-  String get sourceKey => source?.key ?? "";
+  String get sourceKey => source?.key ?? sourceKeyOverride ?? "";
 
   @override
   ComicType get type => ComicType.other;
@@ -404,5 +413,6 @@ class CustomReadingData extends ReadingData {
       "$sourceKey$id${eps?.keys.elementAtOrNull(ep - 1) ?? id}$url";
 
   @override
-  FavoriteType get favoriteType => FavoriteType(source!.intKey);
+  FavoriteType get favoriteType =>
+      FavoriteType(source?.intKey ?? sourceKeyOverride!.hashCode);
 }

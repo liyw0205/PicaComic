@@ -659,6 +659,10 @@ void main() {
     await Directory('${directory.path}/repeat-delete').create();
 
     await manager.init();
+    final totals = <int>[];
+    void listener() => totals.add(manager.total);
+    manager.addListener(listener);
+    addTearDown(() => manager.removeListener(listener));
     await manager.delete(['repeat-delete']);
     expect(
         await Directory('${directory.path}/repeat-delete').exists(), isFalse);
@@ -666,6 +670,28 @@ void main() {
 
     await expectLater(manager.delete(['repeat-delete']), completes);
     expect(manager.total, 0);
+    expect(totals, [0]);
+  });
+
+  test('a partially failed delete publishes the committed download count',
+      () async {
+    createDownloadDatabase(directory, [
+      ['removed', 'title', '', 1, 'removed', 0, '{}'],
+      ['retained', 'title', '', 1, 'unsafe/path', 0, '{}'],
+    ]);
+    await manager.init();
+    final totals = <int>[];
+    void listener() => totals.add(manager.total);
+    manager.addListener(listener);
+    addTearDown(() => manager.removeListener(listener));
+
+    await expectLater(
+        manager.delete(['removed', 'retained']), throwsStateError);
+
+    expect(manager.total, 1);
+    expect(manager.isExists('removed'), isFalse);
+    expect(manager.isExists('retained'), isTrue);
+    expect(totals, [1]);
   });
 
   test('metadata updates preserve downloaded directory and original time',
@@ -1012,12 +1038,17 @@ void main() {
 
     await manager.init();
     expect(manager.total, 1);
+    final totals = <int>[];
+    void listener() => totals.add(manager.total);
+    manager.addListener(listener);
+    addTearDown(() => manager.removeListener(listener));
 
     await manager.delete(['orphaned-directory']);
 
     expect(manager.total, 0);
     await expectLater(manager.delete(['orphaned-directory']), completes);
     expect(manager.total, 0);
+    expect(totals, [0]);
   });
 
   test('directory cache is scoped to the active download root', () async {

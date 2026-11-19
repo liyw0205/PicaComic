@@ -189,6 +189,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       }
 
       _runInit = false;
+      _customDownloadIdIndex = null;
       _db!.dispose();
       downloading.clear();
       await init();
@@ -551,6 +552,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       await _queueWriteTail;
       _db?.dispose();
       _db = null;
+      _customDownloadIdIndex = null;
       _DownloadDb.clearAllDirectoryCache();
     }, preserveEnqueues: false);
   }
@@ -592,6 +594,7 @@ class DownloadManager with _DownloadDb implements Listenable {
     _runInit = true;
     isDownloading = false;
     _error = false;
+    _customDownloadIdIndex = null;
     _stopping.clear();
     _startRequestedDuringStop = false;
     _pauseRequestedDuringStop = false;
@@ -1097,33 +1100,41 @@ class DownloadManager with _DownloadDb implements Listenable {
 
   ///删除已下载的漫画
   Future<void> delete(List<String> ids) async {
-    for (var id in ids) {
-      // Deletion is intentionally idempotent: the UI can retry after a
-      // successful delete without requiring the database row to still exist.
-      final directory = _directoryOrNull(id);
-      if (directory == null) {
-        // A legacy or partially migrated row may not have a directory. There
-        // is no filesystem target to remove, but the database record is still
-        // deletable and must not become an orphan.
-        _deleteFromDb(id);
-        _DownloadDb.clearDirectoryCache(id);
-        continue;
-      }
-      var comic = Directory("$path/$directory");
-      try {
-        await comic.delete(recursive: true);
-      } catch (e) {
-        if (e is PathNotFoundException) {
-          //忽略
-        } else {
-          // Keep the durable database row when the filesystem operation
-          // fails; it is the only record that can make the deletion
-          // retryable after a restart.
-          rethrow;
+    var changed = false;
+    try {
+      for (var id in ids) {
+        // Deletion is intentionally idempotent: the UI can retry after a
+        // successful delete without requiring the database row to still exist.
+        final directory = _directoryOrNull(id);
+        if (directory == null) {
+          // A legacy or partially migrated row may not have a directory. There
+          // is no filesystem target to remove, but the database record is still
+          // deletable and must not become an orphan.
+          changed = _deleteFromDb(id) || changed;
+          _DownloadDb.clearDirectoryCache(id);
+          continue;
         }
+        var comic = Directory("$path/$directory");
+        try {
+          await comic.delete(recursive: true);
+        } catch (e) {
+          if (e is PathNotFoundException) {
+            //忽略
+          } else {
+            // Keep the durable database row when the filesystem operation
+            // fails; it is the only record that can make the deletion
+            // retryable after a restart.
+            rethrow;
+          }
+        }
+        changed = _deleteFromDb(id) || changed;
+        _DownloadDb.clearDirectoryCache(id);
       }
-      _deleteFromDb(id);
-      _DownloadDb.clearDirectoryCache(id);
+    } finally {
+      // Publish committed changes even if a later item could not be deleted.
+      if (changed) {
+        notifyListeners();
+      }
     }
   }
 
@@ -1365,6 +1376,8 @@ DownloadedItem? _getComicFromJson(String id, String json, DateTime time,
 abstract mixin class _DownloadDb {
   Database? get _db;
 
+  Map<(int, String), String>? _customDownloadIdIndex;
+
   void _createTable() {
     _db!.execute('''
       create table if not exists download (
@@ -1392,6 +1405,7 @@ abstract mixin class _DownloadDb {
       item.comicSize,
       jsonEncode(item.toJson()),
     ]);
+    _customDownloadIdIndex = null;
   }
 
   bool isExists(String id) {
@@ -1406,11 +1420,49 @@ abstract mixin class _DownloadDb {
     return result.isNotEmpty;
   }
 
-  void _deleteFromDb(String id) {
+  /// Finds a completed custom-source download after its source definition was
+  /// removed. Favorites persist the source hash and comic ID, not the key.
+  String? findCustomDownloadId(int sourceKeyHash, String comicId) {
+    final db = _db;
+    if (db == null) return null;
+    final index = _customDownloadIdIndex ??= _buildCustomDownloadIdIndex(db);
+    return index[(sourceKeyHash, comicId)];
+  }
+
+  Map<(int, String), String> _buildCustomDownloadIdIndex(Database db) {
+    final index = <(int, String), String>{};
+    final ambiguous = <(int, String)>{};
+    for (final row in db.select('select id, json from download')) {
+      try {
+        final id = row['id'] as String;
+        if (!id.contains('-')) continue;
+        final item = CustomDownloadedItem.fromJson(jsonDecode(row['json']));
+        if (item.id != id || item.sourceKey.isEmpty || item.comicId.isEmpty) {
+          continue;
+        }
+        final identity = (item.sourceKey.hashCode, item.comicId);
+        if (ambiguous.contains(identity)) continue;
+        if (index.containsKey(identity)) {
+          index.remove(identity);
+          ambiguous.add(identity);
+        } else {
+          index[identity] = id;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return index;
+  }
+
+  bool _deleteFromDb(String id) {
     _db!.execute('''
       delete from download
       where id = ?
     ''', [id]);
+    final changed = _db!.getUpdatedRows() > 0;
+    _customDownloadIdIndex = null;
+    return changed;
   }
 
   DownloadedItem? _getComicWithDb(String id) {

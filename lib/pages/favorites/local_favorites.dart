@@ -420,6 +420,10 @@ class LocalFavoriteTile extends ComicTile {
   BuildContext get context => App.mainNavigatorKey!.currentContext!;
 
   void showInfo() {
+    if (!comic.available) {
+      showToast(message: "无效的漫画".tl);
+      return;
+    }
     context.to(
       () => ComicPage(
           sourceKey: comic.type.comicSource.key,
@@ -878,7 +882,11 @@ class LocalFavoriteTile extends ComicTile {
       if (res) return;
     }
     if (!comic.available) {
-      showToast(message: "无效的漫画".tl);
+      if (DownloadManager().isExists(comic.toDownloadId())) {
+        read();
+      } else {
+        showToast(message: "无效的漫画".tl);
+      }
       return;
     }
     if (appdata.settings[60] == "0") {

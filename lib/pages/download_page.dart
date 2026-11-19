@@ -133,7 +133,7 @@ extension ReadComic on DownloadedItem {
         0,
         null,
         comic.sourceKey,
-        comic.id.replaceFirst("${comic.sourceKey}-", ""),
+        comic.comicId,
       );
       var history = await History.findOrCreate(data);
       App.globalTo(
@@ -143,6 +143,8 @@ extension ReadComic on DownloadedItem {
             data.title,
             ComicSource.find(comic.sourceKey),
             comic.chapters,
+            sourceKeyOverride: comic.sourceKey,
+            downloadIdOverride: comic.id,
           ),
           ep == null ? history.page : 0,
           ep ?? history.ep,
