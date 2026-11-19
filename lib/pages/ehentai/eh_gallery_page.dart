@@ -564,7 +564,7 @@ class EhGalleryPage extends BaseComicPage<Gallery> {
             return Res.error("网络错误".tl);
           }
         } else {
-          LocalFavoritesManager()
+          await LocalFavoritesManager()
               .addComic(folder, FavoriteItem.fromEhentai(data!.toBrief()));
           return const Res(true);
         }

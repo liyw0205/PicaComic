@@ -176,7 +176,10 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
 
   @override
   Future<bool> loadFavorite(ComicInfoData data) async {
-    return data.isFavorite ?? false;
+    return data.isFavorite == true ||
+        (await LocalFavoritesManager()
+                .find(id, FavoriteType(sourceKey.hashCode)))
+            .isNotEmpty;
   }
 
   @override
@@ -349,7 +352,7 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
       favoriteOnPlatform: logic.favoriteOnPlatform,
       selectFolderCallback: (folder, type) async {
         if (type == 1) {
-          LocalFavoritesManager().addComic(folder, toLocalFavoriteItem());
+          await LocalFavoritesManager().addComic(folder, toLocalFavoriteItem());
           return const Res(true);
         } else {
           var res = await comicSource!.favoriteData!.addOrDelFavorite!(
@@ -699,6 +702,7 @@ class ThumbnailsData {
 class ComicPageLogic<T extends Object> extends StateController {
   bool loading = true;
   bool _requestInFlight = false;
+  bool _quickFavoriteInFlight = false;
   int _requestGeneration = 0;
   T? data;
   String? message;
@@ -936,7 +940,6 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
           init: ComicPageLogic<T>(),
           initState: (logic) {
             tagsStack.push(_logic);
-            _logic.favoriteOnPlatform = favoriteOnPlatformInitial;
           },
           dispose: (logic) {
             tagsStack.pop();
@@ -945,7 +948,10 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
             _logic.width = constraints.maxWidth;
             _logic.height = constraints.maxHeight;
             if (logic.loading) {
-              unawaited(logic.get(loadData, loadFavorite, () => id,
+              unawaited(logic.get(loadData, (data) {
+                logic.favoriteOnPlatform = favoriteOnPlatformInitial;
+                return loadFavorite(data);
+              }, () => id,
                   retryAttempts: loadRetryAttempts,
                   retryDelay: loadRetryDelay));
               return buildLoading(context);
@@ -1319,6 +1325,31 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
     );
   }
 
+  Future<void> _quickFavorite(ComicPageLogic logic) async {
+    if (logic.isDisposed || logic.loading || logic._quickFavoriteInFlight) {
+      return;
+    }
+    final manager = LocalFavoritesManager();
+    final folder = appdata.settings[51];
+    if (!manager.folderNames.contains(folder)) return;
+    final generation = logic._requestGeneration;
+    logic._quickFavoriteInFlight = true;
+    try {
+      await manager.addComic(folder, toLocalFavoriteItem());
+      if (logic.isDisposed || generation != logic._requestGeneration) return;
+      logic.favorite = true;
+      logic.update();
+      showToast(message: "已收藏".tl);
+    } catch (error, stack) {
+      LogManager.addLog(LogLevel.error, "Favorites",
+          "Failed to save quick favorite: ${safeNetworkError(error)}\n$stack");
+      if (logic.isDisposed || generation != logic._requestGeneration) return;
+      showToast(message: safeNetworkError(error));
+    } finally {
+      logic._quickFavoriteInFlight = false;
+    }
+  }
+
   Widget buildActions(ComicPageLogic logic, BuildContext context, bool center) {
     if (logic.loading) {
       return Container(
@@ -1397,12 +1428,7 @@ abstract class BaseComicPage<T extends Object> extends StatelessWidget {
                       ? Icons.collections_bookmark
                       : Icons.collections_bookmark_outlined,
                   openFavoritePanel, () {
-                var folder = appdata.settings[51];
-                if (LocalFavoritesManager().folderNames.contains(folder)) {
-                  LocalFavoritesManager()
-                      .addComic(folder, toLocalFavoriteItem());
-                  showToast(message: "已收藏".tl);
-                }
+                unawaited(_quickFavorite(logic));
               }),
               if (width >= 500) buildItem("下载".tl, Icons.download, download),
               if (onLike != null)
@@ -1894,9 +1920,11 @@ class FavoriteComicWidget extends StatefulWidget {
   State<FavoriteComicWidget> createState() => _FavoriteComicWidgetState();
 }
 
-class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
+class _FavoriteComicWidgetState extends State<FavoriteComicWidget>
+    with SingleTickerProviderStateMixin {
   late List<String> selected;
   late int page = 0;
+  late final TabController _tabController;
 
   /// network folders
   late Map<String, String> folders;
@@ -1906,20 +1934,168 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
   bool loadedData = false;
   List<String> addedFolders = [];
   bool isAdding = false;
+  bool _loadingFolders = false;
+  String? _folderError;
 
   @override
   void initState() {
-    LocalFavoritesManager()
-        .find(widget.localFavoriteItem.target, widget.localFavoriteItem.type)
-        .then((folder) {
-      Future.microtask(() => setState(() => addedFolders = folder));
-    });
-    selected = widget.initialFolder != null ? [widget.initialFolder!] : [];
+    super.initState();
+    selected = widget.havePlatformFavorite && widget.initialFolder != null
+        ? [widget.initialFolder!]
+        : [];
     if (!widget.havePlatformFavorite) {
       page = 1;
     }
     folders = widget.folders;
-    super.initState();
+    _tabController =
+        TabController(length: widget.havePlatformFavorite ? 2 : 1, vsync: this)
+          ..addListener(_onTabChanged);
+    unawaited(_loadAddedFolders());
+    if (widget.havePlatformFavorite && widget.needLoadFolderData) {
+      unawaited(_loadFolders());
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    final nextPage = widget.havePlatformFavorite ? _tabController.index : 1;
+    if (page == nextPage) return;
+    setState(() {
+      page = nextPage;
+      selected.clear();
+      if (page == 0 && widget.initialFolder != null) {
+        selected.add(widget.initialFolder!);
+      }
+    });
+  }
+
+  Future<void> _loadAddedFolders() async {
+    try {
+      final added = await LocalFavoritesManager()
+          .find(widget.localFavoriteItem.target, widget.localFavoriteItem.type);
+      if (mounted) setState(() => addedFolders = added);
+    } catch (error, stack) {
+      log(
+          'Failed to load local favorite folders: '
+              '${safeNetworkError(error)}\n$stack',
+          'Favorites',
+          LogLevel.error);
+    }
+  }
+
+  Future<void> _loadFolders() async {
+    if (!mounted || _loadingFolders) return;
+    setState(() {
+      _loadingFolders = true;
+      _folderError = null;
+    });
+    try {
+      final res = await widget.foldersLoader!.call();
+      if (!mounted) return;
+      setState(() {
+        if (res.error) {
+          _folderError = res.errorMessageWithoutNull;
+        } else {
+          folders = res.data;
+          favoritedFolders = List<String>.from(res.subData ?? []);
+          loadedData = true;
+        }
+      });
+    } catch (error) {
+      if (mounted) setState(() => _folderError = safeNetworkError(error));
+    } finally {
+      if (mounted) setState(() => _loadingFolders = false);
+    }
+  }
+
+  Future<void> _runFavoriteAction(
+    FutureOr<Res<bool>> Function() action, {
+    required String successMessage,
+    VoidCallback? onSuccess,
+    bool closeOnSuccess = true,
+  }) async {
+    if (!mounted || isAdding) return;
+    setState(() => isAdding = true);
+    try {
+      final res = await action();
+      if (!mounted) return;
+      if (res.error) {
+        showToast(message: res.errorMessageWithoutNull);
+        return;
+      }
+      onSuccess?.call();
+      if (!mounted) return;
+      if (closeOnSuccess) context.pop();
+      showToast(message: successMessage);
+    } catch (error, stack) {
+      log('Failed to update favorite: ${safeNetworkError(error)}\n$stack',
+          'Favorites', LogLevel.error);
+      if (mounted) showToast(message: safeNetworkError(error));
+    } finally {
+      if (mounted) setState(() => isAdding = false);
+    }
+  }
+
+  Future<void> _addToSelectedFolders() async {
+    if (selected.isEmpty ||
+        widget.selectFolderCallback == null ||
+        (page == 0 && widget.needLoadFolderData && !loadedData)) {
+      return;
+    }
+    // The active tab and selection can change while an earlier request waits.
+    final type = page;
+    final ids = List<String>.of(selected);
+    await _runFavoriteAction(() async {
+      for (final id in ids) {
+        if (type == 1 && addedFolders.contains(id)) continue;
+        final res = await widget.selectFolderCallback!(id, type);
+        if (!mounted || res.error) return res;
+        if (type == 1) setState(() => addedFolders.add(id));
+        widget.setFavorite(true);
+      }
+      return const Res(true);
+    }, successMessage: "添加收藏成功".tl);
+  }
+
+  Future<void> _removeLocalFavorites(List<String> ids,
+      {bool closeOnSuccess = true}) {
+    return _runFavoriteAction(() async {
+      for (final id in ids) {
+        await LocalFavoritesManager().deleteComic(id, widget.localFavoriteItem);
+        if (!mounted) return const Res(true);
+        setState(() {
+          addedFolders.remove(id);
+          if (page == 1) selected.remove(id);
+        });
+        if (addedFolders.isEmpty &&
+            widget.favoriteOnPlatform != true &&
+            favoritedFolders.isEmpty) {
+          widget.setFavorite(false);
+        }
+      }
+      return const Res(true);
+    }, successMessage: "取消收藏成功".tl, closeOnSuccess: closeOnSuccess);
+  }
+
+  Future<void> _cancelPlatformFavorite([String? folder]) {
+    return _runFavoriteAction(
+      () => folder == null
+          ? widget.cancelPlatformFavorite!()
+          : widget.cancelPlatformFavoriteWithFolder!(folder),
+      successMessage: "取消收藏成功".tl,
+      onSuccess: () {
+        if (folder != null) favoritedFolders.remove(folder);
+        if (addedFolders.isEmpty &&
+            (folder == null || favoritedFolders.isEmpty)) {
+          widget.setFavorite(false);
+        }
+      },
+    );
   }
 
   @override
@@ -1927,9 +2103,10 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
     assert(widget.havePlatformFavorite || page != 0);
 
     Widget buildFolder(String name, String id, int p) {
-      bool isSelected = selected.contains(id);
+      bool isSelected = page == p && selected.contains(id);
       return InkWell(
         onTap: () => setState(() {
+          if (page != p) selected.clear();
           page = p;
           if (isSelected) {
             selected.remove(id);
@@ -1979,20 +2156,8 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
                 const Spacer(),
                 if (p == 1 && addedFolders.contains(name))
                   GestureDetector(
-                    onTap: () {
-                      unawaited(LocalFavoritesManager()
-                          .deleteComic(name, widget.localFavoriteItem));
-                      setState(() {
-                        addedFolders.remove(name);
-                        selected.remove(name);
-                      });
-                      if (addedFolders.isEmpty &&
-                          widget.favoriteOnPlatform != true &&
-                          favoritedFolders.isEmpty) {
-                        widget.setFavorite(false);
-                      }
-                      showToast(message: "取消收藏成功".tl);
-                    },
+                    onTap: () => unawaited(
+                        _removeLocalFavorites([id], closeOnSuccess: false)),
                     child: Container(
                       height: 30,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2026,33 +2191,11 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
 
     Widget button = Button.filled(
       isLoading: isAdding,
+      disabled: selected.isEmpty ||
+          widget.selectFolderCallback == null ||
+          (page == 0 && widget.needLoadFolderData && !loadedData),
+      onPressed: _addToSelectedFolders,
       child: Text("收藏".tl),
-      onPressed: () async {
-        if (selected.isNotEmpty) {
-          setState(() {
-            isAdding = true;
-          });
-          Res<bool> res = const Res(true);
-          for (var id in selected) {
-            if (addedFolders.contains(id)) {
-              continue;
-            }
-            res = await widget.selectFolderCallback!.call(id, page);
-          }
-          if (res.success) {
-            widget.setFavorite(true);
-            if (context.mounted) {
-              context.pop();
-            }
-            showToast(message: "添加收藏成功".tl);
-          } else {
-            setState(() {
-              isAdding = false;
-            });
-            showToast(message: res.errorMessage!);
-          }
-        }
-      },
     );
 
     Widget platform = SingleChildScrollView(
@@ -2071,26 +2214,8 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
       if (page == 0) {
         button = Button.filled(
           isLoading: isAdding,
-          onPressed: () async {
-            setState(() {
-              isAdding = true;
-            });
-            var res = await widget.cancelPlatformFavorite!.call();
-            if (res.success) {
-              if (addedFolders.isEmpty) {
-                widget.setFavorite(false);
-              }
-              showToast(message: "取消收藏成功".tl);
-              if (context.mounted) {
-                context.pop();
-              }
-            } else {
-              setState(() {
-                isAdding = false;
-              });
-              showToast(message: res.errorMessage!);
-            }
-          },
+          disabled: widget.cancelPlatformFavorite == null,
+          onPressed: _cancelPlatformFavorite,
           child: Text("取消收藏".tl),
         );
       }
@@ -2100,58 +2225,31 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
         selected.isNotEmpty &&
         selected.every((e) => addedFolders.contains(e))) {
       button = Button.filled(
-        onPressed: () {
-          context.hideMessages();
-          App.globalBack();
-          if (addedFolders.length == 1 &&
-              widget.favoriteOnPlatform == false &&
-              favoritedFolders.isEmpty) {
-            widget.setFavorite(false);
-          }
-          for (var id in selected) {
-            unawaited(LocalFavoritesManager().deleteComic(
-              id,
-              widget.localFavoriteItem,
-            ));
-          }
-          showToast(message: "取消收藏成功".tl);
-        },
+        isLoading: isAdding,
+        onPressed: () async => _removeLocalFavorites(List.of(selected)),
         child: Text("取消收藏".tl),
-      );
-    } else if (widget.havePlatformFavorite &&
-        widget.needLoadFolderData &&
-        !loadedData) {
-      widget.foldersLoader!.call().then((res) {
-        if (res.error) {
-          showToast(message: res.errorMessage ?? "Error");
-        } else {
-          setState(() {
-            loadedData = true;
-            folders = res.data;
-            favoritedFolders = res.subData ?? [];
-          });
-        }
-      });
-      platform = const Center(
-        child: CircularProgressIndicator(),
       );
     } else if (page == 0 &&
         selected.length == 1 &&
         favoritedFolders.contains(selected[0])) {
       button = Button.filled(
-        onPressed: () async {
-          var res = await widget.cancelPlatformFavoriteWithFolder!(selected[0]);
-          if (res.success) {
-            showToast(message: "取消收藏成功".tl);
-            if (context.mounted) {
-              context.pop();
-            }
-          } else {
-            showToast(message: res.errorMessage!);
-          }
-        },
+        isLoading: isAdding,
+        disabled: widget.cancelPlatformFavoriteWithFolder == null,
+        onPressed: () async => _cancelPlatformFavorite(selected.single),
         child: Text("取消收藏".tl),
       );
+    }
+
+    if (widget.havePlatformFavorite &&
+        widget.needLoadFolderData &&
+        !loadedData) {
+      platform = _folderError != null
+          ? NetworkError(
+              message: _folderError!,
+              retry: () => unawaited(_loadFolders()),
+              withAppbar: false,
+            )
+          : const Center(child: CircularProgressIndicator());
     }
 
     Widget local;
@@ -2176,9 +2274,10 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
             ],
           ),
           onPressed: () => showDialog(
-                  context: App.globalContext!,
-                  builder: (_) => const CreateFolderDialog())
-              .then((value) => setState(() {})),
+              context: App.globalContext!,
+              builder: (_) => const CreateFolderDialog()).then((value) {
+            if (mounted) setState(() {});
+          }),
         ),
       ),
     ));
@@ -2188,51 +2287,39 @@ class _FavoriteComicWidgetState extends State<FavoriteComicWidget> {
       ),
     );
 
-    return DefaultTabController(
-        length: widget.havePlatformFavorite ? 2 : 1,
-        child: Column(
-          children: [
-            TabBar(
-              onTap: (i) {
-                setState(() {
-                  selected.clear();
-                  if (i == 0 && widget.initialFolder != null) {
-                    selected.add(widget.initialFolder!);
-                  }
-                  page = i;
-                  if (!widget.havePlatformFavorite) {
-                    page = 1;
-                  }
-                });
-              },
-              tabs: [
-                if (widget.havePlatformFavorite)
-                  Tab(
-                    text: "网络".tl,
-                  ),
-                Tab(
-                  text: "本地".tl,
-                ),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  if (widget.havePlatformFavorite) platform,
-                  local,
-                ],
+    return Column(
+      children: [
+        TabBar(
+          controller: _tabController,
+          tabs: [
+            if (widget.havePlatformFavorite)
+              Tab(
+                text: "网络".tl,
               ),
+            Tab(
+              text: "本地".tl,
             ),
-            SizedBox(
-              height: 60,
-              child: Center(
-                child: button,
-              ),
-            ),
-            SizedBox(
-              height: MediaQuery.of(context).padding.bottom,
-            )
           ],
-        ));
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              if (widget.havePlatformFavorite) platform,
+              local,
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 60,
+          child: Center(
+            child: button,
+          ),
+        ),
+        SizedBox(
+          height: MediaQuery.of(context).padding.bottom,
+        )
+      ],
+    );
   }
 }

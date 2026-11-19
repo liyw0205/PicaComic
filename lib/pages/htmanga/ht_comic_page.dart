@@ -33,12 +33,17 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
       needLoadFolderData: true,
       foldersLoader: () => HtmangaNetwork().getFolders(),
       localFavoriteItem: toLocalFavoriteItem(),
-      setFavorite: (b) {},
+      setFavorite: (b) {
+        if (favorite != b) {
+          favorite = b;
+          update();
+        }
+      },
       selectFolderCallback: (folder, page) async {
         if (page == 0) {
           return HtmangaNetwork().addFavorite(data!.id, folder);
         } else {
-          LocalFavoritesManager()
+          await LocalFavoritesManager()
               .addComic(folder, FavoriteItem.fromHtcomic(data!.toBrief()));
           return const Res(true);
         }
@@ -227,7 +232,10 @@ class HtComicPage extends BaseComicPage<HtComicInfo> {
       );
 
   @override
-  Future<bool> loadFavorite(HtComicInfo data) => Future.value(false);
+  Future<bool> loadFavorite(HtComicInfo data) async {
+    return (await LocalFavoritesManager().find(data.id, FavoriteType.htManga))
+        .isNotEmpty;
+  }
 
   @override
   String get source => "绅士漫画".tl;

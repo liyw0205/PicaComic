@@ -79,7 +79,7 @@ class PicacgComicPage extends BaseComicPage<ComicItem> {
             return Res.error("网络错误".tl);
           }
         } else {
-          LocalFavoritesManager().addComic(name, toLocalFavoriteItem());
+          await LocalFavoritesManager().addComic(name, toLocalFavoriteItem());
           return const Res(true);
         }
       },

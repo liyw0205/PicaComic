@@ -77,7 +77,7 @@ class JmComicPage extends BaseComicPage<JmComicInfo> {
           }
           return res;
         } else {
-          LocalFavoritesManager().addComic(
+          await LocalFavoritesManager().addComic(
             folder,
             toLocalFavoriteItem(),
           );

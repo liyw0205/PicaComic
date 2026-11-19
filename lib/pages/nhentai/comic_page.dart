@@ -79,7 +79,7 @@ class NhentaiComicPage extends BaseComicPage<NhentaiComic> {
           }
           return res;
         } else {
-          LocalFavoritesManager().addComic(
+          await LocalFavoritesManager().addComic(
             folder,
             FavoriteItem.fromNhentai(
               NhentaiComicBrief(

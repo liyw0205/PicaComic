@@ -47,12 +47,12 @@ class HitomiComicPage extends BaseComicPage<HitomiComic> {
           update();
         }
       },
-      selectFolderCallback: (folder, page) {
-        LocalFavoritesManager().addComic(
+      selectFolderCallback: (folder, page) async {
+        await LocalFavoritesManager().addComic(
           folder,
           FavoriteItem.fromHitomi(data!.toBrief(link, cover!)),
         );
-        return Future.value(const Res(true));
+        return const Res(true);
       },
     ));
   }
