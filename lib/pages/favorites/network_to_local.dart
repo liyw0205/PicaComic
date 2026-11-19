@@ -130,7 +130,10 @@ class _ChooseNetworkFolderWidgetState
                     }),
                 Text("支持下拉更新".tl),
                 const Spacer(),
-                FilledButton(onPressed: onConfirm, child: Text("继续".tl)),
+                FilledButton(
+                  onPressed: selected == null ? null : onConfirm,
+                  child: Text("继续".tl),
+                ),
                 const SizedBox(
                   width: 24,
                 ),
@@ -176,6 +179,7 @@ class _ChooseNetworkFolderWidgetState
         if (multiFolderData[data.key] == null) {
           if (isExpanded[_folders.indexOf(data)]) {
             data.loadFolders!().then((value) {
+              if (!mounted) return;
               if (value.error) {
                 showToast(message: "网络错误".tl);
               } else {
@@ -206,8 +210,10 @@ class _ChooseNetworkFolderWidgetState
   }
 
   void onConfirm() {
-    var key = selected!.split(":").first;
-    var folderId = selected!.split(":").last;
+    final value = selected;
+    if (value == null) return;
+    var key = value.split(":").first;
+    var folderId = value.split(":").last;
     var data = _folders.firstWhere((element) => element.key == key);
     String name;
     if (!data.multiFolder) {
