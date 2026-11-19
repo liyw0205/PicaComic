@@ -218,6 +218,30 @@ class ComicSource {
     return !res.error;
   }
 
+  Future<Res<T>> runWithLoginRetry<T>(Future<Res<T>> Function() operation,
+      {bool requireLogin = true}) async {
+    bool isCurrent() => identical(ComicSource.find(key), this);
+
+    if (!isCurrent()) return const Res.error("Comic Source Not Found");
+    if (requireLogin && !isLogin) return const Res.error("Not login");
+
+    var res = await operation();
+    if (!isCurrent()) return const Res.error("Comic Source Not Found");
+    if (!res.error || !res.errorMessageWithoutNull.contains("Login expired")) {
+      return res;
+    }
+
+    final reLoginRes = await reLogin();
+    if (!isCurrent()) return const Res.error("Comic Source Not Found");
+    if (!reLoginRes) {
+      return const Res.error("Login expired and re-login failed");
+    }
+
+    res = await operation();
+    if (!isCurrent()) return const Res.error("Comic Source Not Found");
+    return res;
+  }
+
   // only for built-in comic sources
   final FutureOr<void> Function(ComicSource source)? initData;
 

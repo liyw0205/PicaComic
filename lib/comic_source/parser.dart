@@ -204,13 +204,18 @@ class ComicSourceParser {
     }
 
     Future<Res<bool>> login(account, pwd) async {
+      final source = ComicSource.find(_key!);
+      if (source == null || source.isBuiltIn) {
+        return const Res.error("Comic Source Not Found");
+      }
       try {
         await JsEngine().runCode("""
           ComicSource.sources.$_key.account.login(${jsonEncode(account)}, 
           ${jsonEncode(pwd)})
         """);
-        var source =
-            ComicSource.sources.firstWhere((element) => element.key == _key);
+        if (!identical(ComicSource.find(_key!), source)) {
+          return const Res.error("Comic Source Not Found");
+        }
         source.data["account"] = <String>[account, pwd];
         await source.saveData();
         return const Res(true);
@@ -483,19 +488,11 @@ class ComicSourceParser {
     final bool multiFolder = _getValue("favorites.multiFolder");
 
     Future<Res<T>> retryZone<T>(Future<Res<T>> Function() func) async {
-      if (!ComicSource.find(_key!)!.isLogin) {
-        return const Res.error("Not login");
+      final source = ComicSource.find(_key!);
+      if (source == null || source.isBuiltIn) {
+        return const Res.error("Comic Source Not Found");
       }
-      var res = await func();
-      if (res.error && res.errorMessage!.contains("Login expired")) {
-        var reLoginRes = await ComicSource.find(_key!)!.reLogin();
-        if (!reLoginRes) {
-          return const Res.error("Login expired and re-login failed");
-        } else {
-          return func();
-        }
-      }
-      return res;
+      return source.runWithLoginRetry(func);
     }
 
     Future<Res<bool>> addOrDelFavFunc(comicId, folderId, isAdding) async {
@@ -634,16 +631,11 @@ class ComicSourceParser {
         }
       }
 
-      var res = await func();
-      if (res.error && res.errorMessage!.contains("Login expired")) {
-        var reLoginRes = await ComicSource.find(_key!)!.reLogin();
-        if (!reLoginRes) {
-          return const Res.error("Login expired and re-login failed");
-        } else {
-          return func();
-        }
+      final source = ComicSource.find(_key!);
+      if (source == null || source.isBuiltIn) {
+        return const Res.error("Comic Source Not Found");
       }
-      return res;
+      return source.runWithLoginRetry(func, requireLogin: false);
     };
   }
 
