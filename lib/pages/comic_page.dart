@@ -303,6 +303,9 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
   String? get title => data?.title;
 
   @override
+  String? get subTitle => data?.subTitle;
+
+  @override
   FavoriteItem toLocalFavoriteItem() {
     var tags = <String>[];
     data!.tags.forEach((key, value) => tags.addAll(value));
