@@ -84,6 +84,7 @@ class AccountsPage extends StatelessWidget {
               }
             }
             if (!controller.isDisposed) controller.update();
+            StateController.findOrNull(tag: "me_page")?.update();
           },
         );
       }
@@ -134,6 +135,7 @@ class AccountsPage extends StatelessWidget {
               } finally {
                 controller._reLogin.remove(element.key);
                 controller.update();
+                StateController.findOrNull(tag: "me_page")?.update();
               }
             },
             trailing: loading
@@ -157,6 +159,7 @@ class AccountsPage extends StatelessWidget {
               if (context.mounted) showToast(message: "保存失败".tl);
             }
             if (!controller.isDisposed) controller.update();
+            StateController.findOrNull(tag: "me_page")?.update();
           },
           trailing: const Icon(Icons.logout),
         );

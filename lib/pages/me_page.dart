@@ -17,6 +17,14 @@ class MePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return StateBuilder<SimpleController>(
+      tag: "me_page",
+      init: SimpleController(),
+      builder: (_) => buildContents(context),
+    );
+  }
+
+  Widget buildContents(BuildContext context) {
     return SizedBox.expand(
       child: LayoutBuilder(
         builder: (context, constrains) {
@@ -190,12 +198,15 @@ class MePage extends StatelessWidget {
   }
 
   Widget buildDownload(BuildContext context, double width) {
-    return _MePageCard(
-      icon: const Icon(Icons.download_for_offline),
-      title: "已下载".tl,
-      description:
-          "共 @a 部漫画".tlParams({"a": DownloadManager().total.toString()}),
-      onTap: () => context.to(() => const DownloadPage()),
+    final manager = DownloadManager();
+    return ListenableBuilder(
+      listenable: manager,
+      builder: (context, _) => _MePageCard(
+        icon: const Icon(Icons.download_for_offline),
+        title: "已下载".tl,
+        description: "共 @a 部漫画".tlParams({"a": manager.total.toString()}),
+        onTap: () => context.to(() => const DownloadPage()),
+      ),
     );
   }
 

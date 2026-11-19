@@ -17,8 +17,10 @@ ComicSource accountSource(LoginFunction? login) => ComicSource.named(
 
 Future<void> showAccounts(WidgetTester tester, ComicSource source) async {
   ComicSource.sources = [source];
-  await tester
-      .pumpWidget(const MaterialApp(home: OverlayWidget(AccountsPage())));
+  await tester.pumpWidget(MaterialApp(
+    theme: ThemeData(splashFactory: NoSplash.splashFactory),
+    home: const OverlayWidget(AccountsPage()),
+  ));
   await tester.pumpAndSettle();
 }
 
