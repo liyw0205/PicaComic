@@ -664,6 +664,15 @@ class LocalFavoritesManager {
     }
   }
 
+  Future<void> reorderFolders(List<String> folders) {
+    final order = Map<String, int>.fromEntries(
+        folders.mapIndexed((index, folder) => MapEntry(folder, index)));
+    return DataMaintenance.run(() {
+      _transaction(() => updateOrder(order));
+      updateUI();
+    }, operationName: 'favorites-folder-order');
+  }
+
   List<FolderSync> _getFolderSyncWithDB() {
     return _db
         .select("SELECT * FROM folder_sync")

@@ -906,6 +906,7 @@ class _FoldersReorderPage extends StatefulWidget {
 class _FoldersReorderPageState extends State<_FoldersReorderPage> {
   var folders = LocalFavoritesManager().folderNames;
   var changed = false;
+  var _savingOrder = false;
 
   final reorderKey = UniqueKey();
   final _scrollController = ScrollController();
@@ -921,14 +922,31 @@ class _FoldersReorderPageState extends State<_FoldersReorderPage> {
 
   @override
   void dispose() {
-    if (changed) {
-      LocalFavoritesManager().updateOrder(Map<String, int>.fromEntries(
-          folders.mapIndexed((index, element) => MapEntry(element, index))));
-      scheduleMicrotask(() {
-        StateController.find<FavoritesPageController>().update();
-      });
-    }
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveOrderAndPop() async {
+    if (_savingOrder) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    setState(() => _savingOrder = true);
+    try {
+      await LocalFavoritesManager().reorderFolders(List.of(folders));
+    } catch (error, stack) {
+      log('Failed to save favorite folder order.\n$error\n$stack', 'Favorite',
+          LogLevel.error);
+      if (!mounted) return;
+      setState(() => _savingOrder = false);
+      showToast(message: '保存排序失败'.tl);
+      return;
+    }
+    if (!mounted) return;
+    if (route.isCurrent) {
+      navigator.pop();
+    } else if (route.isActive) {
+      navigator.removeRoute(route);
+    }
   }
 
   @override
@@ -958,42 +976,49 @@ class _FoldersReorderPageState extends State<_FoldersReorderPage> {
               ),
             ));
 
-    return Scaffold(
-      appBar: AppBar(title: Text("排序".tl)),
-      body: Column(
-        children: [
-          Expanded(
-            child: ReorderableBuilder(
-              key: reorderKey,
-              scrollController: _scrollController,
-              longPressDelay: App.isDesktop
-                  ? const Duration(milliseconds: 100)
-                  : const Duration(milliseconds: 500),
-              onReorder: (reorderFunc) {
-                changed = true;
-                setState(() {
-                  folders = reorderFunc(folders) as List<String>;
-                });
-              },
-              dragChildBoxDecoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: lightenColor(
-                      Theme.of(context).splashColor.withOpacity(1), 0.2)),
-              builder: (children) {
-                return GridView(
-                  key: _key,
-                  controller: _scrollController,
-                  gridDelegate: const SliverGridDelegateWithFixedHeight(
-                    maxCrossAxisExtent: 260,
-                    itemHeight: 56,
-                  ),
-                  children: children,
-                );
-              },
-              children: tiles,
-            ),
-          )
-        ],
+    return PopScope(
+      canPop: !changed,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && changed) unawaited(_saveOrderAndPop());
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text("排序".tl)),
+        body: Column(
+          children: [
+            Expanded(
+              child: ReorderableBuilder(
+                key: reorderKey,
+                scrollController: _scrollController,
+                longPressDelay: App.isDesktop
+                    ? const Duration(milliseconds: 100)
+                    : const Duration(milliseconds: 500),
+                onReorder: (reorderFunc) {
+                  if (_savingOrder) return;
+                  changed = true;
+                  setState(() {
+                    folders = reorderFunc(folders) as List<String>;
+                  });
+                },
+                dragChildBoxDecoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: lightenColor(
+                        Theme.of(context).splashColor.withOpacity(1), 0.2)),
+                builder: (children) {
+                  return GridView(
+                    key: _key,
+                    controller: _scrollController,
+                    gridDelegate: const SliverGridDelegateWithFixedHeight(
+                      maxCrossAxisExtent: 260,
+                      itemHeight: 56,
+                    ),
+                    children: children,
+                  );
+                },
+                children: tiles,
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
