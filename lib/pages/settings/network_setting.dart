@@ -203,17 +203,18 @@ class _EditRuleViewState extends State<EditRuleView> {
               if (snapshot.hasError) {
                 return Center(child: Text(snapshot.error.toString()));
               }
-              return SingleChildScrollView(
-                  child: Padding(
+              return Padding(
                 padding: EdgeInsets.fromLTRB(
                     8, 0, 8, MediaQuery.of(context).padding.bottom),
                 child: TextField(
                   keyboardType: TextInputType.multiline,
                   maxLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
                   decoration: const InputDecoration(border: InputBorder.none),
                   controller: controller,
                 ),
-              ));
+              );
             }));
   }
 }
