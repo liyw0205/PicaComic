@@ -4,6 +4,18 @@ class BlockingKeywordPageLogic extends StateController {
   var keywords = appdata.blockingKeyword;
   bool down = true;
   final controller = TextEditingController();
+
+  void addKeyword() {
+    final keyword = controller.text.trim();
+    if (keyword.isEmpty) return;
+    if (!appdata.blockingKeyword.any((word) => word.trim() == keyword)) {
+      appdata.blockingKeyword.add(keyword);
+    }
+    update();
+    App.globalBack();
+    controller.clear();
+    unawaited(appdata.writeData());
+  }
 }
 
 class BlockingKeywordPage extends StatelessWidget {
@@ -37,14 +49,7 @@ class BlockingKeywordPage extends StatelessWidget {
                       decoration: InputDecoration(
                           border: const OutlineInputBorder(),
                           hintText: "添加关键词".tl),
-                      onEditingComplete: () {
-                        if (logic.controller.text == "") return;
-                        appdata.blockingKeyword.add(logic.controller.text);
-                        logic.update();
-                        App.globalBack();
-                        logic.controller.text = "";
-                        appdata.writeData();
-                      },
+                      onEditingComplete: logic.addKeyword,
                     ),
                   ),
                   const SizedBox(
@@ -52,15 +57,8 @@ class BlockingKeywordPage extends StatelessWidget {
                   ),
                   Center(
                     child: FilledButton(
+                      onPressed: logic.addKeyword,
                       child: Text("提交".tl),
-                      onPressed: () {
-                        if (logic.controller.text == "") return;
-                        appdata.blockingKeyword.add(logic.controller.text);
-                        logic.update();
-                        App.globalBack();
-                        logic.controller.text = "";
-                        appdata.writeData();
-                      },
                     ),
                   )
                 ],

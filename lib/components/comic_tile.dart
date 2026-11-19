@@ -884,30 +884,39 @@ Widget buildComicTile(BuildContext context, BaseComic item, String sourceKey,
   }
 }
 
+final _tagGenderSuffix = RegExp(r'(?: [♀♂])+$');
+
+String _tagWithoutNamespace(String tag) {
+  final separator = tag.indexOf(':');
+  return separator < 0 ? tag : tag.substring(separator + 1);
+}
+
 /// return the first blocked keyword, or null if not blocked
 String? isBlocked(BaseComic item) {
-  for (var word in appdata.blockingKeyword) {
+  for (final keyword in appdata.blockingKeyword) {
+    final word = keyword.trim();
+    if (word.isEmpty) continue;
     if (item.title.contains(word)) {
-      return word;
+      return keyword;
     }
     if (item.subTitle.contains(word)) {
-      return word;
+      return keyword;
     }
     if (item.description.contains(word)) {
-      return word;
+      return keyword;
     }
-    for (var tag in item.tags) {
-      if (tag == word) {
-        return word;
+    for (final tag in item.tags) {
+      final normalized = tag.replaceFirst(_tagGenderSuffix, '');
+      if (tag == word ||
+          normalized == word ||
+          _tagWithoutNamespace(tag) == word ||
+          _tagWithoutNamespace(normalized) == word) {
+        return keyword;
       }
-      if (tag.contains(':')) {
-        tag = tag.split(':')[1];
-        if (tag == word) {
-          return word;
-        }
-      }
-      if (item.enableTagsTranslation && tag.translateTagsToCN == word) {
-        return word;
+      if (item.enableTagsTranslation &&
+          (tag.translateTagsToCN == word ||
+              normalized.translateTagsToCN == word)) {
+        return keyword;
       }
     }
   }
@@ -925,6 +934,12 @@ class _BlockingPane extends StatefulWidget {
 
 class _BlockingPaneState extends State<_BlockingPane> {
   var controller = TextEditingController();
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -978,22 +993,26 @@ class _BlockingPaneState extends State<_BlockingPane> {
   }
 
   Iterable<Widget> buildTags() sync* {
-    yield buildTag(widget.comic.title);
-    yield buildTag(widget.comic.subTitle);
+    if (widget.comic.title.trim().isNotEmpty) {
+      yield buildTag(widget.comic.title);
+    }
+    if (widget.comic.subTitle.trim().isNotEmpty) {
+      yield buildTag(widget.comic.subTitle);
+    }
     for (var tag in widget.comic.tags ?? []) {
-      yield buildTag(tag);
+      if (tag.trim().isNotEmpty) {
+        yield buildTag(tag, keyword: _tagWithoutNamespace(tag));
+      }
     }
   }
 
   bool _isExisted(String text) {
-    if (text.contains(':')) {
-      text = text.split(':')[1];
-    }
-    return controller.text.split(';').contains(text);
+    return controller.text.split(';').any((word) => word.trim() == text);
   }
 
-  Widget buildTag(String text) {
-    var isExisted = _isExisted(text);
+  Widget buildTag(String text, {String? keyword}) {
+    final word = (keyword ?? text).trim();
+    var isExisted = _isExisted(word);
     if (isExisted) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1005,7 +1024,7 @@ class _BlockingPaneState extends State<_BlockingPane> {
       );
     }
     return GestureDetector(
-      onTap: () => handleText(text),
+      onTap: () => handleText(word),
       child: HoverBox(
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -1022,16 +1041,15 @@ class _BlockingPaneState extends State<_BlockingPane> {
   }
 
   void handleText(String text) {
-    if (text.contains(':')) {
-      text = text.split(':')[1];
-    }
     controller.text += "$text;";
     setState(() {});
   }
 
   void onSubmit() {
-    for (var word in controller.text.split(';')) {
-      if (word.isNotEmpty && !appdata.blockingKeyword.contains(word)) {
+    for (final input in controller.text.split(';')) {
+      final word = input.trim();
+      if (word.isNotEmpty &&
+          !appdata.blockingKeyword.any((keyword) => keyword.trim() == word)) {
         appdata.blockingKeyword.add(word);
       }
     }

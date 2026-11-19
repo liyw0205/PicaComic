@@ -43,10 +43,12 @@ class ComicsPageLogic<T> extends StateController {
         if (res.error) {
           message = res.errorMessage;
         } else {
-          comics = res.data;
+          comics = List.of(res.data);
           dividedComics = {1: res.data};
           maxPage = res.subData is int ? res.subData as int : null;
-          if (res.data.isEmpty) maxPage = 1;
+          if (res.data.isEmpty && (maxPage == null || maxPage! < 1)) {
+            maxPage = 1;
+          }
         }
       } else {
         if (res.error) {
@@ -274,6 +276,7 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                 comics = logic.comics!;
               }
               if (comics.isEmpty) {
+                unawaited(logic.loadNextPage(getComics));
                 return SmoothCustomScrollView(
                   slivers: [
                     if (title != null)
@@ -284,7 +287,16 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                     if (header != null) header!,
                     SliverFillRemaining(
                       hasScrollBody: false,
-                      child: buildEmptyView(context),
+                      child: logic.paginationError != null
+                          ? NetworkError(
+                              message: logic.paginationError!,
+                              retry: () =>
+                                  unawaited(logic.retryNextPage(getComics)),
+                              withAppbar: false,
+                            )
+                          : logic.loadingData
+                              ? const Center(child: CircularProgressIndicator())
+                              : buildEmptyView(context),
                     ),
                   ],
                 );
@@ -342,22 +354,6 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
               } else {
                 comics = logic.dividedComics![logic.current]!;
               }
-              if (comics.isEmpty) {
-                return SmoothCustomScrollView(
-                  slivers: [
-                    if (title != null)
-                      SliverAppbar(
-                        title: Text(title!),
-                        actions: tailing != null ? [tailing!] : null,
-                      ),
-                    if (header != null) header!,
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: buildEmptyView(context),
-                    ),
-                  ],
-                );
-              }
               Widget body = SmoothCustomScrollView(
                 slivers: [
                   if (title != null)
@@ -370,13 +366,19 @@ abstract class ComicsPage<T extends BaseComic> extends StatelessWidget {
                       appdata.settings[64] == "0" &&
                       logic.maxPage != 1)
                     buildPageSelector(context, logic),
-                  SliverGrid(
-                    delegate: SliverChildBuilderDelegate(
-                        childCount: comics.length, (context, i) {
-                      return buildItem(context, comics[i]);
-                    }),
-                    gridDelegate: SliverGridDelegateWithComics(),
-                  ),
+                  if (comics.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: buildEmptyView(context),
+                    )
+                  else
+                    SliverGrid(
+                      delegate: SliverChildBuilderDelegate(
+                          childCount: comics.length, (context, i) {
+                        return buildItem(context, comics[i]);
+                      }),
+                      gridDelegate: SliverGridDelegateWithComics(),
+                    ),
                   if (showPageIndicator &&
                       appdata.settings[64] == "0" &&
                       logic.maxPage != 1)
