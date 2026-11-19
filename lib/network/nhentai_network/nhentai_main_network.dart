@@ -26,6 +26,14 @@ import 'package:html/parser.dart';
 
 export 'models.dart';
 
+typedef _NhentaiAuthState = ({
+  int generation,
+  SingleInstanceCookieJar? cookieJar,
+  String baseUrl,
+  String? authorization,
+  String? refreshToken,
+});
+
 class NhentaiNetwork {
   factory NhentaiNetwork() => _cache ?? (_cache = NhentaiNetwork._create());
 
@@ -37,12 +45,16 @@ class NhentaiNetwork {
   static const String authHeaderCookie = "authorization";
   static const String _authRefreshHeader = "Pica-Nh-Auth-Refresh";
   static const String _authRetriedExtra = "picaNhAuthRetried";
+  static const String _authStateExtra = "picaNhAuthState";
 
   static NhentaiNetwork? _cache;
 
   SingleInstanceCookieJar? cookieJar;
 
   bool logged = false;
+  int _authGeneration = 0;
+  _NhentaiAuthState? _previousAuthState;
+  _NhentaiAuthState? _refreshedAuthState;
 
   String baseUrl = "https://nhentai.net";
 
@@ -56,6 +68,9 @@ class NhentaiNetwork {
   }
 
   Future<void> init() async {
+    _authGeneration++;
+    _previousAuthState = null;
+    _refreshedAuthState = null;
     cookieJar = SingleInstanceCookieJar.instance;
     logged = _hasStoredLogin();
     dio = logDio(BaseOptions(
@@ -67,12 +82,15 @@ class NhentaiNetwork {
       },
       validateStatus: (i) => i != null && i >= 200 && i < 400,
     ));
-    dio.interceptors.add(CookieManagerSql(cookieJar!));
+    dio.interceptors.add(_NhentaiCookieManager(this, cookieJar!));
     dio.interceptors.add(_NhentaiAuthInterceptor(this));
     dio.interceptors.add(CloudflareInterceptor());
   }
 
   void logout() {
+    _authGeneration++;
+    _previousAuthState = null;
+    _refreshedAuthState = null;
     logged = false;
     cookieJar!.deleteUri(Uri.parse(baseUrl));
   }
@@ -142,11 +160,31 @@ class NhentaiNetwork {
     return null;
   }
 
-  Future<bool> refreshAuthTokens() async {
+  _NhentaiAuthState get _authState => (
+        generation: _authGeneration,
+        cookieJar: cookieJar,
+        baseUrl: baseUrl,
+        authorization: _authorizationHeader(),
+        refreshToken: _decodeCookieValue(refreshTokenCookie),
+      );
+
+  bool _wasRefreshed(Object? state) =>
+      state == _previousAuthState &&
+      _refreshedAuthState != null &&
+      _refreshedAuthState == _authState;
+
+  Future<bool> refreshAuthTokens() async => await _refreshAuthTokens() != null;
+
+  Future<_NhentaiAuthState?> _refreshAuthTokens(
+      [_NhentaiAuthState? expectedState]) async {
+    final initialState =
+        expectedState ?? (cookieJar == null ? null : _authState);
     await _ensureReady();
+    final state = initialState ?? _authState;
+    if (state != _authState) return null;
     final refreshToken = _decodeCookieValue(refreshTokenCookie);
     if (refreshToken == null) {
-      return false;
+      return null;
     }
     try {
       final response = await dio.post(
@@ -158,11 +196,16 @@ class NhentaiNetwork {
         },
         options: Options(
           headers: {_authRefreshHeader: "1"},
+          extra: {_authStateExtra: state},
           contentType: Headers.jsonContentType,
           responseType: ResponseType.json,
           validateStatus: (i) => i != null && i >= 200 && i < 300,
         ),
       );
+      if (state != _authState) return null;
+      // Refresh cookies are persisted here after validating the session.
+      cookieJar!.saveFromResponseCookieHeader(
+          response.requestOptions.uri, response.headers["set-cookie"] ?? []);
       final data = _jsonData(response.data);
       var accessTokenReturned = false;
       if (data is Map) {
@@ -177,11 +220,15 @@ class NhentaiNetwork {
         }
       }
       logged = accessTokenReturned && _authorizationHeader() != null;
-      return logged;
+      if (!logged) return null;
+      _previousAuthState = state;
+      _refreshedAuthState = _authState;
+      return _refreshedAuthState;
     } catch (e, s) {
+      if (state != _authState) return null;
       LogManager.addLog(LogLevel.error, "Nhentai Auth",
           "refresh failed: ${safeNetworkError(e)}\n$s");
-      return false;
+      return null;
     }
   }
 
@@ -223,11 +270,19 @@ class NhentaiNetwork {
 
   Future<Res<bool>> validateLogin() async {
     await _ensureReady();
-    if (_authorizationHeader() == null && !await refreshAuthTokens()) {
-      logged = false;
-      return const Res(null, errorMessage: "missing auth token");
+    var state = _authState;
+    if (_authorizationHeader() == null) {
+      final refreshedState = await _refreshAuthTokens(state);
+      if (refreshedState == null) {
+        if (state == _authState) logged = false;
+        return const Res(null, errorMessage: "missing auth token");
+      }
+      state = refreshedState;
     }
-    final res = await _apiGet("$baseUrl/api/v2/user");
+    final res = await _apiGet("$baseUrl/api/v2/user", authState: state);
+    if (res.subData != _authState) {
+      return const Res.error("Login session changed");
+    }
     logged = res.success;
     return res.success ? const Res(true) : Res.fromErrorRes(res);
   }
@@ -268,7 +323,8 @@ class NhentaiNetwork {
     }
   }
 
-  Future<Res<dynamic>> _apiGet(String url) async {
+  Future<Res<dynamic>> _apiGet(String url,
+      {_NhentaiAuthState? authState}) async {
     await _ensureReady();
     try {
       final res = await dio.get(
@@ -276,12 +332,18 @@ class NhentaiNetwork {
         options: Options(
           responseType: ResponseType.json,
           headers: {"Accept": "application/json"},
+          extra: {if (authState != null) _authStateExtra: authState},
           validateStatus: (i) => i != null && i >= 200 && i < 300,
         ),
       );
-      return Res(_jsonData(res.data));
+      return Res(_jsonData(res.data),
+          subData: res.requestOptions.extra[_authStateExtra]);
     } catch (e) {
-      return Res(null, errorMessage: e.toString());
+      return Res(null,
+          errorMessage: e.toString(),
+          subData: e is DioException
+              ? e.requestOptions.extra[_authStateExtra]
+              : authState);
     }
   }
 
@@ -1328,9 +1390,67 @@ enum NhentaiSort {
   }
 }
 
+class _NhentaiCookieManager extends CookieManagerSql {
+  _NhentaiCookieManager(this.network, super.cookieJar);
+
+  final NhentaiNetwork network;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    if (options.uri.path.startsWith("/api/v2/")) {
+      final state = options.extra.putIfAbsent(
+          NhentaiNetwork._authStateExtra, () => network._authState);
+      if (state != network._authState) {
+        if (!options.uri.path.startsWith("/api/v2/auth/refresh") &&
+            network._wasRefreshed(state)) {
+          options.extra[NhentaiNetwork._authStateExtra] = network._authState;
+          options.headers.remove("Authorization");
+        } else {
+          handler.reject(_sessionChanged(options));
+          return;
+        }
+      }
+    }
+    super.onRequest(options, handler);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    final options = response.requestOptions;
+    if (options.extra.containsKey(NhentaiNetwork._authStateExtra) &&
+        options.extra[NhentaiNetwork._authStateExtra] != network._authState) {
+      if (network
+          ._wasRefreshed(options.extra[NhentaiNetwork._authStateExtra])) {
+        options.extra[NhentaiNetwork._authStateExtra] = network._authState;
+        handler.next(response);
+        return;
+      }
+      handler.reject(_sessionChanged(options));
+      return;
+    }
+    if (options.uri.path.startsWith("/api/v2/auth/refresh")) {
+      handler.next(response);
+      return;
+    }
+    cookieJar.saveFromResponseCookieHeader(
+        options.uri, response.headers["set-cookie"] ?? []);
+    if (options.extra.containsKey(NhentaiNetwork._authStateExtra)) {
+      options.extra[NhentaiNetwork._authStateExtra] = network._authState;
+    }
+    handler.next(response);
+  }
+
+  DioException _sessionChanged(RequestOptions options) => DioException(
+        requestOptions: options,
+        type: DioExceptionType.cancel,
+        message: "Login session changed",
+      );
+}
+
 class _NhentaiAuthInterceptor extends Interceptor {
   final NhentaiNetwork network;
-  Future<bool>? _refreshing;
+  Future<_NhentaiAuthState?>? _refreshing;
+  _NhentaiAuthState? _refreshingState;
 
   _NhentaiAuthInterceptor(this.network);
 
@@ -1367,20 +1487,22 @@ class _NhentaiAuthInterceptor extends Interceptor {
 
   Future<void> _refreshAndRetry(
       DioException err, ErrorInterceptorHandler handler) async {
-    bool refreshed;
+    _NhentaiAuthState? refreshedState;
     try {
-      refreshed = await _refreshAuthTokensOnce();
+      refreshedState = await _refreshAuthTokensOnce(
+          err.requestOptions.extra[NhentaiNetwork._authStateExtra]);
     } catch (_) {
       handler.next(err);
       return;
     }
-    if (!refreshed) {
+    if (refreshedState == null || refreshedState != network._authState) {
       handler.next(err);
       return;
     }
     try {
       final options = err.requestOptions;
       options.extra[NhentaiNetwork._authRetriedExtra] = true;
+      options.extra[NhentaiNetwork._authStateExtra] = refreshedState;
       options.headers.remove("Authorization");
       final response = await network.dio.fetch(options);
       handler.resolve(response);
@@ -1389,12 +1511,16 @@ class _NhentaiAuthInterceptor extends Interceptor {
     }
   }
 
-  Future<bool> _refreshAuthTokensOnce() {
+  Future<_NhentaiAuthState?> _refreshAuthTokensOnce(_NhentaiAuthState state) {
+    if (network._wasRefreshed(state)) {
+      return Future.value(network._authState);
+    }
     final current = _refreshing;
-    if (current != null) {
+    if (current != null && _refreshingState == state) {
       return current;
     }
-    final future = network.refreshAuthTokens();
+    final future = network._refreshAuthTokens(state);
+    _refreshingState = state;
     _refreshing = future;
     future.then((_) {
       if (identical(_refreshing, future)) {
@@ -1416,6 +1542,9 @@ class _NhentaiAuthInterceptor extends Interceptor {
     final options = response.requestOptions;
     if (!_isApiV2(options.uri) ||
         _isRefresh(options) ||
+        (options.extra[NhentaiNetwork._authStateExtra] != network._authState &&
+            !network._wasRefreshed(
+                options.extra[NhentaiNetwork._authStateExtra])) ||
         options.extra[NhentaiNetwork._authRetriedExtra] == true) {
       return false;
     }

@@ -283,6 +283,272 @@ void main() {
         adapter.requests.map((request) => request.uri.path), ['/api/v2/user']);
   });
 
+  test('Set-Cookie refresh credentials are used by the original request',
+      () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    final adapter = _Adapter((options) async {
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        return _jsonResponse(200, {}, headers: {
+          'set-cookie': [
+            'access_token=cookie-access; Domain=.nhentai.net; Path=/',
+            'refresh_token=cookie-refresh; Domain=.nhentai.net; Path=/',
+          ],
+        });
+      }
+      return _jsonResponse(
+        _authorization(options) == 'User cookie-access' ? 200 : 401,
+        {'id': 'fixture-user'},
+      );
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    final result = await network.validateLogin();
+
+    expect(result.success, isTrue);
+    expect(cookieJar.value('access_token'), 'cookie-access');
+    expect(cookieJar.value('refresh_token'), 'cookie-refresh');
+    expect(adapter.snapshots.map((request) => request.authorization), [
+      'User expired-access',
+      null,
+      'User cookie-access',
+    ]);
+  });
+
+  test('refresh failure releases the shared refresh for a later attempt',
+      () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    var refreshCalls = 0;
+    final adapter = _Adapter((options) async {
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        refreshCalls++;
+        return refreshCalls == 1
+            ? _jsonResponse(401, {'error': 'refresh rejected'})
+            : _jsonResponse(200, {'access_token': 'fresh-access'});
+      }
+      return _jsonResponse(
+        _authorization(options) == 'User fresh-access' ? 200 : 401,
+        {'id': 'fixture-user'},
+      );
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    expect((await network.validateLogin()).success, isFalse);
+    expect(network.logged, isFalse);
+    expect(adapter.requests, hasLength(2));
+    expect((await network.validateLogin()).success, isTrue);
+    expect(refreshCalls, 2);
+    expect(adapter.requests, hasLength(5));
+  });
+
+  test('an unauthorized retry does not refresh a second time', () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    final adapter = _Adapter((options) async {
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        return _jsonResponse(200, {'access_token': 'still-invalid'});
+      }
+      return _jsonResponse(401, {'error': 'unauthorized'});
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    final result = await network.validateLogin();
+
+    expect(result.success, isFalse);
+    expect(network.logged, isFalse);
+    expect(adapter.snapshots.map((request) => request.path), [
+      '/api/v2/user',
+      '/api/v2/auth/refresh',
+      '/api/v2/user',
+    ]);
+  });
+
+  test('a late 401 reuses the completed refresh without rotating tokens again',
+      () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    final favoriteStarted = Completer<void>();
+    final releaseFavorite = Completer<ResponseBody>();
+    var refreshCalls = 0;
+    final adapter = _Adapter((options) async {
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        refreshCalls++;
+        return _jsonResponse(200, {
+          'access_token': 'fresh-access',
+          'refresh_token': 'fresh-refresh',
+        });
+      }
+      if (options.uri.path.endsWith('/favorite') &&
+          _authorization(options) == 'User expired-access') {
+        favoriteStarted.complete();
+        return releaseFavorite.future;
+      }
+      return _jsonResponse(
+        _authorization(options) == 'User fresh-access' ? 200 : 401,
+        {'id': 'fixture-user'},
+      );
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    final favorite = network.favoriteComic('123', 'unused');
+    await favoriteStarted.future;
+    expect((await network.validateLogin()).success, isTrue);
+    releaseFavorite.complete(_jsonResponse(401, {}));
+
+    expect((await favorite).success, isTrue);
+    expect(refreshCalls, 1);
+    expect(
+      adapter.snapshots
+          .where((request) => request.path.endsWith('/favorite'))
+          .map((request) => request.authorization),
+      ['User expired-access', 'User fresh-access'],
+    );
+  });
+
+  test('a late success after refresh cannot restore the old token cookie',
+      () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    final favoriteStarted = Completer<void>();
+    final releaseFavorite = Completer<ResponseBody>();
+    final adapter = _Adapter((options) async {
+      if (options.uri.path.endsWith('/favorite')) {
+        favoriteStarted.complete();
+        return releaseFavorite.future;
+      }
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        return _jsonResponse(200, {'access_token': 'fresh-access'});
+      }
+      return _jsonResponse(
+        _authorization(options) == 'User fresh-access' ? 200 : 401,
+        {'id': 'fixture-user'},
+      );
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    final favorite = network.favoriteComic('123', 'unused');
+    await favoriteStarted.future;
+    expect((await network.validateLogin()).success, isTrue);
+    releaseFavorite.complete(_jsonResponse(200, {}, headers: {
+      'set-cookie': ['access_token=expired-access; Path=/'],
+    }));
+
+    expect((await favorite).success, isTrue);
+    expect(cookieJar.value('access_token'), 'fresh-access');
+  });
+
+  test('login validation accepts cookies rotated by its own response',
+      () async {
+    cookieJar.set('access_token', 'valid-access');
+    final adapter = _Adapter((options) async => _jsonResponse(200, {
+          'id': 'fixture-user'
+        }, headers: {
+          'set-cookie': ['access_token=rotated-access; Path=/'],
+        }));
+    network.dio.httpClientAdapter = adapter;
+
+    expect((await network.validateLogin()).success, isTrue);
+    expect(network.logged, isTrue);
+    expect(cookieJar.value('access_token'), 'rotated-access');
+  });
+
+  test('a queued validation uses credentials refreshed before dispatch',
+      () async {
+    cookieJar.set('access_token', 'expired-access');
+    cookieJar.set('refresh_token', 'old-refresh');
+    final validationQueued = Completer<void>();
+    final dispatchValidation = Completer<void>();
+    network.dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(onRequest: (options, handler) async {
+        if (options.uri.path == '/api/v2/user') {
+          validationQueued.complete();
+          await dispatchValidation.future;
+        }
+        handler.next(options);
+      }),
+    );
+    final adapter = _Adapter((options) async {
+      if (options.uri.path == '/api/v2/auth/refresh') {
+        return _jsonResponse(200, {'access_token': 'fresh-access'});
+      }
+      return _jsonResponse(
+        _authorization(options) == 'User fresh-access' ? 200 : 401,
+        {'id': 'fixture-user'},
+      );
+    });
+    network.dio.httpClientAdapter = adapter;
+
+    final validation = network.validateLogin();
+    await validationQueued.future;
+    expect(await network.refreshAuthTokens(), isTrue);
+    dispatchValidation.complete();
+
+    expect((await validation).success, isTrue);
+    expect(adapter.snapshots.map((request) => request.authorization),
+        [null, 'User fresh-access']);
+  });
+
+  for (final fromCookie in [false, true]) {
+    for (final replaceAccount in [false, true]) {
+      test(
+          'late refresh preserves ${replaceAccount ? 'new account' : 'logout'} '
+          '(Set-Cookie: $fromCookie)', () async {
+        cookieJar.set('access_token', 'expired-access');
+        cookieJar.set('refresh_token', 'old-refresh');
+        final refreshStarted = Completer<void>();
+        final releaseRefresh = Completer<ResponseBody>();
+        final adapter = _Adapter((options) async {
+          if (options.uri.path == '/api/v2/auth/refresh') {
+            refreshStarted.complete();
+            return releaseRefresh.future;
+          }
+          return _jsonResponse(
+            _authorization(options) == 'User expired-access' ? 401 : 200,
+            {'id': 'fixture-user'},
+          );
+        });
+        network.dio.httpClientAdapter = adapter;
+
+        final resultFuture = network.validateLogin();
+        await refreshStarted.future;
+        if (replaceAccount) {
+          cookieJar.set('access_token', 'other-access');
+          cookieJar.set('refresh_token', 'other-refresh');
+          network.logged = true;
+          expect((await network.validateLogin()).success, isTrue);
+        } else {
+          network.logout();
+        }
+        releaseRefresh.complete(fromCookie
+            ? _jsonResponse(200, {}, headers: {
+                'set-cookie': [
+                  'access_token=stale-access; Domain=.nhentai.net; Path=/',
+                  'refresh_token=stale-refresh; Domain=.nhentai.net; Path=/',
+                ],
+              })
+            : _jsonResponse(200, {
+                'access_token': 'stale-access',
+                'refresh_token': 'stale-refresh',
+              }));
+        final result = await resultFuture;
+
+        expect(result.success, isFalse);
+        expect(cookieJar.value('access_token'),
+            replaceAccount ? 'other-access' : isNull);
+        expect(cookieJar.value('refresh_token'),
+            replaceAccount ? 'other-refresh' : isNull);
+        expect(network.logged, replaceAccount);
+        expect(adapter.snapshots.map((request) => request.path), [
+          '/api/v2/user',
+          '/api/v2/auth/refresh',
+          if (replaceAccount) '/api/v2/user',
+        ]);
+      });
+    }
+  }
+
   test('refresh without a replacement access token does not retry stale auth',
       () async {
     cookieJar.set('access_token', 'expired-access');
@@ -316,11 +582,13 @@ String? _authorization(RequestOptions options) {
   return null;
 }
 
-ResponseBody _jsonResponse(int statusCode, Object value) =>
+ResponseBody _jsonResponse(int statusCode, Object value,
+        {Map<String, List<String>> headers = const {}}) =>
     ResponseBody.fromString(
       jsonEncode(value),
       statusCode,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
+        ...headers,
       },
     );
