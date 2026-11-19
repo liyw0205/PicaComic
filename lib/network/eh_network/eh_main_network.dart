@@ -34,15 +34,18 @@ class EhNetwork {
 
   static EhNetwork createEhNetwork() => EhNetwork();
 
-  late List<String> folderNames;
-
-  EhNetwork.create() {
+  EhNetwork.create({CachedNetwork Function()? cachedNetworkFactory})
+      : _cachedNetworkFactory = cachedNetworkFactory ?? CachedNetwork.new {
     getCookies(true);
     folderNames = List.from(ehentai.data["favoriteNames"] ?? []);
     if (folderNames.length != 10) {
       folderNames = List.generate(10, (index) => "Favorite $index");
     }
   }
+
+  final CachedNetwork Function() _cachedNetworkFactory;
+
+  late List<String> folderNames;
 
   ///e-hentai的url
   String get ehBaseUrl => appdata.settings[20] == "0"
@@ -310,16 +313,18 @@ class EhNetwork {
         headers: {
           "user-agent": webUA,
         });
-    var dio = CachedNetwork();
+    var dio = _cachedNetworkFactory();
     try {
       var res = await dio.get(url, options,
           cookieJar: cookieJar, expiredTime: CacheExpiredTime.no);
-      if (res.statusCode == 200) {
-        ehentai.data['name'] = "PLACEHOLDER";
-        return true;
-      } else {
-        return false;
-      }
+      if (res.statusCode != 200) return false;
+      final name = parse(res.data)
+          .querySelector("div#userlinks > p.home > b > a")
+          ?.text
+          .trim();
+      if (name == null || name.isEmpty) return false;
+      ehentai.data['name'] = name;
+      return true;
     } catch (e, s) {
       LogManager.addLog(LogLevel.error, "Network", "${e.runtimeType}\n$s");
       return false;
