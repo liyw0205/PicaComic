@@ -244,6 +244,7 @@ void main() {
     await HistoryManager().init(databasePath: path, importLegacy: false);
 
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
       home: ImageFavoritesPage(
         tileBuilder: (context, image) => Text(image.title),
       ),

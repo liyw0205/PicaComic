@@ -68,6 +68,8 @@ class ComicReadingPageLogic extends StateController {
   int _loadGeneration = 0;
   int get loadGeneration => _loadGeneration;
   bool loadInFlight = false;
+  int? _imageFavoriteGeneration;
+  bool get savingImageFavorite => _imageFavoriteGeneration == loadGeneration;
 
   void resetPreloadState() {
     readerImages.reset();

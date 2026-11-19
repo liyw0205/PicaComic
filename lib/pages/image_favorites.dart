@@ -351,7 +351,7 @@ class FavoriteImageTile extends StatelessWidget {
   }
 
   void _readWithKey(String key, String target, int ep, int page, String title,
-      Map<String, dynamic> otherInfo) async {
+      Map<String, dynamic> otherInfo) {
     switch (key) {
       case "picacg":
         App.globalTo(() => ComicReadingPage.picacg(
@@ -396,8 +396,16 @@ class FavoriteImageTile extends StatelessWidget {
         );
       case "htManga":
       case "htmanga":
+        final eps = otherInfo["eps"];
+        // Older favorites only stored chapter IDs, without display names.
+        final chapters = eps is Map
+            ? Map<String, String>.from(eps)
+            : eps is List
+                ? {for (final id in eps) id.toString(): id.toString()}
+                : null;
         App.globalTo(
-          () => ComicReadingPage.htmanga(target, title, initialPage: page),
+          () => ComicReadingPage.htmanga(target, title,
+              initialPage: page, initialEp: ep, chapters: chapters),
         );
       case "nhentai":
         App.globalTo(
@@ -412,7 +420,9 @@ class FavoriteImageTile extends StatelessWidget {
               target,
               title,
               source,
-              Map.from(otherInfo["eps"]),
+              otherInfo["eps"] == null
+                  ? null
+                  : Map<String, String>.from(otherInfo["eps"]),
             ),
             page,
             ep,

@@ -115,61 +115,53 @@ extension ToolBar on ComicReadingPage {
                       message: "收藏图片".tl,
                       child: IconButton(
                         icon: const Icon(Icons.favorite_outline),
-                        onPressed: () async {
-                          try {
-                            final id =
-                                "${logic.data.sourceKey}-${logic.data.id}";
-                            var image = await _persistentCurrentImage();
-                            if (image != null) {
-                              image = image.split("/").last;
-                              var otherInfo = <String, dynamic>{};
-                              if (logic.data.type == ReadingType.ehentai) {
-                                otherInfo["gallery"] =
-                                    (logic.data as EhReadingData)
-                                        .gallery
-                                        .toJson();
-                              } else if (logic.data.type ==
-                                  ReadingType.hitomi) {
-                                otherInfo["hitomi"] =
-                                    (readingData as HitomiReadingData)
-                                        .images
-                                        .map((e) => e.toMap())
-                                        .toList();
-                                otherInfo["galleryId"] = readingData.id;
-                              } else if (logic.data.type == ReadingType.jm) {
-                                otherInfo["jmEpNames"] =
-                                    readingData.eps!.values.toList();
-                                otherInfo["epsId"] = readingData.eps!.keys
-                                    .elementAt(logic.order - 1);
-                                otherInfo["bookId"] = readingData.id;
-                              }
-                              if (logic.data.type != ComicType.other) {
-                                otherInfo["eps"] =
-                                    readingData.eps?.keys.toList() ?? [];
-                              } else {
-                                otherInfo["eps"] = readingData.eps;
-                              }
-                              otherInfo["url"] = logic.urls[logic.index - 1];
-                              var favorite = ImageFavorite(
-                                  id,
-                                  image,
-                                  readingData.title,
-                                  logic.order,
-                                  logic.index,
-                                  otherInfo);
-                              if (!ImageFavoriteManager.exist(
-                                  id, logic.order, logic.index)) {
-                                await ImageFavoriteManager.add(favorite);
-                                showToast(message: "已添加至图片收藏".tl);
-                              } else {
-                                await ImageFavoriteManager.delete(favorite);
-                                showToast(message: "已取消图片收藏".tl);
-                              }
-                            }
-                          } catch (e) {
-                            showToast(message: e.toString());
-                          }
-                        },
+                        onPressed: logic.savingImageFavorite
+                            ? null
+                            : () async {
+                                if (logic.savingImageFavorite ||
+                                    !_isCurrentReader(logic)) {
+                                  return;
+                                }
+                                final chapter = logic.order;
+                                final generation = logic.loadGeneration;
+                                bool isCurrent() =>
+                                    _isCurrentReader(logic) &&
+                                    chapter == logic.order &&
+                                    generation == logic.loadGeneration;
+                                logic._imageFavoriteGeneration = generation;
+                                logic.update(["ToolBar"]);
+                                try {
+                                  final favorite =
+                                      await _persistentCurrentImage();
+                                  if (favorite != null) {
+                                    if (!ImageFavoriteManager.exist(favorite.id,
+                                        favorite.ep, favorite.page)) {
+                                      await ImageFavoriteManager.add(favorite);
+                                      if (isCurrent()) {
+                                        showToast(message: "已添加至图片收藏".tl);
+                                      }
+                                    } else {
+                                      await ImageFavoriteManager.delete(
+                                          favorite);
+                                      if (isCurrent()) {
+                                        showToast(message: "已取消图片收藏".tl);
+                                      }
+                                    }
+                                  }
+                                } catch (e) {
+                                  if (isCurrent()) {
+                                    showToast(message: e.toString());
+                                  }
+                                } finally {
+                                  if (logic._imageFavoriteGeneration ==
+                                      generation) {
+                                    logic._imageFavoriteGeneration = null;
+                                  }
+                                  if (_isCurrentReader(logic)) {
+                                    logic.update(["ToolBar"]);
+                                  }
+                                }
+                              },
                       ),
                     ),
                     Tooltip(

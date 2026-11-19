@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_image_gallery_saver/flutter_image_gallery_saver.dart';
 import 'package:pica_comic/components/components.dart';
@@ -42,10 +43,15 @@ Future<void> saveImage(File file) async {
 }
 
 Future<String> persistentCurrentImage(File file) async {
-  var newFile = File("${App.dataPath}/images/${file.path.split('/').last}");
+  final data = await file.readAsBytes();
+  final name = file.name;
+  final extensionIndex = name.lastIndexOf('.');
+  final extension = extensionIndex > 0 ? name.substring(extensionIndex) : '';
+  final digest = sha256.convert(data);
+  final newFile = File("${App.dataPath}/images/$digest$extension");
   if (!(await newFile.exists())) {
     await newFile.parent.create(recursive: true);
-    await newFile.writeAsBytes(await file.readAsBytes(), flush: true);
+    await newFile.writeAsBytes(data, flush: true);
   }
   return newFile.path;
 }

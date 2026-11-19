@@ -531,7 +531,12 @@ class ComicReadingPage extends StatelessWidget {
   /// Select a image form screen, to share or download
   Future<int?> selectImage() async {
     var logic = StateController.find<ComicReadingPageLogic>();
-    var items = logic.itemScrollListener.itemPositions.value.toList();
+    var items = logic.itemScrollListener.itemPositions.value
+        .where((item) => item.index >= 0 && item.index < logic.urls.length)
+        .toList();
+    if (items.isEmpty) {
+      return null;
+    }
     if (items.length == 1) {
       return items[0].index;
     }
@@ -587,10 +592,12 @@ class ComicReadingPage extends StatelessWidget {
 
   bool _isCurrentReader(ComicReadingPageLogic logic) {
     return !logic.isDisposed &&
+        identical(logic.data, readingData) &&
         identical(StateController.findOrNull<ComicReadingPageLogic>(), logic);
   }
 
-  Future<File?> _loadCurrentImage(ComicReadingPageLogic logic) async {
+  Future<({File file, int chapter, int page, String url, int generation})?>
+      _loadCurrentImage(ComicReadingPageLogic logic) async {
     if (!_isCurrentReader(logic)) {
       return null;
     }
@@ -611,44 +618,87 @@ class ComicReadingPage extends StatelessWidget {
       return null;
     }
 
-    final file = await _getFileFromStream(
-        readingData.loadImage(chapter, index, urls[index]));
+    final url = urls[index];
+    final file =
+        await _getFileFromStream(readingData.loadImage(chapter, index, url));
     if (!_isCurrentReader(logic) ||
         chapter != logic.order ||
         generation != logic.loadGeneration) {
       return null;
     }
-    return file;
+    return (
+      file: file,
+      chapter: chapter,
+      page: index + 1,
+      url: url,
+      generation: generation,
+    );
   }
 
   Future<void> share() async {
     final logic = StateController.find<ComicReadingPageLogic>();
-    final file = await _loadCurrentImage(logic);
-    if (file == null) {
+    final image = await _loadCurrentImage(logic);
+    if (image == null) {
       return;
     }
 
-    await shareImage(file);
+    await shareImage(image.file);
   }
 
-  Future<String?> _persistentCurrentImage() async {
+  Future<ImageFavorite?> _persistentCurrentImage() async {
     final logic = StateController.find<ComicReadingPageLogic>();
-    final file = await _loadCurrentImage(logic);
-    if (file == null) {
+    final image = await _loadCurrentImage(logic);
+    if (image == null) {
       return null;
     }
 
-    return persistentCurrentImage(file);
+    // Keep the selected image's position through file I/O and reader movement.
+    final otherInfo = <String, dynamic>{};
+    if (readingData is EhReadingData) {
+      otherInfo['gallery'] = (readingData as EhReadingData).gallery.toJson();
+    } else if (readingData is HitomiReadingData) {
+      otherInfo['hitomi'] = (readingData as HitomiReadingData)
+          .images
+          .map((e) => e.toMap())
+          .toList();
+      otherInfo['galleryId'] = readingData.id;
+    } else if (readingData is JmReadingData) {
+      otherInfo['jmEpNames'] = readingData.eps!.values.toList();
+      otherInfo['epsId'] =
+          readingData.eps!.keys.elementAtOrNull(image.chapter - 1) ??
+              readingData.id;
+      otherInfo['bookId'] = readingData.id;
+    }
+    otherInfo['eps'] = readingData.type == ComicType.other ||
+            readingData.type == ComicType.htManga
+        ? readingData.eps
+        : readingData.eps?.keys.toList() ?? [];
+    otherInfo['url'] = image.url;
+
+    final path = await persistentCurrentImage(image.file);
+    if (!_isCurrentReader(logic) ||
+        image.chapter != logic.order ||
+        image.generation != logic.loadGeneration) {
+      return null;
+    }
+    return ImageFavorite(
+      '${readingData.sourceKey}-${readingData.id}',
+      path.split('/').last,
+      readingData.title,
+      image.chapter,
+      image.page,
+      otherInfo,
+    );
   }
 
   Future<void> saveCurrentImage() async {
     final logic = StateController.find<ComicReadingPageLogic>();
-    final file = await _loadCurrentImage(logic);
-    if (file == null) {
+    final image = await _loadCurrentImage(logic);
+    if (image == null) {
       return;
     }
 
-    await saveImage(file);
+    await saveImage(image.file);
   }
 
   Widget? buildEpChangeButton(ComicReadingPageLogic logic) {
