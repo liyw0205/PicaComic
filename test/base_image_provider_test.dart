@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
+import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
+import 'package:pica_comic/foundation/image_manager.dart';
 
 const List<int> _validPng = <int>[
   0x89,
@@ -193,6 +195,59 @@ Future<void> _expectImage(ImageStream stream) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('a cancelled old load cannot evict a same-key replacement', () async {
+    BaseImageProvider.clearCache();
+    final oldBytes = Completer<Uint8List>();
+    final newBytes = Completer<Uint8List>();
+    const key = 'stale-image-load';
+    final oldProvider = _TestImageProvider(key, () => oldBytes.future);
+    final newProvider = _TestImageProvider(key, () => newBytes.future);
+    final oldError =
+        _expectError(oldProvider.resolve(ImageConfiguration.empty));
+    await oldProvider.evict();
+    final newStream = newProvider.resolve(ImageConfiguration.empty);
+    final newImage = _expectImage(newStream);
+
+    try {
+      oldBytes.completeError(const ImageTaskCancelledException());
+      expect(await oldError, isA<ImageTaskCancelledException>());
+      await Future<void>.delayed(Duration.zero);
+      expect(
+          PaintingBinding.instance.imageCache.statusForKey(newProvider).pending,
+          isTrue,
+          reason: 'a late old failure must leave the replacement pending');
+      expect(newProvider.resolve(ImageConfiguration.empty).completer,
+          same(newStream.completer));
+    } finally {
+      newBytes.complete(Uint8List.fromList(_validPng));
+      await newImage;
+      await newProvider.evict();
+      BaseImageProvider.clearCache();
+    }
+  });
+
+  test('a released load still reports errors other than cancellation',
+      () async {
+    final bytes = Completer<Uint8List>();
+    final provider =
+        _TestImageProvider('released-real-error', () => bytes.future);
+    final stream = provider.resolve(ImageConfiguration.empty);
+    final listener = ImageStreamListener((info, _) => info.dispose());
+    stream.addListener(listener);
+    stream.removeListener(listener);
+    await provider.evict();
+    final errors = <FlutterErrorDetails>[];
+    final previousHandler = FlutterError.onError;
+    FlutterError.onError = errors.add;
+    try {
+      bytes.completeError(const BadRequestException('fixture HTTP error'));
+      await Future<void>.delayed(Duration.zero);
+      expect(errors.single.exception, isA<BadRequestException>());
+    } finally {
+      FlutterError.onError = previousHandler;
+    }
+  });
 
   test('invalid image bytes are not retained and the same key can recover',
       () async {

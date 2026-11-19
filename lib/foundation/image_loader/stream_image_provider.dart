@@ -54,8 +54,8 @@ class StreamImageProvider extends BaseImageProvider<StreamImageProvider> {
             cumulativeBytesLoaded: progress.currentBytes,
             expectedTotalBytes: progress.expectedBytes));
       }
-      if (cancellation?.isCancelled ??
-          false || taskScope?.isCancelled == true) {
+      if ((cancellation?.isCancelled ?? false) ||
+          taskScope?.isCancelled == true) {
         throw const ImageTaskCancelledException();
       }
       if (finishProgress == null) {

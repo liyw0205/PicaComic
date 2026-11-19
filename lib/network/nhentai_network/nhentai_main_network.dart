@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/foundation/cache_manager.dart';
 import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/network/cloudflare.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
@@ -1171,11 +1173,51 @@ class NhentaiNetwork {
     }
   }
 
+  String _readerPagesKey(String id) => 'nhentai-reader-pages:$baseUrl:$id';
+
+  Future<List<String>?> _readReaderPages(String key) async {
+    try {
+      final path = await CacheManager().findCache(key);
+      if (path == null) return null;
+      final data = jsonDecode(await File(path).readAsString());
+      if (data is List &&
+          data.isNotEmpty &&
+          data.every((value) {
+            if (value is! String) return false;
+            final uri = Uri.tryParse(value);
+            return uri != null &&
+                const {'http', 'https'}.contains(uri.scheme) &&
+                uri.host.isNotEmpty;
+          })) {
+        return data.cast<String>().toList();
+      }
+    } catch (error) {
+      Log.warning(
+          'Nhentai Cache', 'Page list read failed: ${error.runtimeType}');
+    }
+    return null;
+  }
+
+  Future<void> _cacheReaderPages(String key, List<String> images) async {
+    if (images.isEmpty) return;
+    try {
+      await CacheManager()
+          .writeCache(key, Uint8List.fromList(utf8.encode(jsonEncode(images))));
+    } catch (error) {
+      Log.warning(
+          'Nhentai Cache', 'Page list write failed: ${error.runtimeType}');
+    }
+  }
+
   Future<Res<List<String>>> getImages(String id) async {
+    final cacheKey = _readerPagesKey(id);
+    final cached = await _readReaderPages(cacheKey);
+    if (cached != null) return Res(cached);
     final apiRes = await _apiGet("$baseUrl/api/v2/galleries/$id");
     if (apiRes.success) {
       final images = _parseApiImages(apiRes.data);
       if (images.isNotEmpty) {
+        await _cacheReaderPages(cacheKey, images);
         return Res(images);
       }
     }
@@ -1219,6 +1261,7 @@ class NhentaiNetwork {
         return const Res.error("图片列表为空");
       }
 
+      await _cacheReaderPages(cacheKey, images);
       return Res(images);
     } catch (e, s) {
       LogManager.addLog(

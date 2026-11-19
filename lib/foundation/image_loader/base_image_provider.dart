@@ -17,8 +17,10 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
   @override
   ImageStreamCompleter loadImage(T key, ImageDecoderCallback decode) {
     final chunkEvents = StreamController<ImageChunkEvent>();
-    return MultiFrameImageStreamCompleter(
-      codec: _loadBufferAsync(key, chunkEvents, decode),
+    final load = Object();
+    _pendingLoads[key] = load;
+    return _CancellableImageStreamCompleter(
+      codec: _loadBufferAsync(key, chunkEvents, decode, load),
       chunkEvents: chunkEvents.stream,
       scale: 1.0,
       informationCollector: () sync* {
@@ -35,6 +37,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
     T key,
     StreamController<ImageChunkEvent> chunkEvents,
     ImageDecoderCallback decode,
+    Object load,
   ) async {
     final cancellation = ImageLoadCancellation();
     try {
@@ -85,7 +88,7 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
       }
 
       if (stop) {
-        throw Exception("Image loading is stopped");
+        throw const ImageTaskCancelledException();
       }
 
       if (data!.isEmpty) {
@@ -117,14 +120,21 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
       }
     } catch (e) {
       scheduleMicrotask(() {
-        PaintingBinding.instance.imageCache.evict(key);
+        // A released load may fail after the same key has started loading again.
+        if (identical(_pendingLoads[key], load)) {
+          PaintingBinding.instance.imageCache.evict(key);
+        }
       });
       rethrow;
     } finally {
       chunkEvents.close();
+      scheduleMicrotask(() {
+        if (identical(_pendingLoads[key], load)) _pendingLoads.remove(key);
+      });
     }
   }
 
+  static final _pendingLoads = <Object, Object>{};
   static final ByteLruCache _cache = ByteLruCache(limit: 50 * 1024 * 1024);
 
   static void clearCache() {
@@ -163,6 +173,38 @@ abstract class BaseImageProvider<T extends BaseImageProvider<T>>
 }
 
 typedef FileDecoderCallback = Future<ui.Codec> Function(Uint8List);
+
+class _CancellableImageStreamCompleter extends MultiFrameImageStreamCompleter {
+  _CancellableImageStreamCompleter({
+    required super.codec,
+    required super.scale,
+    super.chunkEvents,
+    super.informationCollector,
+  });
+
+  @override
+  void reportError({
+    DiagnosticsNode? context,
+    required Object exception,
+    StackTrace? stack,
+    InformationCollector? informationCollector,
+    bool silent = false,
+  }) {
+    // Releasing an obsolete reader page is an expected cancellation.
+    if (!hasListeners &&
+        (exception is ImageTaskCancelledException ||
+            (exception is DioException && CancelToken.isCancel(exception)))) {
+      return;
+    }
+    super.reportError(
+      context: context,
+      exception: exception,
+      stack: stack,
+      informationCollector: informationCollector,
+      silent: silent,
+    );
+  }
+}
 
 /// Cancellation hooks owned by one BaseImageProvider load.
 ///

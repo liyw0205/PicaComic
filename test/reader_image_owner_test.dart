@@ -166,6 +166,104 @@ void main() {
     expect(secondCancelled, isTrue);
   });
 
+  test('scope cancellation is recognised with a live load cancellation token',
+      () async {
+    final scope = ImageTaskScope();
+    final source = StreamController<DownloadProgress>();
+    final provider = StreamImageProvider(
+      () => source.stream,
+      'scope-cancelled-stream',
+      taskScope: scope,
+    );
+    final chunks = StreamController<ImageChunkEvent>();
+    final events = chunks.stream.listen((_) {});
+    final result = expectLater(
+      provider.loadWithCancellation(chunks, ImageLoadCancellation()),
+      throwsA(isA<ImageTaskCancelledException>()),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await scope.cancel();
+    await result;
+    await source.close();
+    await chunks.close();
+    await events.cancel();
+  });
+
+  testWidgets('rapid return starts a new load before old release finishes',
+      (tester) async {
+    final controller = ReaderImageController();
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    await tester.runAsync(() async {
+      final release = Completer<void>();
+      final oldSource = StreamController<DownloadProgress>(
+        onCancel: () => release.future,
+      );
+      final newSource = StreamController<DownloadProgress>();
+      var builds = 0;
+      controller.configure(
+        context: context,
+        imageCount: 40,
+        firstVisible: 0,
+        visibleCount: 1,
+        preloadCount: 0,
+        createProvider: (index, scope) => StreamImageProvider(
+          () => builds++ == 0 ? oldSource.stream : newSource.stream,
+          'rapid-return-$index',
+          taskScope: scope,
+        ),
+      );
+      final oldStream =
+          controller.imageFor(0).resolve(ImageConfiguration.empty);
+      final oldListener =
+          ImageStreamListener((info, _) => info.dispose(), onError: (_, __) {});
+      oldStream.addListener(oldListener);
+      await Future<void>.delayed(Duration.zero);
+      controller.updateWindow(20);
+      controller.updateWindow(0);
+      final provider = controller.imageFor(0);
+      final newStream = provider.resolve(ImageConfiguration.empty);
+      final received = Completer<void>();
+      final newListener = ImageStreamListener((info, _) {
+        info.dispose();
+        if (!received.isCompleted) received.complete();
+      }, onError: (Object error, StackTrace? stack) {
+        if (!received.isCompleted) received.completeError(error, stack);
+      });
+      newStream.addListener(newListener);
+      try {
+        expect(newStream.completer, isNot(same(oldStream.completer)),
+            reason: 'the new reader scope must not inherit cancelled work');
+        await Future<void>.delayed(Duration.zero);
+        release.complete();
+        await controller.waitForIdle();
+        final bytes = Uint8List.fromList(
+            image.encodePng(image.Image(width: 1, height: 1)));
+        newSource.add(DownloadProgress(1, 1, '', '', bytes));
+        await newSource.close();
+        await received.future.timeout(const Duration(seconds: 5));
+        expect(provider.resolve(ImageConfiguration.empty).completer,
+            same(newStream.completer));
+      } finally {
+        if (!release.isCompleted) release.complete();
+        oldStream.removeListener(oldListener);
+        newStream.removeListener(newListener);
+        controller.dispose();
+        await controller.waitForIdle();
+        await oldSource.close();
+        await newSource.close();
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
+        BaseImageProvider.clearCache();
+      }
+    });
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('late image error after widget disposal is ignored',
       (tester) async {
     final provider = _LateErrorImageProvider();
@@ -177,6 +275,35 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
+  });
+
+  test('releasing a pending reader image has no unhandled cancellation',
+      () async {
+    final source = StreamController<DownloadProgress>();
+    final scope = ImageTaskScope();
+    final provider = StreamImageProvider(
+      () => source.stream,
+      'reader-unmounted-cancellation',
+      taskScope: scope,
+    );
+    final stream = provider.resolve(ImageConfiguration.empty);
+    final listener =
+        ImageStreamListener((info, _) => info.dispose(), onError: (_, __) {});
+    stream.addListener(listener);
+    await Future<void>.delayed(Duration.zero);
+    final errors = <FlutterErrorDetails>[];
+    final previousHandler = FlutterError.onError;
+    FlutterError.onError = errors.add;
+    try {
+      stream.removeListener(listener);
+      await scope.cancel();
+      await provider.evict();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(errors, isEmpty);
+    } finally {
+      FlutterError.onError = previousHandler;
+      await source.close();
+    }
   });
 
   testWidgets('jump and exit release obsolete preloads without automatic retry',
