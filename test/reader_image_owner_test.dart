@@ -75,6 +75,14 @@ class _DeferredLoadingPhysics extends ScrollPhysics {
       deferred.value;
 }
 
+Future<void> _pumpUntil(WidgetTester tester, bool Function() done) async {
+  for (var frame = 0; frame < 30 && !done(); frame++) {
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+    await tester.pump();
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -451,6 +459,195 @@ void main() {
 
     expect(tester.takeException(), isNull);
   });
+
+  for (final failWhileScrolling in [true, false]) {
+    testWidgets(
+        'visible image recovers when it fails ${failWhileScrolling ? 'during' : 'after'} scrolling',
+        (tester) async {
+      final scroll = ScrollController();
+      final sources = <StreamController<DownloadProgress>>[];
+      final provider = StreamImageProvider(() {
+        final source = StreamController<DownloadProgress>();
+        sources.add(source);
+        return source.stream;
+      }, 'visible-scroll-recovery-$failWhileScrolling');
+      addTearDown(() {
+        scroll.dispose();
+        for (final source in sources) {
+          unawaited(source.close());
+        }
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
+        BaseImageProvider.clearCache();
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: SingleChildScrollView(
+          controller: scroll,
+          child: ComicImage(image: provider, width: 400, height: 1600),
+        ),
+      ));
+      expect(sources, hasLength(1));
+      final gesture = await tester.startGesture(const Offset(200, 350));
+      await gesture.moveBy(const Offset(0, -80));
+      await tester.pump();
+      expect(scroll.position.isScrollingNotifier.value, isTrue);
+      if (!failWhileScrolling) {
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
+      sources.first.addError(const ImageTaskCancelledException());
+      unawaited(sources.first.close());
+      await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+      expect(sources.first.hasListener, isFalse);
+      expect(find.text('Retry'), findsOneWidget,
+          reason: 'the failure must reach the mounted image');
+      await tester.pump(const Duration(milliseconds: 300));
+      if (failWhileScrolling) {
+        expect(sources, hasLength(1),
+            reason: 'recovery must wait until the drag ends');
+        await gesture.up();
+      }
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+
+      expect(sources, hasLength(2),
+          reason: 'an idle visible image must subscribe to a fresh load');
+      final bytes = Uint8List.fromList(
+          image.encodePng(image.Image(width: 100, height: 400)));
+      sources.last.add(DownloadProgress(1, 1, '', '', bytes));
+      unawaited(sources.last.close());
+      await _pumpUntil(
+          tester, () => find.byType(RawImage).evaluate().isNotEmpty);
+      await tester.pumpAndSettle();
+      expect(find.byType(RawImage), findsOneWidget);
+      expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+      expect(find.text('Retry'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('visible image recovery is bounded and rearmed by another drag',
+      (tester) async {
+    final scroll = ScrollController();
+    var loads = 0;
+    final provider = StreamImageProvider(() {
+      loads++;
+      return Stream.error(const ImageTaskCancelledException());
+    }, 'visible-bounded-recovery');
+    addTearDown(() {
+      scroll.dispose();
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: SingleChildScrollView(
+        controller: scroll,
+        child: ComicImage(image: provider, width: 400, height: 1600),
+      ),
+    ));
+    await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+    expect(loads, 1);
+    await tester.pump(const Duration(milliseconds: 300));
+    await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+    expect(loads, 2);
+    await tester.pump(const Duration(seconds: 2));
+    expect(loads, 2, reason: 'a persistent error must not create a retry loop');
+
+    final gesture = await tester.startGesture(const Offset(200, 350));
+    await gesture.moveBy(const Offset(0, -80));
+    await tester.pump();
+    expect(scroll.position.isScrollingNotifier.value, isTrue);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(loads, 2);
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 300));
+    await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+    expect(loads, 3,
+        reason: 'a new drag must allow an exhausted page to recover');
+    await tester.pump(const Duration(seconds: 2));
+    expect(loads, 3);
+    expect(find.text('Retry'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final replace in [true, false]) {
+    testWidgets(
+        'pending recovery is cancelled on ${replace ? 'replacement' : 'exit'}',
+        (tester) async {
+      var oldLoads = 0;
+      var newLoads = 0;
+      final oldProvider = StreamImageProvider(() {
+        oldLoads++;
+        return Stream.error(const ImageTaskCancelledException());
+      }, 'visible-obsolete-recovery-$replace');
+      final source = StreamController<DownloadProgress>();
+      final newProvider = StreamImageProvider(() {
+        newLoads++;
+        return source.stream;
+      }, 'visible-current-recovery-$replace');
+      Widget view(ImageProvider provider) => MaterialApp(
+            home: ComicImage(image: provider, width: 100, height: 120),
+          );
+      addTearDown(() {
+        unawaited(source.close());
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
+        BaseImageProvider.clearCache();
+      });
+      await tester.pumpWidget(view(oldProvider));
+      await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+      expect(oldLoads, 1);
+      final state = tester.state(find.byType(ComicImage));
+      await tester.pumpWidget(replace ? view(newProvider) : const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
+      expect(oldLoads, 1);
+      expect(newLoads, replace ? 1 : 0);
+      if (replace) expect(tester.state(find.byType(ComicImage)), same(state));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final permanent in [true, false]) {
+    testWidgets(
+        'visible recovery skips ${permanent ? 'permanent errors' : 'cancelled scopes'}',
+        (tester) async {
+      var loads = 0;
+      final scope = ImageTaskScope();
+      final source = StreamController<DownloadProgress>();
+      final provider = StreamImageProvider(() {
+        loads++;
+        return permanent
+            ? Stream.error(const BadRequestException('Not found'))
+            : source.stream;
+      }, 'visible-no-recovery-$permanent', taskScope: scope);
+      addTearDown(() {
+        unawaited(scope.cancel());
+        unawaited(source.close());
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
+        BaseImageProvider.clearCache();
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: ComicImage(image: provider, width: 100, height: 120),
+      ));
+      if (!permanent) await tester.runAsync(scope.cancel);
+      await _pumpUntil(tester, () => find.text('Retry').evaluate().isNotEmpty);
+      expect(find.text('Retry'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      expect(loads, 1);
+      await tester.pumpWidget(const SizedBox());
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   test('releasing a pending reader image has no unhandled cancellation',
       () async {

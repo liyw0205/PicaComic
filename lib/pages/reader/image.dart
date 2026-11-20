@@ -80,6 +80,9 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   late DisposableBuildContext<State<ComicImage>> _scrollAwareContext;
   Object? _lastException;
   ImageStreamCompleterHandle? _completerHandle;
+  ScrollPosition? _scrollPosition;
+  Timer? _retryTimer;
+  int _automaticRetries = 0;
 
   static final Map<int, Size> _cache = {};
 
@@ -96,6 +99,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   void dispose() {
     assert(_imageStream != null);
     WidgetsBinding.instance.removeObserver(this);
+    _scrollPosition?.isScrollingNotifier.removeListener(_handleScrollActivity);
     _stopListeningToStream();
     _completerHandle?.dispose();
     _scrollAwareContext.dispose();
@@ -106,6 +110,13 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     _updateInvertColors();
+    final position = Scrollable.maybeOf(context)?.position;
+    if (!identical(position, _scrollPosition)) {
+      _scrollPosition?.isScrollingNotifier
+          .removeListener(_handleScrollActivity);
+      _scrollPosition = position;
+      position?.isScrollingNotifier.addListener(_handleScrollActivity);
+    }
     _resolveImage();
 
     if (TickerMode.of(context)) {
@@ -122,6 +133,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     super.didUpdateWidget(oldWidget);
     // A fresh reader scope can replace cancelled work with the same cache key.
     if (!identical(widget.image, oldWidget.image)) {
+      _automaticRetries = 0;
       _resolveImage();
     }
   }
@@ -146,6 +158,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   }
 
   void _resolveImage() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
     // Stop deferred callbacks from resolving a superseded reader scope.
     _scrollAwareContext.dispose();
     _scrollAwareContext = DisposableBuildContext<State<ComicImage>>(this);
@@ -163,6 +177,43 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     _updateSourceStream(newStream);
   }
 
+  void _handleScrollActivity() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    if (_scrollPosition?.isScrollingNotifier.value ?? false) {
+      _automaticRetries = 0;
+    } else {
+      _scheduleRetry();
+    }
+  }
+
+  bool get _canRetry {
+    if (!mounted ||
+        !_isListeningToStream ||
+        _lastException == null ||
+        _lastException is BadRequestException ||
+        _automaticRetries >= 1 ||
+        (_scrollPosition?.isScrollingNotifier.value ?? false)) {
+      return false;
+    }
+    ImageProvider provider = widget.image;
+    if (provider is ResizeImage) provider = provider.imageProvider;
+    return provider is! FileImageProvider &&
+        !(provider is StreamImageProvider &&
+            provider.taskScope?.isCancelled == true);
+  }
+
+  void _scheduleRetry() {
+    if (_retryTimer != null || !_canRetry) return;
+    // Visible images are not covered by the controller's preload retry queue.
+    _retryTimer = Timer(const Duration(milliseconds: 250), () {
+      _retryTimer = null;
+      if (!_canRetry) return;
+      _automaticRetries++;
+      _resolveImage();
+    });
+  }
+
   ImageStreamListener? _imageStreamListener;
   ImageStreamListener _getListener({bool recreateListener = false}) {
     if (_imageStreamListener == null || recreateListener) {
@@ -175,6 +226,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
           setState(() {
             _lastException = error;
           });
+          _scheduleRetry();
         },
       );
     }
@@ -188,6 +240,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     }
     final size = Size(
         imageInfo.image.width.toDouble(), imageInfo.image.height.toDouble());
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _cache[widget.image.hashCode] = size;
     widget.onImageSize?.call(size);
     setState(() {
@@ -255,6 +309,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     _completerHandle = null;
 
     _isListeningToStream = true;
+    _scheduleRetry();
   }
 
   /// Stops listening to the image stream, if this state object has attached a
@@ -265,6 +320,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   /// to true, which create [ImageStreamCompleterHandle] to keep the completer
   /// alive and is compatible with the [TickerMode] being off.
   void _stopListeningToStream({bool keepStreamAlive = false}) {
+    _retryTimer?.cancel();
+    _retryTimer = null;
     if (!_isListeningToStream) {
       return;
     }
