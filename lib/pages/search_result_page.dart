@@ -765,8 +765,16 @@ class _SearchOptionsState extends State<_SearchOptions> {
       );
     } else {
       final searchOptions = data.searchOptions ?? <SearchOptions>[];
+      final languageIndex = int.tryParse(appdata.settings[69]) ?? 0;
       for (int i = 0; i < searchOptions.length; i++) {
         final option = searchOptions[i];
+        if (shouldHideSourceLanguageOption(
+          label: option.label,
+          enableLanguageFilter: data.enableLanguageFilter,
+          languageIndex: languageIndex,
+        )) {
+          continue;
+        }
         children.add(ListTile(
           title: Text(option.label),
         ));

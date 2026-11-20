@@ -9,6 +9,7 @@ import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/foundation/pair.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/network_logging.dart';
+import 'package:pica_comic/network/search_language.dart';
 import 'package:pica_comic/pages/comic_page.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/app_links.dart';
@@ -636,8 +637,16 @@ class PreSearchPage extends StatelessWidget {
           );
         } else {
           final searchOptions = searchData.searchOptions ?? <SearchOptions>[];
+          final languageIndex = int.tryParse(appdata.settings[69]) ?? 0;
           for (int i = 0; i < searchOptions.length; i++) {
             final option = searchOptions[i];
+            if (shouldHideSourceLanguageOption(
+              label: option.label,
+              enableLanguageFilter: searchData.enableLanguageFilter,
+              languageIndex: languageIndex,
+            )) {
+              continue;
+            }
             children.add(ListTile(
               title: Text(option.label.tl),
             ));

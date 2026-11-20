@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,13 @@ Future<void> _finishSearchTransition(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
   await tester.pump();
+}
+
+Future<void> _openSearchOptionsDialog(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.more_horiz));
+  await _finishSearchTransition(tester);
+  await tester.tap(find.text('搜索选项'));
+  await _finishSearchTransition(tester);
 }
 
 void main() {
@@ -127,6 +135,119 @@ void main() {
       SearchResultPage.updateDefaultLanguage(1);
       await tester.pump();
       expect(find.text('artist:test language:japanese'), findsOneWidget);
+    });
+
+    ComicSource languageOptionsSource({required bool enableLanguageFilter}) =>
+        ComicSource.named(
+          name: 'Language options fixture',
+          key: 'language-options-fixture',
+          filePath: 'test',
+          searchPageData: SearchPageData.named(
+            enableLanguageFilter: enableLanguageFilter,
+            searchOptions: [
+              SearchOptions(
+                  LinkedHashMap.of({'recent': 'Recent', 'popular': 'Popular'}),
+                  'Sort'),
+              SearchOptions(
+                  LinkedHashMap.of({
+                    'chinese': 'Source Chinese',
+                    'english': 'Source English',
+                  }),
+                  '语言'),
+              SearchOptions(
+                  LinkedHashMap.of(
+                      {'low': 'Low quality', 'high': 'High quality'}),
+                  'Quality'),
+            ],
+            customResultsBuilder: (keyword, options, header) =>
+                CustomScrollView(
+              slivers: [
+                header,
+                SliverToBoxAdapter(child: Text(options.join('|'))),
+              ],
+            ),
+          ),
+        );
+
+    testWidgets(
+        'automatic language hides the source language option without shifting indices',
+        (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final languageSource = languageOptionsSource(enableLanguageFilter: true);
+      ComicSource.sources = [languageSource];
+      appdata.settings[69] = '3';
+
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: SearchResultPage(
+          keyword: 'query',
+          sourceKey: languageSource.key,
+        ),
+      ));
+      await _openSearchOptionsDialog(tester);
+
+      expect(find.text('Source Chinese'), findsNothing);
+      expect(find.text('Quality'), findsOneWidget);
+      await tester.tap(find.text('High quality'));
+      await tester.tap(find.text('确认'));
+      await _finishSearchTransition(tester);
+      expect(find.text('recent|chinese|high'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    for (final setting in ['0', '4', 'invalid']) {
+      testWidgets('source language option remains visible for setting $setting',
+          (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final languageSource =
+            languageOptionsSource(enableLanguageFilter: true);
+        ComicSource.sources = [languageSource];
+        appdata.settings[69] = setting;
+
+        await tester.pumpWidget(MaterialApp(
+          theme: ThemeData(splashFactory: NoSplash.splashFactory),
+          home: SearchResultPage(
+            keyword: 'query',
+            sourceKey: languageSource.key,
+          ),
+        ));
+        await _openSearchOptionsDialog(tester);
+
+        expect(find.text('Source Chinese'), findsOneWidget);
+        expect(find.text('语言'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
+
+    testWidgets('unsupported source keeps its language option', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final languageSource = languageOptionsSource(enableLanguageFilter: false);
+      ComicSource.sources = [languageSource];
+      appdata.settings[69] = '1';
+
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(splashFactory: NoSplash.splashFactory),
+        home: SearchResultPage(
+          keyword: 'query',
+          sourceKey: languageSource.key,
+        ),
+      ));
+      await _openSearchOptionsDialog(tester);
+
+      expect(find.text('Source Chinese'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
     });
   });
 

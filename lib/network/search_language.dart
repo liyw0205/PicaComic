@@ -1,5 +1,15 @@
 const searchLanguages = ['chinese', 'english', 'japanese'];
 
+bool shouldHideSourceLanguageOption({
+  required String label,
+  required bool enableLanguageFilter,
+  required int languageIndex,
+}) =>
+    enableLanguageFilter &&
+    label == '语言' &&
+    languageIndex >= 1 &&
+    languageIndex <= searchLanguages.length;
+
 String withDefaultSearchLanguage(String keyword, int index,
     {bool enabled = true}) {
   keyword = keyword.trim();

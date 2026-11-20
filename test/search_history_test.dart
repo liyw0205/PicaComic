@@ -220,6 +220,69 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets(
+      'presearch hides an automatically applied source language without shifting options',
+      (tester) async {
+    final languageSource = ComicSource.named(
+      name: 'Language options fixture',
+      key: 'language-options-fixture',
+      filePath: 'test',
+      searchPageData: SearchPageData.named(
+        enableLanguageFilter: true,
+        searchOptions: [
+          SearchOptions(
+              LinkedHashMap.of({'recent': 'Recent', 'popular': 'Popular'}),
+              'Sort'),
+          SearchOptions(LinkedHashMap.of({'chinese': 'Source Chinese'}), '语言'),
+          SearchOptions(
+              LinkedHashMap.of({'low': 'Low quality', 'high': 'High quality'}),
+              'Quality'),
+        ],
+      ),
+    );
+    ComicSource.sources = [languageSource];
+    appdata.appSettings.initialSearchTarget = languageSource.key;
+    appdata.settings[69] = '1';
+    final page = PreSearchPage();
+    await open(
+        tester, Scaffold(body: Builder(builder: page.buildSearchOptions)));
+
+    expect(find.text('Source Chinese'), findsNothing);
+    expect(find.text('语言'), findsOneWidget,
+        reason: 'the pre-search language selector remains available');
+    expect(find.text('Quality'), findsOneWidget);
+    await tester.tap(find.text('High quality'));
+    expect(page.searchController.options, ['recent', 'chinese', 'high']);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('presearch keeps the source language option for invalid defaults',
+      (tester) async {
+    final languageSource = ComicSource.named(
+      name: 'Language options fixture',
+      key: 'language-options-fixture',
+      filePath: 'test',
+      searchPageData: SearchPageData.named(
+        enableLanguageFilter: true,
+        searchOptions: [
+          SearchOptions(LinkedHashMap.of({'chinese': 'Source Chinese'}), '语言'),
+        ],
+      ),
+    );
+    ComicSource.sources = [languageSource];
+    appdata.appSettings.initialSearchTarget = languageSource.key;
+    appdata.settings[69] = '4';
+    final page = PreSearchPage();
+    await open(
+        tester, Scaffold(body: Builder(builder: page.buildSearchOptions)));
+
+    expect(find.text('Source Chinese'), findsOneWidget);
+    expect(find.text('语言'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final hasUnsupportedSource in [false, true]) {
     testWidgets(
         'presearch handles no searchable sources (nonsearch source: $hasUnsupportedSource)',
