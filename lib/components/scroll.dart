@@ -1,7 +1,8 @@
 part of 'components.dart';
 
 class SmoothCustomScrollView extends StatelessWidget {
-  const SmoothCustomScrollView({super.key, required this.slivers, this.controller});
+  const SmoothCustomScrollView(
+      {super.key, required this.slivers, this.controller});
 
   final ScrollController? controller;
 
@@ -22,9 +23,9 @@ class SmoothCustomScrollView extends StatelessWidget {
   }
 }
 
-
 class SmoothScrollProvider extends StatefulWidget {
-  const SmoothScrollProvider({super.key, this.controller, required this.builder});
+  const SmoothScrollProvider(
+      {super.key, this.controller, required this.builder});
 
   final ScrollController? controller;
 
@@ -41,6 +42,8 @@ class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
 
   double? _futurePosition;
 
+  int _scrollGeneration = 0;
+
   static bool _isMouseScroll = App.isDesktop;
 
   @override
@@ -51,7 +54,7 @@ class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
 
   @override
   Widget build(BuildContext context) {
-    if(App.isMacOS) {
+    if (App.isMacOS) {
       return widget.builder(
         context,
         _controller,
@@ -61,6 +64,7 @@ class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (event) {
+        _futurePosition = null;
         if (_isMouseScroll) {
           setState(() {
             _isMouseScroll = false;
@@ -76,16 +80,27 @@ class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
             });
           }
           if (!_isMouseScroll) return;
+          if (!_controller.hasClients) return;
           var currentLocation = _controller.position.pixels;
+          // Only accumulate a target while its scroll animation is active.
+          if (!_controller.position.isScrollingNotifier.value) {
+            _futurePosition = null;
+          }
           _futurePosition ??= currentLocation;
           double k = (_futurePosition! - currentLocation).abs() / 1600 + 1;
-          _futurePosition =
-              _futurePosition! + pointerSignal.scrollDelta.dy * k;
+          _futurePosition = _futurePosition! + pointerSignal.scrollDelta.dy * k;
           _futurePosition = _futurePosition!.clamp(
               _controller.position.minScrollExtent,
               _controller.position.maxScrollExtent);
-          _controller.animateTo(_futurePosition!,
-              duration: _fastAnimationDuration, curve: Curves.linear);
+          final generation = ++_scrollGeneration;
+          unawaited(_controller
+              .animateTo(_futurePosition!,
+                  duration: _fastAnimationDuration, curve: Curves.linear)
+              .then((_) {
+            if (mounted && generation == _scrollGeneration) {
+              _futurePosition = null;
+            }
+          }));
         }
       },
       child: widget.builder(
