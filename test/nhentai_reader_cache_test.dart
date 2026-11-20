@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
@@ -14,6 +15,7 @@ import 'package:pica_comic/foundation/image_loader/stream_image_provider.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
+import 'package:pica_comic/network/source_network_policy.dart';
 
 Future<void> _decode(ImageProvider provider) async {
   final stream = provider.resolve(ImageConfiguration.empty);
@@ -39,6 +41,8 @@ void main() {
   late StreamSubscription<HttpRequest> serving;
   final network = NhentaiNetwork();
   final requests = <String>[];
+  final blockedResponses =
+      <String, ({Completer<void> started, Completer<void> release})>{};
   var online = true;
   late String origin;
   final png = image.encodePng(image.Image(width: 2, height: 3));
@@ -55,6 +59,17 @@ void main() {
     origin = 'http://${server.address.address}:${server.port}';
     serving = server.listen((request) async {
       requests.add(request.uri.path);
+      final blocked = blockedResponses[request.uri.path];
+      if (blocked != null) {
+        blocked.started.complete();
+        await blocked.release.future;
+        try {
+          await request.response.close();
+        } on IOException {
+          // Cancellation may already have closed the client connection.
+        }
+        return;
+      }
       if (!online) {
         request.response.headers.contentType = ContentType.html;
         request.response.write('<html>offline fixture</html>');
@@ -178,5 +193,65 @@ void main() {
         reason:
             'the second decode must use disk, not the byte or Flutter cache');
     expect(ImageManager.haveTask, isFalse);
+  });
+
+  test('repeated reader cancellation leaves budget for the current page',
+      () async {
+    final key = 'host:${server.address.address}';
+    SourceNetworkPolicy.instance.configure(
+        key,
+        const SourceNetworkConfig(
+            maxConcurrent: 1, minInterval: Duration.zero));
+    final manager = ImageManager();
+    final scopes = <ImageTaskScope>[];
+    final completions = <Future<void>>[];
+    try {
+      for (var i = 0; i < 6; i++) {
+        final path = '/pending-$i.png';
+        final blocked =
+            (started: Completer<void>(), release: Completer<void>());
+        blockedResponses[path] = blocked;
+        final scope = ImageTaskScope();
+        scopes.add(scope);
+        final provider = StreamImageProvider(
+            () => manager.getImage('$origin$path'), '$origin$path',
+            taskScope: scope);
+        final decoded = expectLater(
+            _decode(provider),
+            throwsA(anyOf(
+                isA<ImageTaskCancelledException>(),
+                isA<DioException>().having(
+                    (error) => error.type, 'type', DioExceptionType.cancel))));
+        completions.add(decoded);
+        await blocked.started.future.timeout(const Duration(seconds: 3));
+        await scope.cancel();
+        await decoded;
+        await provider.evict();
+        expect(ImageManager.haveTask, isFalse);
+      }
+      // None of the cancelled server requests have returned yet.
+      final currentScope = ImageTaskScope();
+      scopes.add(currentScope);
+      final current = StreamImageProvider(
+          () => manager.getImage('$origin/page.png'), '$origin/page.png',
+          taskScope: currentScope);
+      await _decode(current);
+      await currentScope.cancel();
+      await current.evict();
+      expect(requests.where((path) => path.startsWith('/pending-')).length, 6);
+      expect(requests.last, '/page.png');
+      expect(await CacheManager().findCache('$origin/page.png'), isNotNull);
+      expect(ImageManager.haveTask, isFalse);
+    } finally {
+      for (final blocked in blockedResponses.values) {
+        blocked.release.complete();
+      }
+      for (final scope in scopes) {
+        await scope.cancel();
+      }
+      await Future.wait(completions);
+      blockedResponses.clear();
+      SourceNetworkPolicy.instance.configure(key);
+    }
   });
 }

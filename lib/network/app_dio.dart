@@ -200,6 +200,14 @@ class AppHttpAdapter implements HttpClientAdapter {
         try {
           lease = await policy.beforeRequest(o, cancelFuture: cancelFuture);
           var res = await fetchOnce(o, requestStream, cancelFuture);
+          if (cancelled) {
+            await res.stream.listen(null).cancel();
+            // Dio's response cleanup is bypassed when fetch discards the body.
+            // ignore: invalid_use_of_internal_member
+            res.close();
+            throw DioException(
+                requestOptions: o, type: DioExceptionType.cancel);
+          }
           res = policy.enforceResponseLimit(res, sourceKey);
           final statusKind = policy.classifyStatus(res.statusCode);
           if (statusKind != null) {

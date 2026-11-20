@@ -212,7 +212,11 @@ class SourceNetworkPolicy {
           message: 'Source circuit is open',
         );
       }
-      return SourceNetworkLease._(bucket, permit, key);
+      final lease = SourceNetworkLease._(bucket, permit, key);
+      // A cancelled transport may never return or expose a subscribed body.
+      // Release its budget without waiting for either of those events.
+      cancelFuture?.then((_) => reportFailure(lease, _cancelled(options, key)));
+      return lease;
     } catch (error) {
       permit?.release();
       _recordPreLeaseFailure(bucket, error);
@@ -356,6 +360,7 @@ class SourceNetworkPolicy {
   }
 
   void reportSuccess(SourceNetworkLease lease, {ResponseBody? response}) {
+    if (lease._released) return;
     if (response == null) {
       _recordSuccess(lease._bucket.health);
       lease.release();
@@ -485,7 +490,7 @@ class SourceNetworkPolicy {
         error: SourceNetworkException(
           kind: SourceNetworkErrorKind.cancelled,
           sourceKey: sourceKey,
-          message: 'Request cancelled while waiting for source budget',
+          message: 'Request cancelled',
         ),
       );
 
@@ -527,7 +532,7 @@ class SourceNetworkPolicy {
       await for (final chunk in source) {
         yield chunk;
       }
-      _recordSuccess(lease._bucket.health);
+      if (!lease._released) _recordSuccess(lease._bucket.health);
     } catch (error) {
       reportFailure(lease, error);
       rethrow;

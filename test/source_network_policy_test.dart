@@ -144,6 +144,94 @@ void main() {
     expect(health['successes'], 1);
   });
 
+  for (final withResponse in [false, true]) {
+    test(
+        'cancellation releases a lease ${withResponse ? 'before body subscription' : 'while transport is pending'}',
+        () async {
+      final policy = SourceNetworkPolicy();
+      policy.configure(
+        'cancelled-fixture',
+        const SourceNetworkConfig(maxConcurrent: 1, minInterval: Duration.zero),
+      );
+      final options = RequestOptions(
+        path: 'https://fixture.test/cancelled',
+        extra: {'sourceKey': 'cancelled-fixture'},
+      );
+      for (var iteration = 0; iteration < 6; iteration++) {
+        final cancel = Completer<void>();
+        final lease =
+            await policy.beforeRequest(options, cancelFuture: cancel.future);
+        final response = ResponseBody.fromString('late response', 200);
+        if (withResponse) policy.reportSuccess(lease, response: response);
+        cancel.complete();
+        await Future<void>.delayed(Duration.zero);
+
+        final nextCancel = Completer<void>();
+        SourceNetworkLease? next;
+        try {
+          next = await policy
+              .beforeRequest(options, cancelFuture: nextCancel.future)
+              .timeout(const Duration(milliseconds: 200));
+          policy.reportSuccess(next);
+        } finally {
+          nextCancel.complete();
+          lease.release();
+          next?.release();
+        }
+        if (!withResponse) policy.reportSuccess(lease, response: response);
+        await response.stream.drain<void>();
+      }
+      final health = policy.diagnosticSummary()['cancelled-fixture'] as Map;
+      expect(health['cancelled'], 6);
+      expect(health['successes'], 6,
+          reason: 'late cancelled responses must not be counted as successes');
+      expect(health['state'], 'healthy');
+    });
+  }
+
+  test('cancellation releases an active body and ignores its late completion',
+      () async {
+    final policy = SourceNetworkPolicy();
+    policy.configure(
+        'fixture',
+        const SourceNetworkConfig(
+            maxConcurrent: 1, minInterval: Duration.zero));
+    final options = RequestOptions(
+        path: 'https://fixture.test', extra: {'sourceKey': 'fixture'});
+    final cancel = Completer<void>();
+    final lease =
+        await policy.beforeRequest(options, cancelFuture: cancel.future);
+    final body = StreamController<Uint8List>();
+    final response = ResponseBody(body.stream, 200);
+    policy.reportSuccess(lease, response: response);
+    final received = Completer<void>();
+    final consumed =
+        response.stream.listen((_) => received.complete()).asFuture();
+    body.add(Uint8List.fromList([1]));
+    await received.future;
+    cancel.complete();
+    await Future<void>.delayed(Duration.zero);
+    final nextCancel = Completer<void>();
+    try {
+      final next = await policy
+          .beforeRequest(options, cancelFuture: nextCancel.future)
+          .timeout(const Duration(milliseconds: 200));
+      policy.reportSuccess(next);
+      policy.reportFailure(lease,
+          DioException(requestOptions: options, type: DioExceptionType.cancel));
+      policy.reportSuccess(lease);
+    } finally {
+      nextCancel.complete();
+      lease.release();
+      await body.close();
+      await consumed;
+    }
+    final health = policy.diagnosticSummary()['fixture'] as Map;
+    expect(health['successes'], 1);
+    expect(health['cancelled'], 1);
+    expect(health['failures'], 1);
+  });
+
   test('opens a source circuit after repeated transient failures', () async {
     var now = DateTime(2026, 1, 1);
     final policy = SourceNetworkPolicy(now: () => now);

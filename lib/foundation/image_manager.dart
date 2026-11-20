@@ -97,14 +97,19 @@ class ImageManager {
         ..onCancel = () async {
           _cancelledOwners.add(owner);
           cancelTasksForOwner(owner);
-          await subscription.cancel();
-          for (final entry in _taskOwners.entries.toList()) {
-            if (identical(entry.value, owner)) {
-              final token = _cancelTokens[entry.key];
-              if (token != null) _finishTask(entry.key, token);
+          try {
+            await subscription.cancel();
+          } on DioException catch (error) {
+            if (!CancelToken.isCancel(error)) rethrow;
+          } finally {
+            for (final entry in _taskOwners.entries.toList()) {
+              if (identical(entry.value, owner)) {
+                final token = _cancelTokens[entry.key];
+                if (token != null) _finishTask(entry.key, token);
+              }
             }
+            _cancelledOwners.remove(owner);
           }
-          _cancelledOwners.remove(owner);
         };
     });
   }

@@ -52,6 +52,25 @@ class _ScriptedAdapter extends AppHttpAdapter {
   }
 }
 
+class _DeferredAdapter extends AppHttpAdapter {
+  _DeferredAdapter() : super(false);
+
+  final started = Completer<void>();
+  final pending = Completer<ResponseBody>();
+  int calls = 0;
+
+  @override
+  Future<ResponseBody> fetchOnce(RequestOptions options,
+      Stream<Uint8List>? stream, Future<void>? cancelFuture) async {
+    calls++;
+    if (calls == 1) {
+      started.complete();
+      return pending.future;
+    }
+    return ResponseBody.fromString('ok', 200);
+  }
+}
+
 ResponseBody _fixtureResponse(int statusCode, String body,
     {String? retryAfter}) {
   return ResponseBody.fromString(
@@ -289,6 +308,50 @@ void main() {
             .having((error) => error.type, 'type', DioExceptionType.cancel)));
     expect(adapter.calls, 1);
   });
+
+  for (final status in [200, 403, 503]) {
+    test('cancelled transport discards a late $status response', () async {
+      _configureFixturePolicy();
+      final adapter = _DeferredAdapter();
+      addTearDown(() => adapter.close(force: true));
+      final cancel = Completer<void>();
+      var streamCancelled = false;
+      var responseClosed = false;
+      final body =
+          StreamController<Uint8List>(onCancel: () => streamCancelled = true);
+      final lateResponse = ResponseBody(body.stream, status,
+          onClose: () => responseClosed = true);
+      final cancelledRequest = expectLater(
+        adapter.fetch(_fixtureRequest(), null, cancel.future),
+        throwsA(isA<DioException>()
+            .having((error) => error.type, 'type', DioExceptionType.cancel)),
+      );
+      await adapter.started.future;
+      cancel.complete();
+      await Future<void>.delayed(Duration.zero);
+      try {
+        // A replacement must start before the cancelled transport returns.
+        final next = await adapter
+            .fetch(_fixtureRequest(), null, null)
+            .timeout(const Duration(seconds: 1));
+        expect(await _readFixtureBody(next), 'ok');
+        expect(adapter.calls, 2);
+      } finally {
+        adapter.pending.complete(lateResponse);
+        await cancelledRequest;
+        unawaited(body.close());
+      }
+      expect(streamCancelled, isTrue);
+      expect(responseClosed, isTrue);
+      final health =
+          SourceNetworkPolicy.instance.diagnosticSummary()['fixture']! as Map;
+      expect(health['cancelled'], 1);
+      expect(health['failures'], 1);
+      expect(health['successes'], 1);
+      expect(health['retries'], 0);
+      expect(health['state'], 'healthy');
+    });
+  }
 
   test('native requests use one attempt and receive cancellation', () async {
     proxyHttpOverrides = ProxyHttpOverrides(
