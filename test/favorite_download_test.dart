@@ -180,6 +180,25 @@ void main() {
     expect(favorite.toDownloadId(), 'Ht405320');
   });
 
+  test('legacy built-in favorite keys keep their download identity', () {
+    final favorite = FavoriteItem(
+      target: 'legacy-picacg',
+      name: 'Legacy PICACG favorite',
+      coverPath: '',
+      author: '',
+      type: FavoriteType('picacg'.hashCode),
+      tags: const [],
+    );
+
+    expect(favorite.available, isTrue);
+    expect(favorite.type.comicType, ComicType.picacg);
+    expect(favorite.toDownloadId(), 'legacy-picacg');
+
+    manager.isDownloading = true;
+    manager.addFavoriteDownload(favorite);
+    expect(manager.downloading.single.id, 'legacy-picacg');
+  });
+
   test('batch-safe favorite entry ignores an unavailable source', () {
     final favorite = FavoriteItem(
       target: 'fixture',

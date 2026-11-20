@@ -41,37 +41,37 @@ extension LocalFavoritesExt on FavoriteItem {
   }
 
   Future<bool> updateInfo(String folder) async {
-    if (type == FavoriteType.picacg) {
+    if (type.comicType == ComicType.picacg) {
       var res = await PicacgNetwork().getComicInfo(target);
       if (res.error) return false;
       name = res.data.title;
       author = res.data.author;
       tags = res.data.tags;
       coverPath = res.data.cover;
-    } else if (type == FavoriteType.ehentai) {
+    } else if (type.comicType == ComicType.ehentai) {
       var res = await EhNetwork().getGalleryInfo(target);
       if (res.error) return false;
       name = res.data.title;
       coverPath = res.data.cover;
-    } else if (type == FavoriteType.jm) {
+    } else if (type.comicType == ComicType.jm) {
       var res = await JmNetwork().getComicInfo(target);
       if (res.error) return false;
       name = res.data.title;
       author = res.data.author.firstOrNull ?? '';
       tags = res.data.tags;
       coverPath = res.data.cover;
-    } else if (type == FavoriteType.nhentai) {
+    } else if (type.comicType == ComicType.nhentai) {
       var res = await NhentaiNetwork().getComicInfo(target);
       if (res.error) return false;
       name = res.data.title;
       coverPath = res.data.cover;
-    } else if (type == FavoriteType.htManga) {
+    } else if (type.comicType == ComicType.htManga) {
       var res = await HtmangaNetwork().getComicInfo(target);
       if (res.error) return false;
       name = res.data.title;
       author = res.data.uploader;
       coverPath = res.data.cover;
-    } else if (type == FavoriteType.hitomi) {
+    } else if (type.comicType == ComicType.hitomi) {
       var res = await HiNetwork().getComicInfo(target);
       if (res.error) return false;
       name = res.data.title;

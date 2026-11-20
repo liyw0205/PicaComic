@@ -40,6 +40,72 @@ void main() {
     expect(manager.count(folder), 2);
   });
 
+  test('legacy built-in source favorite keys remain readable and writable',
+      () async {
+    final manager = LocalFavoritesManager.create();
+    final path = '${directory.path}/legacy-favorite-type.db';
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('legacy-type');
+    await DataMaintenance.waitForIdle();
+    const target = 'legacy-picacg-comic';
+    final legacyType = 'picacg'.hashCode;
+    final fixture = sqlite3.open(path);
+    fixture.execute('''
+      insert into "$folder"
+        (target, name, author, type, tags, cover_path, time, display_order)
+      values (?, ?, ?, ?, ?, ?, ?, ?);
+    ''', [
+      target,
+      'Legacy title',
+      'Legacy author',
+      legacyType,
+      'old',
+      '',
+      '2000-01-01 00:00:00',
+      3
+    ]);
+    fixture.dispose();
+
+    try {
+      expect(await manager.find(target, FavoriteType.picacg), [folder]);
+      expect(FavoriteType(legacyType), FavoriteType.picacg);
+      expect(FavoriteType(legacyType).hashCode, FavoriteType.picacg.hashCode);
+      expect(manager.getComic(folder, target, FavoriteType.picacg).name,
+          'Legacy title');
+      expect(
+          manager.comicExists(folder, target, FavoriteType.picacg.key), isTrue);
+
+      await manager.addComic(
+          folder, favorite(target, FavoriteType.picacg.key), null, false);
+      expect(manager.count(folder), 1,
+          reason:
+              'adding with the current key must not duplicate a legacy row');
+
+      await manager.addTagTo(
+          folder, target, 'unavailable', FavoriteType.picacg);
+      expect(manager.getComic(folder, target, FavoriteType.picacg).tags,
+          ['unavailable', 'old']);
+      await manager.editTags(target, folder, ['edited'], FavoriteType.picacg);
+      expect(manager.getComic(folder, target, FavoriteType.picacg).tags,
+          ['edited']);
+
+      await manager.onReadEnd(target, FavoriteType.picacg);
+      final raw = sqlite3.open(path, mode: OpenMode.readOnly);
+      final updated = raw.select(
+          'select time, type from "$folder" where target = ?;',
+          [target]).single;
+      raw.dispose();
+      expect(updated['type'], legacyType,
+          reason: 'compatibility should not rewrite persisted identities');
+      expect(updated['time'], isNot('2000-01-01 00:00:00'));
+
+      await manager.deleteComicWithTarget(folder, target, FavoriteType.picacg);
+      expect(manager.comicExists(folder, target, legacyType), isFalse);
+    } finally {
+      manager.close();
+    }
+  });
+
   test('Hitomi favorites match and delete legacy URL variants', () async {
     final manager = LocalFavoritesManager.create();
     final path = '${directory.path}/hitomi-target-compat.db';
@@ -54,6 +120,19 @@ void main() {
       expect(manager.comicExists(folder, canonical.target, 3), isTrue);
       await manager.deleteComic(folder, canonical);
       expect(manager.comicExists(folder, legacy.target, 3), isFalse);
+
+      final legacyHashed =
+          favorite('https://hitomi.la/reader/43.html', 'hitomi'.hashCode);
+      await manager.addComic(folder, legacyHashed, null, false);
+      final canonicalHashed =
+          favorite('https://hitomi.la/galleries/43.html', 'hitomi'.hashCode);
+      expect(await manager.findWithModel(canonicalHashed), [folder]);
+      await manager.deleteComicWithTarget(
+          folder, 'https://hitomi.la/galleries/43.html', FavoriteType.hitomi);
+      expect(
+          manager.comicExists(
+              folder, legacyHashed.target, legacyHashed.type.key),
+          isFalse);
     } finally {
       manager.close();
     }

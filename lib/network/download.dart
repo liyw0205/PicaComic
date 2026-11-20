@@ -1327,17 +1327,17 @@ extension AddDownloadExt on DownloadManager {
   }
 
   void addFavoriteDownload(FavoriteItem comic) {
-    var id = switch (comic.type.key) {
-      0 => comic.target,
-      1 => getGalleryId(comic.target),
-      2 => "jm${comic.target}",
-      3 => () {
+    var id = switch (comic.type.comicType) {
+      ComicType.picacg => comic.target,
+      ComicType.ehentai => getGalleryId(comic.target),
+      ComicType.jm => "jm${comic.target}",
+      ComicType.hitomi => () {
           final galleryId = hitomiGalleryIdFromTarget(comic.target);
           if (galleryId == null) throw StateError('Invalid Hitomi target');
           return "hitomi$galleryId";
         }(),
-      4 => "Ht${comic.target}",
-      6 => "nhentai${comic.target}",
+      ComicType.htManga => "Ht${comic.target}",
+      ComicType.nhentai => "nhentai${comic.target}",
       _ => generateId(comic.type.comicSource.key, comic.target)
     };
     _enqueue(FavoriteDownloading(comic, _onFinish, _onError, _saveInfo, id));

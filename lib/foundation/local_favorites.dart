@@ -39,6 +39,37 @@ final class FavoriteType {
 
   const FavoriteType(this.key);
 
+  static const _legacyBuiltInTypes = <String, int>{
+    'picacg': 0,
+    'ehentai': 1,
+    'jm': 2,
+    'hitomi': 3,
+    'htmanga': 4,
+    'nhentai': 6,
+  };
+
+  List<int> get _compatibleKeys {
+    final keys = <int>{key};
+    for (final entry in _legacyBuiltInTypes.entries) {
+      final legacyKey = entry.key.hashCode;
+      if (key == entry.value || key == legacyKey) {
+        keys
+          ..add(entry.value)
+          ..add(legacyKey);
+      }
+    }
+    return keys.toList();
+  }
+
+  int get _canonicalBuiltInKey {
+    for (final entry in _legacyBuiltInTypes.entries) {
+      if (key == entry.value || key == entry.key.hashCode) {
+        return entry.value;
+      }
+    }
+    return key;
+  }
+
   static FavoriteType get picacg => const FavoriteType(0);
 
   static FavoriteType get ehentai => const FavoriteType(1);
@@ -52,14 +83,16 @@ final class FavoriteType {
   static FavoriteType get nhentai => const FavoriteType(6);
 
   ComicType get comicType {
-    if (key >= 0 && key <= 6) {
-      return ComicType.values[key];
+    final canonicalKey = _canonicalBuiltInKey;
+    if (canonicalKey >= 0 && canonicalKey <= 6) {
+      return ComicType.values[canonicalKey];
     }
     return ComicType.other;
   }
 
   ComicSource get comicSource {
-    if (key <= 6) {
+    final canonicalKey = _canonicalBuiltInKey;
+    if (canonicalKey >= 0 && canonicalKey <= 6) {
       var key = comicType.name.toLowerCase();
       return ComicSource.find(key)!;
     }
@@ -82,11 +115,12 @@ final class FavoriteType {
 
   @override
   bool operator ==(Object other) {
-    return other is FavoriteType && other.key == key;
+    return other is FavoriteType &&
+        other._canonicalBuiltInKey == _canonicalBuiltInKey;
   }
 
   @override
-  int get hashCode => key.hashCode;
+  int get hashCode => _canonicalBuiltInKey.hashCode;
 }
 
 class FavoriteItem {
@@ -99,7 +133,7 @@ class FavoriteItem {
   String time = getCurTime();
 
   bool get available {
-    if (type.key <= 6 && type.key >= 0) {
+    if (type._canonicalBuiltInKey <= 6 && type._canonicalBuiltInKey >= 0) {
       return true;
     }
     return ComicSource.sources
@@ -256,7 +290,9 @@ class FavoriteItem {
 
   @override
   int get hashCode =>
-      (type == FavoriteType.hitomi ? canonicalHitomiTarget(target) : target)
+      (type.comicType == ComicType.hitomi
+              ? canonicalHitomiTarget(target)
+              : target)
           .hashCode ^
       type.hashCode;
 
@@ -742,11 +778,12 @@ class LocalFavoritesManager {
       return DataMaintenance.run<void>(
           () => addTagTo(folder, target, tag, type));
     }
-    _db.execute("""
+    final keys = type?._compatibleKeys;
+    _db.execute('''
       update ${_identifier(folder)}
       set tags = ? || ',' || tags
-      where target == ? ${type == null ? '' : 'and type == ?'};
-    """, [tag, target, if (type != null) type.key]);
+      where target == ? ${keys == null ? '' : 'and type IN (${_placeholders(keys.length)})'};
+    ''', [tag, target, if (keys != null) ...keys]);
     await saveData();
   }
 
@@ -858,7 +895,8 @@ class LocalFavoritesManager {
     if (res.isEmpty) {
       throw Exception("Comic not found");
     }
-    return FavoriteItem.fromRow(res.first);
+    final current = res.firstWhereOrNull((row) => row['type'] == type.key);
+    return FavoriteItem.fromRow(current ?? res.first);
   }
 
   /// add comic to a folder
@@ -1020,29 +1058,26 @@ class LocalFavoritesManager {
   }
 
   void _deleteComicWithTarget(String folder, String target, FavoriteType type) {
-    if (type != FavoriteType.hitomi) {
-      _db.execute("""
-        delete from ${_identifier(folder)}
-        where target == ? and type == ?;
-      """, [target, type.key]);
-      return;
-    }
     for (final row in _matchingRows(folder, target, type)) {
       _db.execute("""
         delete from ${_identifier(folder)}
         where target == ? and type == ?;
-      """, [row['target'], type.key]);
+      """, [row['target'], row['type']]);
     }
   }
 
   List<Row> _matchingRows(String folder, String target, FavoriteType type) {
-    final rows = type == FavoriteType.hitomi ? _db.select("""
-          select * from ${_identifier(folder)} where type == ?;
-        """, [type.key]) : _db.select("""
+    final keys = type._compatibleKeys;
+    final rows = type._compatibleKeys.contains(FavoriteType.hitomi.key)
+        ? _db.select('''
           select * from ${_identifier(folder)}
-          where target == ? and type == ?;
-        """, [target, type.key]);
-    if (type != FavoriteType.hitomi) return rows;
+          where type IN (${_placeholders(keys.length)});
+        ''', keys)
+        : _db.select('''
+          select * from ${_identifier(folder)}
+          where target == ? and type IN (${_placeholders(keys.length)});
+        ''', [target, ...keys]);
+    if (!type._compatibleKeys.contains(FavoriteType.hitomi.key)) return rows;
     return rows
         .where((row) =>
             _favoriteTargetsMatch(type, row['target'] as String, target))
@@ -1070,10 +1105,13 @@ class LocalFavoritesManager {
     }
     _transaction(() {
       for (int i = 0; i < newFolder.length; i++) {
-        _db.execute('''
-          update ${_identifier(folder)} set display_order = ?
-          where target = ? and type = ?;
-        ''', [i, newFolder[i].target, newFolder[i].type.key]);
+        for (final row
+            in _matchingRows(folder, newFolder[i].target, newFolder[i].type)) {
+          _db.execute('''
+            update ${_identifier(folder)} set display_order = ?
+            where target = ? and type = ?;
+          ''', [i, row['target'], row['type']]);
+        }
       }
     });
     updateUI();
@@ -1119,10 +1157,7 @@ class LocalFavoritesManager {
     _modifiedAfterLastCache = true;
     bool isModified = false;
     for (final folder in folderNames) {
-      var rows = _db.select("""
-        select * from ${_identifier(folder)}
-        where target == ? and type == ?;
-      """, [target, type.key]);
+      final rows = _matchingRows(folder, target, type);
       if (rows.isNotEmpty) {
         isModified = true;
         var newTime = DateTime.now()
@@ -1143,11 +1178,14 @@ class LocalFavoritesManager {
           """).firstOrNull?["min_value"] ?? 0;
           order = minValue - 1;
         }
-        _db.execute("""
-            UPDATE ${_identifier(folder)}
-            SET ${order == null ? '' : 'display_order = ?,'} time = ?
-            WHERE target == ? and type == ?;
-          """, [if (order != null) order, newTime, target, type.key]);
+        for (final row in rows) {
+          _db.execute("""
+              UPDATE ${_identifier(folder)}
+              SET ${order == null ? '' : 'display_order = ?,'} time = ?
+              WHERE target == ? and type == ?;
+            """,
+              [if (order != null) order, newTime, row['target'], row['type']]);
+        }
       }
     }
     if (isModified) {
@@ -1241,11 +1279,12 @@ class LocalFavoritesManager {
       return DataMaintenance.run<void>(
           () => editTags(target, folder, List.of(tags), type));
     }
-    _db.execute("""
+    final keys = type?._compatibleKeys;
+    _db.execute('''
         update ${_identifier(folder)}
         set tags = ?
-        where target == ? ${type == null ? '' : 'and type == ?'};
-      """, [tags.join(','), target, if (type != null) type.key]);
+        where target == ? ${keys == null ? '' : 'and type IN (${_placeholders(keys.length)})'};
+      ''', [tags.join(','), target, if (keys != null) ...keys]);
     await saveData();
   }
 
@@ -1269,7 +1308,7 @@ class LocalFavoritesManager {
       """);
       for (var row in res) {
         _cachedFavoritedTargets[row["target"]] = true;
-        if (row['type'] == FavoriteType.hitomi.key) {
+        if (FavoriteType.hitomi._compatibleKeys.contains(row['type'])) {
           final canonical = canonicalHitomiTarget(row['target'] as String);
           _cachedFavoritedTargets[canonical] = true;
         }
@@ -1279,23 +1318,28 @@ class LocalFavoritesManager {
 
   void updateInfo(String folder, FavoriteItem comic) {
     if (_deferWrite(() => updateInfo(folder, comic))) return;
+    final keys = comic.type._compatibleKeys;
     _db.execute("""
       update ${_identifier(folder)}
       set name = ?, author = ?, cover_path = ?, tags = ?
-      where target == ? and type == ?;
+      where target == ? and type IN (${_placeholders(keys.length)});
     """, [
       comic.name,
       comic.author,
       comic.coverPath,
       comic.tags.join(","),
       comic.target,
-      comic.type.key
+      ...keys,
     ]);
   }
 }
 
+String _placeholders(int count) => List.filled(count, '?').join(', ');
+
 bool _favoriteTargetsMatch(FavoriteType type, String left, String right) {
-  if (type != FavoriteType.hitomi) return left == right;
+  if (!type._compatibleKeys.contains(FavoriteType.hitomi.key)) {
+    return left == right;
+  }
   final leftId = hitomiGalleryIdFromTarget(left);
   final rightId = hitomiGalleryIdFromTarget(right);
   return leftId != null && rightId != null ? leftId == rightId : left == right;
