@@ -529,6 +529,8 @@ class ComicInfoData with HistoryMixin {
 
   final String? subId;
 
+  final int? pages;
+
   const ComicInfoData(
       this.title,
       this.subTitle,
@@ -543,7 +545,21 @@ class ComicInfoData with HistoryMixin {
       this.sourceKey,
       this.comicId,
       {this.isFavorite,
-      this.subId});
+      this.subId,
+      this.pages});
+
+  static int? parsePageCount(Map<String, dynamic> data) {
+    for (final value in [data['pages'], data['maxPage']]) {
+      final pageCount = switch (value) {
+        num number when number.isFinite && number > 0 && number % 1 == 0 =>
+          number.toInt(),
+        String text => int.tryParse(text),
+        _ => null,
+      };
+      if (pageCount != null && pageCount > 0) return pageCount;
+    }
+    return null;
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -557,6 +573,7 @@ class ComicInfoData with HistoryMixin {
       "comicId": comicId,
       "isFavorite": isFavorite,
       "subId": subId,
+      "pages": pages,
     };
   }
 
@@ -585,7 +602,8 @@ class ComicInfoData with HistoryMixin {
         thumbnailMaxPage = 0,
         suggestions = null,
         isFavorite = json["isFavorite"],
-        subId = json["subId"];
+        subId = json["subId"],
+        pages = parsePageCount(json);
 
   @override
   HistoryType get historyType => HistoryType(sourceKey.hashCode);

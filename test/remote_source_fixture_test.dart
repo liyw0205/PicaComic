@@ -510,6 +510,44 @@ class SearchDefaultsFixture extends ComicSource {
     expect(defaults.searchPageData?.enableTagsSuggestions, isFalse);
   });
 
+  test('custom source detail parses and persists page counts', () async {
+    ComicSource.sources.clear();
+    JsEngine().runCode('ComicSource.sources = {};');
+    const script = '''
+class ComicPageCountFixture extends ComicSource {
+  name = "Comic Page Count Fixture"
+  key = "comic_page_count_fixture"
+  version = "1.0.0"
+  comic = {
+    loadInfo: async (id) => ({
+      title: "Fixture",
+      cover: "https://fixture.test/cover.jpg",
+      tags: {},
+      pages: id === "string" ? "15" : id === "fallback" ? 0 : id === "invalid" ? "bad" : 14,
+      maxPage: id === "fallback" ? "16" : id === "invalid" ? 0 : 20
+    })
+  }
+}
+''';
+    final source =
+        await ComicSourceParser().parse(script, 'fixture/comic-page-count.js');
+    ComicSource.sources.add(source);
+
+    for (final fixture in {
+      'number': 14,
+      'string': 15,
+      'fallback': 16,
+    }.entries) {
+      final result = await source.loadComicInfo!(fixture.key);
+      expect(result.error, isFalse, reason: result.errorMessage);
+      expect(result.data.pages, fixture.value);
+      expect(ComicInfoData.fromJson(result.data.toJson()).pages, fixture.value);
+    }
+    final invalid = await source.loadComicInfo!('invalid');
+    expect(invalid.error, isFalse, reason: invalid.errorMessage);
+    expect(invalid.data.pages, isNull);
+  });
+
   test('pinned remote rules satisfy the offline source contract', () async {
     for (final fixture in _rules) {
       ComicSource.sources.clear();

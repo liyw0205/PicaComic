@@ -467,6 +467,7 @@ class ComicSourceParser {
           id,
           isFavorite: res["isFavorite"],
           subId: res["subId"],
+          pages: ComicInfoData.parsePageCount(res),
         ));
       } catch (e, s) {
         log("${safeNetworkError(e)}\n$s", "Network", LogLevel.error);

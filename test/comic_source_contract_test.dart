@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/comic_source/contract.dart';
@@ -408,6 +409,42 @@ void main() {
       HitomiFile('2.jpg', 'b', false, false, 1, 1, '42'),
     ]);
     expect(page.pages, 2);
+  });
+
+  testWidgets('custom comic detail exposes its parsed page count',
+      (tester) async {
+    late BaseComicPage<ComicInfoData> page;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) {
+      page = const ComicPage(sourceKey: 'fixture_source', id: 'fixture')
+          .build(context) as BaseComicPage<ComicInfoData>;
+      return const SizedBox();
+    })));
+    final logic = StateController.put(
+      ComicPageLogic<ComicInfoData>()
+        ..data = const ComicInfoData(
+          'Fixture',
+          null,
+          '',
+          null,
+          {},
+          null,
+          null,
+          null,
+          0,
+          null,
+          'fixture_source',
+          'fixture',
+          pages: 14,
+        ),
+      tag: page.tag,
+    );
+    addTearDown(() {
+      logic.controller.dispose();
+      StateController.remove<ComicPageLogic<ComicInfoData>>(page.tag);
+    });
+
+    expect(page.pages, 14);
+    await tester.pumpWidget(const SizedBox());
   });
 
   test('Hitomi and Htmanga parsers accept current source URL variants', () {

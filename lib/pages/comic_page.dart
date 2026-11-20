@@ -183,7 +183,7 @@ class _ComicPageImpl extends BaseComicPage<ComicInfoData> {
   }
 
   @override
-  int? get pages => null;
+  int? get pages => data?.pages;
 
   @override
   void read(History? history) {
