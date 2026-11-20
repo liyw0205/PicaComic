@@ -70,4 +70,17 @@ void main() {
     expect(await getLatestVersion(client: dio), '4.2.18');
     expect(await getUpdatesInfo(), '');
   });
+
+  test('release notes longer than five lines are preserved', () async {
+    const notes = 'one\ntwo\nthree\nfour\nfive\nsix\nseven';
+    final dio = Dio()
+      ..httpClientAdapter = _ReleaseAdapter({
+        'tag_name': 'v4.2.19',
+        'body': notes,
+      });
+    addTearDown(() => dio.close(force: true));
+
+    expect(await getLatestVersion(client: dio), '4.2.19');
+    expect(await getUpdatesInfo(), notes);
+  });
 }

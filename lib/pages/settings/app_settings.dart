@@ -14,6 +14,7 @@ void findUpdate(BuildContext context) {
               context: context,
               builder: (context) {
                 return AlertDialog(
+                  scrollable: true,
                   title: Text("有可用更新".tl),
                   content: Text(s),
                   actions: [

@@ -102,11 +102,7 @@ _ParsedVersion? _parseVersion(String value) {
 Future<String?> getUpdatesInfo() async {
   final info = _updateInfo;
   if (info == null) return null;
-  final lines = info.replaceAll('\r\n', '\n').split("\n");
-  if (lines.length > 5) {
-    return '${lines.take(5).join("\n")}\n...';
-  }
-  return info;
+  return info.replaceAll('\r\n', '\n');
 }
 
 Future<String> getDownloadUrl() async {
