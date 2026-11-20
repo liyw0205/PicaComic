@@ -190,6 +190,10 @@ void main() {
     expect(favorite(key: otherSourceKey).toDownloadId(), otherId);
   });
 
+  test('download id generation survives source removal after details open', () {
+    expect(manager.generateId(sourceKey, comicId), matchingId);
+  });
+
   test('installed sources retain their brief ID normalization', () async {
     await seed([download(id: '$sourceKey-42')]);
     ComicSource.sources = [

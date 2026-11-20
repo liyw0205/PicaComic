@@ -768,9 +768,9 @@ class DownloadManager with _DownloadDb implements Listenable {
   }
 
   String generateId(String source, String id) {
-    var comicSource = ComicSource.find(source)!;
-    if (comicSource.matchBriefIdReg != null) {
-      id = RegExp(comicSource.matchBriefIdReg!).firstMatch(id)!.group(1)!;
+    final matchBriefIdReg = ComicSource.find(source)?.matchBriefIdReg;
+    if (matchBriefIdReg != null) {
+      id = RegExp(matchBriefIdReg).firstMatch(id)!.group(1)!;
     }
     id = "$source-$id";
     return id;
