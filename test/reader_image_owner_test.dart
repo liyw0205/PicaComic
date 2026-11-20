@@ -528,6 +528,89 @@ void main() {
     });
   }
 
+  testWidgets('visible image restarts once after its stream stops progressing',
+      (tester) async {
+    final scroll = ScrollController();
+    final sources = <StreamController<DownloadProgress>>[];
+    final provider = StreamImageProvider(() {
+      final source = StreamController<DownloadProgress>();
+      sources.add(source);
+      return source.stream;
+    }, 'visible-stalled-load-recovery');
+    addTearDown(() {
+      scroll.dispose();
+      for (final source in sources) {
+        unawaited(source.close());
+      }
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: SingleChildScrollView(
+        controller: scroll,
+        child: Column(children: [
+          ComicImage(image: provider, width: 100, height: 120),
+          const SizedBox(height: 1200),
+        ]),
+      ),
+    ));
+    expect(sources, hasLength(1));
+
+    await tester.pump(const Duration(seconds: 14));
+    sources.first.add(DownloadProgress.inProgress(20, 100, '', ''));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 14));
+    expect(sources, hasLength(1),
+        reason: 'received progress must reset the inactivity timer');
+
+    final gesture = await tester.startGesture(const Offset(100, 300));
+    await gesture.moveBy(const Offset(0, -80));
+    await tester.pump();
+    expect(scroll.position.isScrollingNotifier.value, isTrue);
+    await tester.pump(const Duration(seconds: 20));
+    expect(sources, hasLength(1),
+        reason: 'a pending request must not be restarted during scrolling');
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(scroll.position.isScrollingNotifier.value, isFalse);
+
+    await tester.pump(const Duration(seconds: 14));
+    expect(sources, hasLength(1),
+        reason: 'the idle recovery timeout must start after scrolling stops');
+    await tester.pump(const Duration(seconds: 1));
+    for (var frame = 0; frame < 5 && sources.length < 2; frame++) {
+      await tester.pump();
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+    }
+    expect(sources, hasLength(2),
+        reason: 'a stream stalled while idle must be subscribed again');
+    expect(sources.first.hasListener, isFalse);
+    expect(sources.last.hasListener, isTrue);
+
+    final bytes = Uint8List.fromList(
+        image.encodePng(image.Image(width: 100, height: 120)));
+    sources.last
+        .add(DownloadProgress(bytes.length, bytes.length, '', '', bytes));
+    unawaited(sources.last.close());
+    for (var frame = 0;
+        frame < 20 && find.byType(RawImage).evaluate().isEmpty;
+        frame++) {
+      await tester.pump();
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+    }
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RawImage), findsOneWidget);
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('visible image recovery is bounded and rearmed by another drag',
       (tester) async {
     final scroll = ScrollController();

@@ -70,6 +70,8 @@ class ComicImage extends StatefulWidget {
 }
 
 class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
+  static const _stalledLoadTimeout = Duration(seconds: 15);
+
   ImageStream? _imageStream;
   ImageInfo? _imageInfo;
   ImageChunkEvent? _loadingProgress;
@@ -82,7 +84,10 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   ImageStreamCompleterHandle? _completerHandle;
   ScrollPosition? _scrollPosition;
   Timer? _retryTimer;
+  Timer? _stalledLoadTimer;
   int _automaticRetries = 0;
+  int _stalledLoadRestarts = 0;
+  bool _stalledLoadRecoveryInFlight = false;
 
   static final Map<int, Size> _cache = {};
 
@@ -100,6 +105,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     assert(_imageStream != null);
     WidgetsBinding.instance.removeObserver(this);
     _scrollPosition?.isScrollingNotifier.removeListener(_handleScrollActivity);
+    _stalledLoadTimer?.cancel();
     _stopListeningToStream();
     _completerHandle?.dispose();
     _scrollAwareContext.dispose();
@@ -119,7 +125,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     }
     _resolveImage();
 
-    if (TickerMode.of(context)) {
+    if (TickerMode.valuesOf(context).enabled) {
       _listenToStream();
     } else {
       _stopListeningToStream(keepStreamAlive: true);
@@ -134,6 +140,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     // A fresh reader scope can replace cancelled work with the same cache key.
     if (!identical(widget.image, oldWidget.image)) {
       _automaticRetries = 0;
+      _stalledLoadRestarts = 0;
       _resolveImage();
     }
   }
@@ -160,6 +167,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   void _resolveImage() {
     _retryTimer?.cancel();
     _retryTimer = null;
+    _stalledLoadTimer?.cancel();
+    _stalledLoadTimer = null;
     // Stop deferred callbacks from resolving a superseded reader scope.
     _scrollAwareContext.dispose();
     _scrollAwareContext = DisposableBuildContext<State<ComicImage>>(this);
@@ -182,8 +191,77 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     _retryTimer = null;
     if (_scrollPosition?.isScrollingNotifier.value ?? false) {
       _automaticRetries = 0;
+      _stalledLoadRestarts = 0;
+      _stalledLoadTimer?.cancel();
+      _stalledLoadTimer = null;
     } else {
       _scheduleRetry();
+      _scheduleStalledLoadRecovery();
+    }
+  }
+
+  bool get _canRecoverStalledLoad {
+    if (!mounted ||
+        !_isListeningToStream ||
+        _imageInfo != null ||
+        _lastException != null ||
+        _loadingProgress == null ||
+        _stalledLoadRestarts >= 1 ||
+        _stalledLoadRecoveryInFlight ||
+        (_scrollPosition?.isScrollingNotifier.value ?? false)) {
+      return false;
+    }
+    ImageProvider provider = widget.image;
+    if (provider is ResizeImage) provider = provider.imageProvider;
+    return provider is BaseImageProvider &&
+        !(provider is StreamImageProvider &&
+            provider.taskScope?.isCancelled == true);
+  }
+
+  void _scheduleStalledLoadRecovery() {
+    _stalledLoadTimer?.cancel();
+    _stalledLoadTimer = null;
+    if (!_canRecoverStalledLoad) return;
+    _stalledLoadTimer = Timer(_stalledLoadTimeout, () {
+      _stalledLoadTimer = null;
+      if (!_canRecoverStalledLoad) return;
+      _stalledLoadRestarts++;
+      unawaited(_recoverStalledLoad());
+    });
+  }
+
+  Future<void> _recoverStalledLoad() async {
+    if (!mounted ||
+        !_isListeningToStream ||
+        _imageInfo != null ||
+        _lastException != null ||
+        (_scrollPosition?.isScrollingNotifier.value ?? false)) {
+      return;
+    }
+    _stalledLoadRecoveryInFlight = true;
+    final provider = widget.image;
+    final oldStream = _imageStream;
+    _stopListeningToStream();
+    try {
+      final key = await provider.obtainKey(createLocalImageConfiguration(
+        context,
+        size: widget.width != null && widget.height != null
+            ? Size(widget.width!, widget.height!)
+            : null,
+      ));
+      PaintingBinding.instance.imageCache.evict(key, includeLive: true);
+    } catch (_) {
+      // Resolving again is still useful if the cache entry was already gone.
+    }
+    if (!mounted) return;
+    _stalledLoadRecoveryInFlight = false;
+    if (identical(_imageStream, oldStream)) {
+      _imageStream = null;
+      _resolveImage();
+    }
+    if (!_isListeningToStream) _listenToStream();
+    if (!TickerMode.valuesOf(context).enabled) {
+      _stopListeningToStream(keepStreamAlive: true);
     }
   }
 
@@ -223,6 +301,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
         onChunk: _handleImageChunk,
         onError: (Object error, StackTrace? stackTrace) {
           if (!mounted) return;
+          _stalledLoadTimer?.cancel();
+          _stalledLoadTimer = null;
           setState(() {
             _lastException = error;
           });
@@ -242,6 +322,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
         imageInfo.image.width.toDouble(), imageInfo.image.height.toDouble());
     _retryTimer?.cancel();
     _retryTimer = null;
+    _stalledLoadTimer?.cancel();
+    _stalledLoadTimer = null;
     _cache[widget.image.hashCode] = size;
     widget.onImageSize?.call(size);
     setState(() {
@@ -259,6 +341,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       _loadingProgress = event;
       _lastException = null;
     });
+    _scheduleStalledLoadRecovery();
   }
 
   void _replaceImage({required ImageInfo? info}) {
@@ -322,6 +405,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   void _stopListeningToStream({bool keepStreamAlive = false}) {
     _retryTimer?.cancel();
     _retryTimer = null;
+    _stalledLoadTimer?.cancel();
+    _stalledLoadTimer = null;
     if (!_isListeningToStream) {
       return;
     }
