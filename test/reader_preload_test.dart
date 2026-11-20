@@ -10,6 +10,8 @@ import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
+import 'package:pica_comic/foundation/image_loader/stream_image_provider.dart';
+import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/foundation/state_controller.dart';
 import 'package:pica_comic/network/res.dart';
 import 'package:pica_comic/pages/reader/comic_reading_page.dart';
@@ -96,6 +98,18 @@ class _ReusableImageProvider extends ImageProvider<_ReusableImageProvider> {
           _ReusableImageProvider key, ImageDecoderCallback decode) =>
       OneFrameImageStreamCompleter(result.future.then(
           (info) => ImageInfo(image: info.image.clone(), scale: info.scale)));
+}
+
+class _ScopedContinuousReadingData extends PicacgReadingData {
+  _ScopedContinuousReadingData(this.createProvider)
+      : super('Reader test', 'scoped-reader-test', []);
+
+  final ReaderImageProviderBuilder createProvider;
+
+  @override
+  ImageProvider createImageProvider(int ep, int page, String url,
+          {ImageTaskScope? taskScope}) =>
+      createProvider(page, taskScope!);
 }
 
 void main() {
@@ -297,6 +311,122 @@ void main() {
     for (var frame = 0; frame < 12; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
       expect(logic.index, 11);
+    }
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('continuous reader resumes visible streams after rapid reversals',
+      (tester) async {
+    final oldMode = appdata.settings[9];
+    final oldPreload = appdata.settings[28];
+    appdata.settings[9] = '4';
+    appdata.settings[28] = '3';
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    final loads = <({
+      int index,
+      ImageTaskScope scope,
+      StreamController<DownloadProgress> source,
+    })>[];
+    final data = _ScopedContinuousReadingData((index, scope) {
+      return StreamImageProvider(() {
+        final source = StreamController<DownloadProgress>();
+        loads.add((index: index, scope: scope, source: source));
+        return source.stream;
+      }, 'rapid-reversal-$index', taskScope: scope);
+    });
+    final page = ComicReadingPage(data, 1, 1);
+    final registered = StateController.find<ComicReadingPageLogic>();
+    registered.releaseImageTasks();
+    registered.pageController.dispose();
+    registered.scrollController.dispose();
+    registered.focusNode.dispose();
+    StateController.remove<ComicReadingPageLogic>();
+    final logic = ComicReadingPageLogic(1, data, 1, () {})
+      ..urls = List.generate(40, (index) => 'page-$index');
+    addTearDown(() async {
+      logic.releaseImageTasks();
+      await logic.readerImages.waitForIdle();
+      logic.pageController.dispose();
+      logic.scrollController.dispose();
+      logic.clearPhotoViewControllers();
+      logic.focusNode.dispose();
+      StateController.remove<ComicReadingPageLogic>();
+      for (final load in loads) {
+        unawaited(load.source.close());
+      }
+      appdata.settings[9] = oldMode;
+      appdata.settings[28] = oldPreload;
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      BaseImageProvider.clearCache();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: StateBuilder<ComicReadingPageLogic>(
+        init: logic,
+        builder: (value) => Builder(
+          builder: (context) => Stack(
+            children: [page.buildComicView(value, context, data.id)],
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    for (var turn = 0; turn < 3; turn++) {
+      final gesture = await tester.startGesture(const Offset(200, 400));
+      for (var step = 0; step < 16; step++) {
+        await gesture.moveBy(const Offset(0, -280));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      for (var step = 0; step < 15; step++) {
+        await gesture.moveBy(const Offset(0, 280));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+    expect(loads.any((load) => load.scope.isCancelled), isTrue,
+        reason: 'the gestures must release real reader requests');
+    final (first, count) = logic.visibleImageRange;
+    expect(count, greaterThan(0));
+    for (var index = first; index < first + count; index++) {
+      expect(
+        loads.any((load) => load.index == index && load.scope.isCancelled),
+        isTrue,
+        reason: 'visible page $index must revisit a cancelled request',
+      );
+      expect(
+        loads.any((load) =>
+            load.index == index &&
+            !load.scope.isCancelled &&
+            load.source.hasListener),
+        isTrue,
+        reason: 'visible page $index must have a live download after stopping',
+      );
+    }
+    final bytes = Uint8List.fromList(
+        image.encodePng(image.Image(width: 400, height: 480)));
+    for (final load in loads.toList()) {
+      if (load.scope.isCancelled || !load.source.hasListener) continue;
+      load.source.add(DownloadProgress(1, 1, '', '', bytes));
+      unawaited(load.source.close());
+    }
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump();
+    }
+    for (var index = first; index < first + count; index++) {
+      final provider = logic.readerImages.imageFor(index);
+      final widget = find.byWidgetPredicate((widget) =>
+          widget is ComicImage && identical(widget.image, provider));
+      expect(widget, findsOneWidget);
+      final rendered =
+          find.descendant(of: widget, matching: find.byType(RawImage));
+      expect(rendered, findsOneWidget,
+          reason: 'visible page $index must render the completed download');
+      expect(tester.widget<RawImage>(rendered).image, isNotNull);
     }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
