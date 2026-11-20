@@ -48,6 +48,23 @@ void main() {
     expect(events, ['integration:true', 'database:false']);
   });
 
+  test('optional account marker persistence failure does not block startup',
+      () async {
+    var applicationReady = false;
+    final startup = StartupCoordinator([
+      StartupStep('Nhentai account marker',
+          () async => throw StateError('disk write failed'),
+          essential: false),
+      StartupStep('application data', () async => applicationReady = true),
+    ]);
+
+    final result = await startup.run();
+
+    expect(result.ready, isTrue);
+    expect(applicationReady, isTrue);
+    expect(result.warnings.single.stage, 'Nhentai account marker');
+  });
+
   test('nonblocking startup returns before optional work completes', () async {
     final optional = Completer<void>();
     final calls = <String>[];

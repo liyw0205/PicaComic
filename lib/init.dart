@@ -63,15 +63,15 @@ final _startup = StartupCoordinator([
   StartupStep('JavaScript engine', () => JsEngine().init(throwOnError: true)),
   const StartupStep('comic sources', ComicSource.init),
   StartupStep('downloads', downloadManager.init),
-  StartupStep('Nhentai', () async {
+  StartupStep('Nhentai', () => NhentaiNetwork().init()),
+  StartupStep('Nhentai account marker', () async {
     final network = NhentaiNetwork();
-    await network.init();
     final source = ComicSource.find('nhentai');
     if (source != null &&
         syncNhentaiAccountMarker(source.data, network.logged)) {
       await source.saveData();
     }
-  }),
+  }, essential: false),
   StartupStep('JM', () => JmNetwork().init()),
   StartupStep('favorites', () => LocalFavoritesManager().init()),
   StartupStep('history', () => HistoryManager().init()),
