@@ -188,7 +188,7 @@ class ReaderImageController {
         _armStallTimer(image, generation);
       }
     }
-    return changed;
+    return changedState || changed;
   }
 
   void _drain() {

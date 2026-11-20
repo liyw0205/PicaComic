@@ -597,6 +597,57 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('stopping scroll reports the resumed preload window',
+      (tester) async {
+    final controller = ReaderImageController(maxConcurrent: 3);
+    final providers = <int, _ControlledImageProvider>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 12,
+      firstVisible: 0,
+      visibleCount: 1,
+      preloadCount: 3,
+      createProvider: (index, _) => providers.putIfAbsent(
+        index,
+        () => _ControlledImageProvider(Completer<ImageInfo>()),
+      ),
+    );
+    expect(providers.keys, orderedEquals([1, 2, 3]));
+
+    controller.setScrolling(true);
+    expect(controller.updateWindow(4), isTrue);
+    expect(controller.activePreloads, 0);
+
+    expect(
+      controller.setScrolling(false),
+      isTrue,
+      reason: 'ending a scroll must request a rebuild for newly started work',
+    );
+    expect(providers.keys, orderedEquals([1, 2, 3, 5, 6, 7]));
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.blue, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(1, 1));
+    picture.dispose();
+    for (final provider in providers.values) {
+      provider.result.complete(info.clone());
+    }
+    await tester.pumpAndSettle();
+    info.dispose();
+  });
+
   testWidgets('preloads pages in the current scroll direction', (tester) async {
     final controller = ReaderImageController(maxConcurrent: 4);
     addTearDown(() async {

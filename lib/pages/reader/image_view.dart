@@ -389,9 +389,9 @@ extension ImageExt on ComicReadingPage {
           onNotification: (_) {
             if (logic.readingMethod == ReadingMethod.topToBottomContinuously) {
               final (first, count) = logic.visibleImageRange;
-              final changed =
+              var changed =
                   logic.readerImages.updateWindow(first, visibleCount: count);
-              logic.readerImages.setScrolling(false);
+              changed = logic.readerImages.setScrolling(false) || changed;
               if (changed) logic.update();
             }
             return false;
