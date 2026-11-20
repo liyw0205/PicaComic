@@ -9,9 +9,13 @@ typedef ReaderImageProviderBuilder = ImageProvider Function(
 
 /// Keeps a fixed window around the visible spread and bounds speculative work.
 class ReaderImageController {
-  ReaderImageController({this.maxConcurrent = 3}) : assert(maxConcurrent > 0);
+  ReaderImageController({
+    this.maxConcurrent = 3,
+    this.stalledLoadTimeout = const Duration(seconds: 15),
+  }) : assert(maxConcurrent > 0);
 
   final int maxConcurrent;
+  final Duration stalledLoadTimeout;
   final _images = <int, _ReaderImage>{};
   final _active = <_ReaderImage>{};
   final _pendingReleases = <Future<void>>{};
@@ -25,7 +29,9 @@ class ReaderImageController {
   int _firstVisible = 0;
   int _visibleCount = 1;
   int _preloadCount = 0;
+  int _scrollDirection = 1;
   bool _isScrolling = false;
+  bool _windowMovedWhileScrolling = false;
   bool _disposed = false;
   BuildContext? _context;
   ReaderImageProviderBuilder? _createProvider;
@@ -66,16 +72,25 @@ class ReaderImageController {
 
   bool updateWindow(int firstVisible, {int? visibleCount}) {
     if (_disposed || requested.isEmpty) return false;
+    final previousVisibleCount = _visibleCount;
     if (visibleCount != null) _visibleCount = visibleCount;
-    _firstVisible = firstVisible.clamp(0, requested.length - 1);
+    final nextFirstVisible = firstVisible.clamp(0, requested.length - 1);
+    if (_isScrolling &&
+        (nextFirstVisible != _firstVisible ||
+            _visibleCount != previousVisibleCount)) {
+      _windowMovedWhileScrolling = true;
+    }
+    if (nextFirstVisible != _firstVisible) {
+      _scrollDirection = nextFirstVisible > _firstVisible ? 1 : -1;
+    }
+    _firstVisible = nextFirstVisible;
     final visibleEnd =
         (_firstVisible + _visibleCount).clamp(0, requested.length);
-    final preloadEnd = (visibleEnd + _preloadCount).clamp(0, requested.length);
+    final retainedPadding =
+        _preloadCount > _visibleCount ? _preloadCount : _visibleCount;
     // Keep the neighboring spread mounted during a page turn, even at 0 preload.
-    final start = (_firstVisible - _visibleCount).clamp(0, requested.length);
-    final end = (visibleEnd +
-            (_preloadCount > _visibleCount ? _preloadCount : _visibleCount))
-        .clamp(0, requested.length);
+    final start = (_firstVisible - retainedPadding).clamp(0, requested.length);
+    final end = (visibleEnd + retainedPadding).clamp(0, requested.length);
     final retained = {for (var i = start; i < end; i++) i};
     final changed = !setEquals(_retained, retained);
     _retained = retained;
@@ -89,12 +104,39 @@ class ReaderImageController {
         _release(image);
       }
     }
-    _queue
-      ..clear()
-      ..addAll([
-        for (var i = visibleEnd; i < preloadEnd; i++)
-          if (!requested[i] && (_retryCounts[i] ?? 0) <= 1) i,
-      ]);
+    final candidates = _scrollDirection > 0
+        ? [
+            for (var i = visibleEnd;
+                i < (visibleEnd + _preloadCount).clamp(0, requested.length);
+                i++)
+              i,
+          ]
+        : [
+            for (var i = _firstVisible - 1;
+                i >= (_firstVisible - _preloadCount).clamp(0, requested.length);
+                i--)
+              i,
+          ];
+    final visible = {
+      for (var i = _firstVisible; i < visibleEnd; i++) i,
+    };
+    final candidateSet = candidates.toSet();
+    for (final image in _active.toList()) {
+      if (visible.contains(image.index) || candidateSet.contains(image.index)) {
+        continue;
+      }
+      _active.remove(image);
+      _images.remove(image.index);
+      requested[image.index] = false;
+      _retryTimers.remove(image.index)?.cancel();
+      _retryCounts.remove(image.index);
+      _release(image);
+    }
+    _queue.clear();
+    _queue.addAll([
+      for (final index in candidates)
+        if (!requested[index] && (_retryCounts[index] ?? 0) <= 1) index,
+    ]);
     _drain();
     return changed;
   }
@@ -121,16 +163,38 @@ class ReaderImageController {
   }
 
   bool setScrolling(bool scrolling) {
+    final changedState = _isScrolling != scrolling;
     _isScrolling = scrolling;
-    if (!scrolling) {
-      return updateWindow(_firstVisible, visibleCount: _visibleCount);
+    if (changedState) {
+      _windowMovedWhileScrolling = false;
+      for (final image in _active) {
+        image.stallTimer?.cancel();
+        image.stallTimer = null;
+      }
+      if (scrolling) {
+        for (final index in _retained) {
+          _retryCounts.remove(index);
+        }
+      }
     }
-    return false;
+    if (scrolling) return false;
+    final changed = updateWindow(_firstVisible, visibleCount: _visibleCount);
+    if (changedState) {
+      for (final image in _active) {
+        _armStallTimer(image, generation);
+      }
+    }
+    return changed;
   }
 
   void _drain() {
     final context = _context;
-    if (context == null || !context.mounted || _disposed) return;
+    if (context == null ||
+        !context.mounted ||
+        _disposed ||
+        (_isScrolling && _windowMovedWhileScrolling)) {
+      return;
+    }
     while (_active.length < maxConcurrent && _queue.isNotEmpty) {
       final index = _queue.removeAt(0);
       if (!_retained.contains(index) || requested[index]) continue;
@@ -151,6 +215,7 @@ class ReaderImageController {
             _retryTimers.remove(index);
             if (!_isCurrent(image, requestGeneration) ||
                 requested[index] ||
+                _isScrolling ||
                 !_isPreloadCandidate(index)) {
               return;
             }
@@ -162,6 +227,8 @@ class ReaderImageController {
 
       void finished() {
         if (!_isCurrent(image, requestGeneration)) return;
+        image.stallTimer?.cancel();
+        image.stallTimer = null;
         _active.remove(image);
         if (!didFail) {
           _retryCounts.remove(index);
@@ -171,16 +238,56 @@ class ReaderImageController {
       }
 
       try {
-        unawaited(precacheImage(image.provider, context, onError: failed).then(
+        final stream = image.provider.resolve(
+          createLocalImageConfiguration(context),
+        );
+        late final ImageStreamListener listener;
+        listener = ImageStreamListener(
+          (info, _) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              info.dispose();
+              _removeListener(image, stream, listener);
+            });
+          },
+          onChunk: (event) {
+            if (_isCurrent(image, requestGeneration)) {
+              if (event.cumulativeBytesLoaded > image.lastLoadedBytes) {
+                image.lastLoadedBytes = event.cumulativeBytesLoaded;
+                image.lastProgressAt = DateTime.now();
+              }
+              _armStallTimer(image, requestGeneration);
+            }
+          },
+          onError: (error, stackTrace) {
+            if (_isCurrent(image, requestGeneration)) {
+              failed(error, stackTrace);
+            }
+            _removeListener(image, stream, listener);
+          },
+        );
+        image.stream = stream;
+        image.listener = listener;
+        stream.addListener(listener);
+        unawaited(precacheImage(
+          image.provider,
+          context,
+          onError: (_, __) {},
+        ).then(
           (_) => finished(),
           onError: (Object error, StackTrace stackTrace) {
             failed(error, stackTrace);
             finished();
           },
         ));
+        _armStallTimer(image, requestGeneration);
       } catch (error, stackTrace) {
         failed(error, stackTrace);
         finished();
+        final stream = image.stream;
+        final listener = image.listener;
+        if (stream != null && listener != null) {
+          _removeListener(image, stream, listener);
+        }
       }
     }
   }
@@ -188,12 +295,78 @@ class ReaderImageController {
   bool _isPreloadCandidate(int index) {
     final visibleEnd =
         (_firstVisible + _visibleCount).clamp(0, requested.length);
-    final preloadEnd = (visibleEnd + _preloadCount).clamp(0, requested.length);
-    return index >= visibleEnd && index < preloadEnd;
+    if (_scrollDirection > 0) {
+      final preloadEnd =
+          (visibleEnd + _preloadCount).clamp(0, requested.length);
+      return index >= visibleEnd && index < preloadEnd;
+    }
+    final preloadStart =
+        (_firstVisible - _preloadCount).clamp(0, requested.length);
+    return index >= preloadStart && index < _firstVisible;
+  }
+
+  void _armStallTimer(_ReaderImage image, int requestGeneration) {
+    image.stallTimer?.cancel();
+    image.stallTimer = null;
+    if (_isScrolling ||
+        !_isCurrent(image, requestGeneration) ||
+        !_active.contains(image)) {
+      return;
+    }
+    final elapsed = DateTime.now().difference(
+      image.lastProgressAt ?? image.startedAt,
+    );
+    final remaining = stalledLoadTimeout - elapsed;
+    image.stallTimer =
+        Timer(remaining.isNegative ? Duration.zero : remaining, () {
+      image.stallTimer = null;
+      if (!_isCurrent(image, requestGeneration) || _isScrolling) return;
+      _recoverStalledPreload(image, requestGeneration);
+    });
+  }
+
+  void _recoverStalledPreload(_ReaderImage image, int requestGeneration) {
+    final index = image.index;
+    if (!_isCurrent(image, requestGeneration) || !_active.contains(image)) {
+      return;
+    }
+    final retries = _retryCounts[index] ?? 0;
+    _retryCounts[index] = retries + 1;
+    _active.remove(image);
+    _images.remove(index);
+    requested[index] = false;
+    _release(image);
+    if (retries == 0 &&
+        _retained.contains(index) &&
+        _isPreloadCandidate(index) &&
+        !_queue.contains(index)) {
+      _queue.insert(0, index);
+    }
+    _drain();
+  }
+
+  void _removeListener(
+      _ReaderImage image, ImageStream stream, ImageStreamListener listener) {
+    if (!identical(image.stream, stream) ||
+        !identical(image.listener, listener)) {
+      return;
+    }
+    image.stream = null;
+    image.listener = null;
+    stream.removeListener(listener);
   }
 
   void _release(_ReaderImage image) {
     // Do not let a newly mounted image inherit the cancelled pending completer.
+    image.stallTimer?.cancel();
+    image.stallTimer = null;
+    final stream = image.stream;
+    final listener = image.listener;
+    image.stream = null;
+    image.listener = null;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
     final release = Future.wait<void>([
       image.scope.cancel(),
       image.provider.evict().then<void>((_) {}),
@@ -226,7 +399,12 @@ class ReaderImageController {
     _retryTimers.clear();
     _retryCounts.clear();
     _isScrolling = false;
+    _firstVisible = 0;
+    _visibleCount = 1;
+    _preloadCount = 0;
+    _scrollDirection = 1;
     _imageSizes.clear();
+    _windowMovedWhileScrolling = false;
     _retained.clear();
     requested = [];
     _context = null;
@@ -240,9 +418,15 @@ class ReaderImageController {
 }
 
 class _ReaderImage {
-  const _ReaderImage(this.index, this.scope, this.provider);
+  _ReaderImage(this.index, this.scope, this.provider);
 
   final int index;
   final ImageTaskScope scope;
   final ImageProvider provider;
+  final DateTime startedAt = DateTime.now();
+  DateTime? lastProgressAt;
+  int lastLoadedBytes = 0;
+  ImageStream? stream;
+  ImageStreamListener? listener;
+  Timer? stallTimer;
 }

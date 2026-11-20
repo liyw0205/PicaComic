@@ -313,6 +313,8 @@ void main() {
       expect(logic.index, 11);
     }
     expect(tester.takeException(), isNull);
+    logic.releaseImageTasks();
+    await logic.readerImages.waitForIdle();
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -429,6 +431,8 @@ void main() {
       expect(tester.widget<RawImage>(rendered).image, isNotNull);
     }
     expect(tester.takeException(), isNull);
+    logic.releaseImageTasks();
+    await logic.readerImages.waitForIdle();
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -506,8 +510,7 @@ void main() {
     logic.readerImages.setScrolling(true);
     result.completeError(StateError('First image request failed'));
     await tester.pump();
-    // The old precache implementation reports this through FlutterError.
-    tester.takeException();
+    expect(tester.takeException(), isNull);
 
     expect(logic.requestedLoadingItems[1], isFalse);
   });
@@ -589,7 +592,150 @@ void main() {
     expect(retryProvider.loads, 2);
     expect(logic.requestedLoadingItems[2], isTrue);
     expect(tester.takeException(), isNull);
+    logic.releaseImageTasks();
+    await logic.readerImages.waitForIdle();
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('preloads pages in the current scroll direction', (tester) async {
+    final controller = ReaderImageController(maxConcurrent: 4);
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+    });
+    final providers = <int, _ControlledImageProvider>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+
+    controller.configure(
+      context: context,
+      imageCount: 40,
+      firstVisible: 10,
+      visibleCount: 1,
+      preloadCount: 4,
+      createProvider: (index, _) => providers.putIfAbsent(
+        index,
+        () => _ControlledImageProvider(Completer<ImageInfo>()),
+      ),
+    );
+    expect(providers.keys, orderedEquals([11, 12, 13, 14]));
+
+    controller.setScrolling(true);
+    controller.updateWindow(8);
+
+    expect(controller.contains(4), isTrue);
+    expect(controller.activePreloads, 0,
+        reason: 'obsolete forward preloads must release their slots');
+    expect(providers.keys, orderedEquals([11, 12, 13, 14]),
+        reason: 'new speculative loads wait until scrolling stops');
+
+    controller.setScrolling(false);
+    expect(providers.keys, orderedEquals([11, 12, 13, 14, 7, 6, 5, 4]));
+    expect(controller.activePreloads, 4);
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.red, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(1, 1));
+    picture.dispose();
+    for (final provider in providers.values) {
+      provider.result.complete(info.clone());
+    }
+    await tester.pumpAndSettle();
+    expect(controller.activePreloads, 0);
+    controller.dispose();
+    await controller.waitForIdle();
+    info.dispose();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('stalled preload retries once after scrolling stops',
+      (tester) async {
+    final controller = ReaderImageController(
+      maxConcurrent: 1,
+      stalledLoadTimeout: const Duration(seconds: 15),
+    );
+    final scopes = <ImageTaskScope>[];
+    final sources = <StreamController<DownloadProgress>>[];
+    final loads = <int, int>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 4,
+      firstVisible: 1,
+      visibleCount: 1,
+      preloadCount: 1,
+      createProvider: (index, scope) {
+        scopes.add(scope);
+        return StreamImageProvider(() {
+          loads[index] = (loads[index] ?? 0) + 1;
+          final source = StreamController<DownloadProgress>();
+          sources.add(source);
+          return source.stream;
+        }, 'stalled-preload-$index', taskScope: scope);
+      },
+    );
+    await tester.pump();
+    expect(loads[2], 1);
+
+    controller.setScrolling(true);
+    await tester.pump(const Duration(seconds: 30));
+    expect(loads[2], 1,
+        reason: 'preloads must not restart while the reader is moving');
+    sources.first.add(DownloadProgress.inProgress(10, 100, '', ''));
+    await tester.pump();
+
+    controller.setScrolling(false);
+    await tester.pump(const Duration(seconds: 14));
+    expect(loads[2], 1);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    expect(loads[2], 2);
+    expect(scopes.first.isCancelled, isTrue);
+    expect(scopes.last.isCancelled, isFalse);
+    expect(controller.requested[2], isTrue);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pump();
+    expect(loads[2], 2,
+        reason: 'one stalled recovery per idle cycle must remain bounded');
+    expect(controller.requested[2], isFalse);
+    expect(controller.activePreloads, 0);
+
+    controller.setScrolling(true);
+    controller.setScrolling(false);
+    await tester.pump();
+    expect(loads[2], 3,
+        reason: 'a later user scroll must rearm the bounded recovery');
+    expect(tester.takeException(), isNull);
+    final bytes = Uint8List.fromList(
+      image.encodePng(image.Image(width: 1, height: 1)),
+    );
+    sources.last
+        .add(DownloadProgress(bytes.length, bytes.length, '', '', bytes));
+    unawaited(sources.last.close());
+    for (var frame = 0; frame < 20 && controller.activePreloads > 0; frame++) {
+      await tester.pump();
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+    }
+    await tester.pumpAndSettle();
+    expect(controller.activePreloads, 0);
+    controller.dispose();
+    await controller.waitForIdle();
   });
 
   testWidgets('twenty builds schedule three concurrent preloads once',
@@ -622,6 +768,20 @@ void main() {
     expect(providers.values.map((provider) => provider.loads), everyElement(1));
     expect(controller.contains(16), isFalse);
     expect(controller.contains(15), isTrue);
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.red, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(1, 1));
+    picture.dispose();
+    for (final provider in providers.values) {
+      provider.result.complete(info.clone());
+    }
+    await tester.pump();
+    controller.dispose();
+    await controller.waitForIdle();
+    info.dispose();
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('retry after an image failure reaches the provider again',
@@ -691,6 +851,16 @@ void main() {
     expect(controller.generation, greaterThan(previousGeneration));
     expect(controller.requested[1], isTrue);
     expect(controller.activePreloads, 1);
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.red, BlendMode.src);
+    final picture = recorder.endRecording();
+    next.complete(ImageInfo(image: picture.toImageSync(1, 1)));
+    picture.dispose();
+    await tester.pump();
+    controller.dispose();
+    await controller.waitForIdle();
+    await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
 
