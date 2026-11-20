@@ -167,8 +167,6 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   void _resolveImage() {
     _retryTimer?.cancel();
     _retryTimer = null;
-    _stalledLoadTimer?.cancel();
-    _stalledLoadTimer = null;
     // Stop deferred callbacks from resolving a superseded reader scope.
     _scrollAwareContext.dispose();
     _scrollAwareContext = DisposableBuildContext<State<ComicImage>>(this);
@@ -205,7 +203,6 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
         !_isListeningToStream ||
         _imageInfo != null ||
         _lastException != null ||
-        _loadingProgress == null ||
         _stalledLoadRestarts >= 1 ||
         _stalledLoadRecoveryInFlight ||
         (_scrollPosition?.isScrollingNotifier.value ?? false)) {
@@ -359,6 +356,9 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
       return;
     }
 
+    _stalledLoadTimer?.cancel();
+    _stalledLoadTimer = null;
+
     if (_isListeningToStream) {
       _imageStream!.removeListener(_getListener());
     }
@@ -379,6 +379,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
     _imageStream = newStream;
     if (_isListeningToStream) {
       _imageStream!.addListener(_getListener());
+      _scheduleStalledLoadRecovery();
     }
   }
 
@@ -393,6 +394,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
     _isListeningToStream = true;
     _scheduleRetry();
+    _scheduleStalledLoadRecovery();
   }
 
   /// Stops listening to the image stream, if this state object has attached a

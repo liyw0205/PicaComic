@@ -611,6 +611,99 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets(
+      'visible image recovers a pending stream without replayed progress',
+      (tester) async {
+    final sources = <StreamController<DownloadProgress>>[];
+    final provider = StreamImageProvider(() {
+      final source = StreamController<DownloadProgress>();
+      sources.add(source);
+      return source.stream;
+    }, 'visible-missed-initial-progress');
+    final existing = provider.resolve(ImageConfiguration.empty);
+    var chunks = 0;
+    final listener = ImageStreamListener((info, _) => info.dispose(),
+        onChunk: (_) => chunks++, onError: (_, __) {});
+    existing.addListener(listener);
+    await tester.pump();
+    expect(chunks, greaterThan(0));
+    expect(sources, hasLength(1));
+    addTearDown(() {
+      for (final source in sources) {
+        unawaited(source.close());
+      }
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: ComicImage(image: provider, width: 100, height: 120),
+    ));
+    existing.removeListener(listener);
+    await tester.pump(const Duration(seconds: 14));
+    expect(sources, hasLength(1));
+    await tester.pump(const Duration(seconds: 1));
+    await _pumpUntil(tester, () => sources.length > 1);
+    expect(sources, hasLength(2),
+        reason: 'joining a pending stream must not require another chunk');
+    expect(sources.first.hasListener, isFalse);
+    expect(sources.last.hasListener, isTrue);
+
+    final bytes = Uint8List.fromList(
+        image.encodePng(image.Image(width: 100, height: 120)));
+    sources.last.add(DownloadProgress(1, 1, '', '', bytes));
+    unawaited(sources.last.close());
+    await _pumpUntil(tester, () => find.byType(RawImage).evaluate().isNotEmpty);
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resolving the same pending stream preserves stalled recovery',
+      (tester) async {
+    final sources = <StreamController<DownloadProgress>>[];
+    final provider = StreamImageProvider(() {
+      final source = StreamController<DownloadProgress>();
+      sources.add(source);
+      return source.stream;
+    }, 'visible-dependency-stalled-recovery');
+    Widget view(bool invertColors) => MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(invertColors: invertColors),
+            child: ComicImage(image: provider, width: 100, height: 120),
+          ),
+        );
+    addTearDown(() {
+      for (final source in sources) {
+        unawaited(source.close());
+      }
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+
+    await tester.pumpWidget(view(false));
+    await tester.pump(const Duration(seconds: 5));
+    final state = tester.state(find.byType(ComicImage));
+    await tester.pumpWidget(view(true));
+    expect(tester.state(find.byType(ComicImage)), same(state));
+    expect(sources, hasLength(1));
+    await tester.pump(const Duration(seconds: 15));
+    await _pumpUntil(tester, () => sources.length > 1);
+    expect(sources, hasLength(2),
+        reason: 'a dependency change must not disable the inactivity timer');
+    expect(sources.first.hasListener, isFalse);
+    expect(sources.last.hasListener, isTrue);
+    await tester.pump(const Duration(seconds: 30));
+    expect(sources, hasLength(2),
+        reason: 'a stalled load must still have a bounded recovery budget');
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('visible image recovery is bounded and rearmed by another drag',
       (tester) async {
     final scroll = ScrollController();
