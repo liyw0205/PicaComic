@@ -92,7 +92,7 @@ class ReaderImageController {
     final start = (_firstVisible - retainedPadding).clamp(0, requested.length);
     final end = (visibleEnd + retainedPadding).clamp(0, requested.length);
     final retained = {for (var i = start; i < end; i++) i};
-    final changed = !setEquals(_retained, retained);
+    var changed = !setEquals(_retained, retained);
     _retained = retained;
     for (final index in _images.keys.toList()) {
       if (!_retained.contains(index)) {
@@ -127,6 +127,7 @@ class ReaderImageController {
       }
       _active.remove(image);
       _images.remove(image.index);
+      changed = true;
       requested[image.index] = false;
       _retryTimers.remove(image.index)?.cancel();
       _retryCounts.remove(image.index);

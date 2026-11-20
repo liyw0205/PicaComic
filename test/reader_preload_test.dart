@@ -652,6 +652,56 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('window reports cancelled providers inside the retained range',
+      (tester) async {
+    final controller = ReaderImageController();
+    final scopes = <int, ImageTaskScope>{};
+    final sources = <int, StreamController<DownloadProgress>>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+      for (final source in sources.values) {
+        await source.close();
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 5,
+      firstVisible: 1,
+      visibleCount: 1,
+      preloadCount: 3,
+      createProvider: (index, scope) => StreamImageProvider(() {
+        scopes[index] = scope;
+        final source = StreamController<DownloadProgress>();
+        sources[index] = source;
+        return source.stream;
+      }, 'retained-window-$index', taskScope: scope),
+    );
+    await tester.pump();
+    expect(scopes.keys, unorderedEquals([2, 3, 4]));
+    final previousProvider = controller.imageFor(2);
+    final previousScope = scopes[2]!;
+
+    controller.setScrolling(true);
+    final changed = controller.updateWindow(3);
+
+    expect(controller.contains(2), isTrue,
+        reason: 'the page remains in the retained range');
+    expect(previousScope.isCancelled, isTrue,
+        reason: 'the page is no longer visible or a directional candidate');
+    expect(controller.imageFor(2), isNot(same(previousProvider)),
+        reason: 'a replacement scope is required when the page is revisited');
+    expect(changed, isTrue,
+        reason: 'callers must rebuild after an active provider is cancelled');
+  });
+
   testWidgets('stalled preload retries once after scrolling stops',
       (tester) async {
     final controller = ReaderImageController(
