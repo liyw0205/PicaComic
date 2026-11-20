@@ -819,6 +819,7 @@ class ImageManager {
     final cancelToken = await _startTask(cacheKey);
 
     CachingFile? caching;
+    Map<String, dynamic>? config;
 
     try {
       var cache = await CacheManager().findCache(cacheKey);
@@ -829,7 +830,6 @@ class ImageManager {
 
       var source = ComicSource.find(sourceKey) ??
           (throw "Unknown Comic Source $sourceKey");
-      Map<String, dynamic> config;
 
       if (source.getImageLoadingConfig == null) {
         config = {};
@@ -879,7 +879,7 @@ class ImageManager {
       Uint8List? result;
 
       if (shouldModifyData) {
-        var data = (config['onResponse'] as JSInvokable)(rawData);
+        var data = (config['onResponse'] as JSInvokable)([rawData]);
         if (data is! Uint8List) {
           throw "Invalid Config: onImageLoad.onResponse return invalid type\n"
               "Expected: Uint8List(ArrayBuffer)\n"
@@ -912,7 +912,11 @@ class ImageManager {
       }
       rethrow;
     } finally {
-      await _cleanupImageTask(cacheKey, cancelToken, caching);
+      try {
+        JSRef.freeRecursive(config);
+      } finally {
+        await _cleanupImageTask(cacheKey, cancelToken, caching);
+      }
     }
   }
 

@@ -483,8 +483,23 @@ class _ImageProvider extends BaseImageProvider<_ImageProvider> {
           stream = ImageManager().getHitomiImage(
               HitomiFile.fromMap(image.otherInfo["hitomi"][image.page - 1]),
               image.otherInfo["galleryId"]);
-        default:
+        case "picacg":
+        case "nhentai":
+        case "htmanga":
+        case "htManga":
           stream = ImageManager().getImage(image.otherInfo["url"]);
+        default:
+          final comicId = image.id.substring(type.length + 1);
+          final eps = image.otherInfo["eps"];
+          final chapterIds = eps is Map
+              ? eps.keys
+              : eps is List
+                  ? eps
+                  : const <String>[];
+          final epId =
+              chapterIds.elementAtOrNull(image.ep - 1)?.toString() ?? comicId;
+          stream = ImageManager()
+              .getCustomImage(image.otherInfo["url"], comicId, epId, type);
       }
       DownloadProgress? finishProgress;
       await for (var progress in stream) {
