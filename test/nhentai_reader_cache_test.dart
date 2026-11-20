@@ -16,6 +16,7 @@ import 'package:pica_comic/foundation/image_manager.dart';
 import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/nhentai_network/nhentai_main_network.dart';
 import 'package:pica_comic/network/source_network_policy.dart';
+import 'package:pica_comic/pages/reader/reader_image_controller.dart';
 
 Future<void> _decode(ImageProvider provider) async {
   final stream = provider.resolve(ImageConfiguration.empty);
@@ -253,5 +254,114 @@ void main() {
       blockedResponses.clear();
       SourceNetworkPolicy.instance.configure(key);
     }
+  });
+
+  test('same reader URL can restart while the cancelled response is pending',
+      () async {
+    final manager = ImageManager();
+    const path = '/page.png';
+    final url = '$origin$path';
+    final blocked = (started: Completer<void>(), release: Completer<void>());
+    blockedResponses[path] = blocked;
+    final firstScope = ImageTaskScope();
+    final first = StreamImageProvider(() => manager.getImage(url), url,
+        taskScope: firstScope);
+    final firstDecode = _decode(first);
+
+    try {
+      await blocked.started.future.timeout(const Duration(seconds: 3));
+      await firstScope.cancel();
+      await expectLater(
+        firstDecode,
+        throwsA(anyOf(
+          isA<ImageTaskCancelledException>(),
+          isA<DioException>()
+              .having((error) => error.type, 'type', DioExceptionType.cancel),
+        )),
+      );
+      await first.evict();
+
+      // Keep the old server handler blocked while the replacement starts.
+      blockedResponses.remove(path);
+      final secondScope = ImageTaskScope();
+      final second = StreamImageProvider(() => manager.getImage(url), url,
+          taskScope: secondScope);
+      try {
+        await _decode(second).timeout(const Duration(seconds: 5));
+        expect(requests.where((request) => request == path), hasLength(2));
+        expect(await CacheManager().findCache(url), isNotNull);
+        expect(ImageManager.haveTask, isFalse);
+      } finally {
+        await secondScope.cancel();
+        await second.evict();
+      }
+    } finally {
+      blockedResponses.remove(path);
+      if (!blocked.release.isCompleted) blocked.release.complete();
+      await firstScope.cancel();
+      await first.evict();
+    }
+  });
+
+  testWidgets(
+      'reader window release restarts the same URL through ImageManager',
+      (tester) async {
+    final controller = ReaderImageController();
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+
+    await tester.runAsync(() async {
+      const path = '/page.png';
+      final url = '$origin$path';
+      final blocked = (started: Completer<void>(), release: Completer<void>());
+      blockedResponses[path] = blocked;
+      final manager = ImageManager();
+      controller.configure(
+        context: context,
+        imageCount: 30,
+        firstVisible: 0,
+        visibleCount: 1,
+        preloadCount: 0,
+        createProvider: (_, scope) => StreamImageProvider(
+          () => manager.getImage(url),
+          url,
+          taskScope: scope,
+        ),
+      );
+      final oldProvider = controller.imageFor(0);
+      final oldCancelled = expectLater(
+        _decode(oldProvider),
+        throwsA(anyOf(
+          isA<ImageTaskCancelledException>(),
+          isA<DioException>()
+              .having((error) => error.type, 'type', DioExceptionType.cancel),
+        )),
+      );
+
+      try {
+        await blocked.started.future.timeout(const Duration(seconds: 3));
+        controller.updateWindow(20);
+        controller.updateWindow(0);
+        final newProvider = controller.imageFor(0);
+        blockedResponses.remove(path);
+
+        await oldCancelled;
+        await _decode(newProvider).timeout(const Duration(seconds: 5));
+        expect(requests.where((request) => request == path), hasLength(2));
+        expect(await CacheManager().findCache(url), isNotNull);
+        expect(ImageManager.haveTask, isFalse);
+      } finally {
+        blockedResponses.remove(path);
+        if (!blocked.release.isCompleted) blocked.release.complete();
+      }
+    });
+
+    controller.dispose();
+    await controller.waitForIdle();
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
   });
 }
