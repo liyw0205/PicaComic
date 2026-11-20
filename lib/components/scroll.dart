@@ -38,7 +38,7 @@ class SmoothScrollProvider extends StatefulWidget {
 }
 
 class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
-  late final ScrollController _controller;
+  late ScrollController _controller;
 
   double? _futurePosition;
 
@@ -50,6 +50,25 @@ class _SmoothScrollProviderState extends State<SmoothScrollProvider> {
   void initState() {
     _controller = widget.controller ?? ScrollController();
     super.initState();
+  }
+
+  @override
+  void didUpdateWidget(covariant SmoothScrollProvider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(widget.controller, oldWidget.controller)) return;
+    final previous = _controller;
+    _controller = widget.controller ?? ScrollController();
+    _futurePosition = null;
+    _scrollGeneration++;
+    if (oldWidget.controller == null && !identical(previous, _controller)) {
+      previous.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.controller == null) _controller.dispose();
+    super.dispose();
   }
 
   @override
