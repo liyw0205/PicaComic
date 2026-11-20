@@ -60,6 +60,21 @@ class _LateErrorImageProvider extends ImageProvider<_LateErrorImageProvider> {
   }
 }
 
+class _DeferredLoadingPhysics extends ScrollPhysics {
+  const _DeferredLoadingPhysics(this.deferred, {super.parent});
+
+  final ValueNotifier<bool> deferred;
+
+  @override
+  _DeferredLoadingPhysics applyTo(ScrollPhysics? ancestor) =>
+      _DeferredLoadingPhysics(deferred, parent: buildParent(ancestor));
+
+  @override
+  bool recommendDeferredLoading(
+          double velocity, ScrollMetrics metrics, BuildContext context) =>
+      deferred.value;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -319,6 +334,96 @@ void main() {
         image.encodePng(image.Image(width: 100, height: 120)));
     newSource.add(DownloadProgress(1, 1, '', '', bytes));
     unawaited(newSource.close());
+    for (var frame = 0;
+        frame < 20 && find.byType(RawImage).evaluate().isEmpty;
+        frame++) {
+      await tester.pump();
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+    }
+    await tester.pumpAndSettle();
+    expect(find.byType(RawImage), findsOneWidget);
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(find.text('Retry'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('deferred old scope cannot capture the returning mounted image',
+      (tester) async {
+    final controller = ReaderImageController();
+    final deferred = ValueNotifier(true);
+    final source = StreamController<DownloadProgress>();
+    final scopes = <ImageTaskScope>[];
+    var loads = 0;
+    var configured = false;
+    Widget view() => MaterialApp(
+          home: SingleChildScrollView(
+            physics: _DeferredLoadingPhysics(deferred),
+            child: Builder(builder: (context) {
+              if (!configured) {
+                configured = true;
+                controller.configure(
+                  context: context,
+                  imageCount: 40,
+                  firstVisible: 0,
+                  visibleCount: 1,
+                  preloadCount: 0,
+                  createProvider: (index, scope) {
+                    scopes.add(scope);
+                    return StreamImageProvider(() {
+                      loads++;
+                      return source.stream;
+                    }, 'deferred-rapid-return-$index', taskScope: scope);
+                  },
+                );
+              }
+              return SizedBox(
+                height: 1200,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ComicImage(
+                    image: controller.imageFor(0),
+                    width: 100,
+                    height: 120,
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+    addTearDown(() {
+      controller.dispose();
+      deferred.dispose();
+      unawaited(source.close());
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+    await tester.pumpWidget(view());
+    expect(loads, 0);
+    final originalState = tester.state(find.byType(ComicImage));
+
+    controller.updateWindow(20);
+    controller.updateWindow(0);
+    await tester.pumpWidget(view());
+    expect(tester.state(find.byType(ComicImage)), same(originalState));
+    expect(scopes.first.isCancelled, isTrue);
+    expect(scopes.last.isCancelled, isFalse);
+    expect(loads, 0);
+
+    deferred.value = false;
+    await tester.pump();
+    await tester.pump();
+    expect(loads, 1,
+        reason:
+            'scroll end must start the current scope, not the old callback');
+    expect(source.hasListener, isTrue);
+    final bytes = Uint8List.fromList(
+        image.encodePng(image.Image(width: 100, height: 120)));
+    source.add(DownloadProgress(1, 1, '', '', bytes));
+    unawaited(source.close());
     for (var frame = 0;
         frame < 20 && find.byType(RawImage).evaluate().isEmpty;
         frame++) {

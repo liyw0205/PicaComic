@@ -146,6 +146,9 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   }
 
   void _resolveImage() {
+    // Stop deferred callbacks from resolving a superseded reader scope.
+    _scrollAwareContext.dispose();
+    _scrollAwareContext = DisposableBuildContext<State<ComicImage>>(this);
     final ScrollAwareImageProvider provider = ScrollAwareImageProvider<Object>(
       context: _scrollAwareContext,
       imageProvider: widget.image,
