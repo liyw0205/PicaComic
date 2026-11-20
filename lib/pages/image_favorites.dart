@@ -8,9 +8,11 @@ import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
+import 'package:pica_comic/foundation/log.dart';
 import 'package:pica_comic/foundation/ui_mode.dart';
 import 'package:pica_comic/network/eh_network/eh_models.dart';
 import 'package:pica_comic/network/hitomi_network/hitomi_models.dart';
+import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/components/components.dart';
@@ -329,8 +331,9 @@ class FavoriteImageTile extends StatelessWidget {
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: onTap,
-                      onLongPress: onLongTap,
-                      onSecondaryTapDown: onSecondaryTap,
+                      onLongPress: () => onLongTap(context),
+                      onSecondaryTapDown: (details) =>
+                          onSecondaryTap(context, details),
                       borderRadius: BorderRadius.circular(8),
                       child: const SizedBox.expand(),
                     ),
@@ -431,24 +434,117 @@ class FavoriteImageTile extends StatelessWidget {
     }
   }
 
-  void onLongTap() {
-    showConfirmDialog(App.globalContext!, "确认删除".tl, "要删除这个图片吗".tl, delete);
+  void onLongTap(BuildContext context) {
+    unawaited(_confirmRemoval(context));
   }
 
-  Future<void> delete() async {
-    await ImageFavoriteManager.delete(image);
-    onDeleted?.call();
+  Future<void> _confirmRemoval(BuildContext context) async {
+    final pageRoute = ModalRoute.of(context);
+    final onRemoved = onDeleted;
+    final controller = StateController.findOrNull(tag: "image_favorites_page");
+    final deleted = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ImageRemovalDialog(image: image),
+    );
+    if (deleted != true || !context.mounted || pageRoute?.isActive == false) {
+      return;
+    }
+    onRemoved?.call();
     showToast(message: "删除成功".tl);
-    if (onDeleted == null) {
-      StateController.findOrNull(tag: "image_favorites_page")?.refresh();
+    if (onRemoved == null &&
+        identical(controller,
+            StateController.findOrNull(tag: "image_favorites_page"))) {
+      controller?.refresh();
     }
   }
 
-  void onSecondaryTap(TapDownDetails details) {
-    showDesktopMenu(App.globalContext!, details.globalPosition, [
+  void onSecondaryTap(BuildContext context, TapDownDetails details) {
+    showDesktopMenu(context, details.globalPosition, [
       DesktopMenuEntry(text: "查看".tl, onClick: onTap),
-      DesktopMenuEntry(text: "删除".tl, onClick: delete),
+      DesktopMenuEntry(
+          text: "删除".tl, onClick: () => unawaited(_confirmRemoval(context))),
     ]);
+  }
+}
+
+class _ImageRemovalDialog extends StatefulWidget {
+  const _ImageRemovalDialog({required this.image});
+
+  final ImageFavorite image;
+
+  @override
+  State<_ImageRemovalDialog> createState() => _ImageRemovalDialogState();
+}
+
+class _ImageRemovalDialogState extends State<_ImageRemovalDialog> {
+  bool _removing = false;
+  bool _failed = false;
+
+  Future<void> _remove() async {
+    if (_removing) return;
+    setState(() {
+      _removing = true;
+      _failed = false;
+    });
+    try {
+      await ImageFavoriteManager.delete(widget.image);
+    } catch (error, stack) {
+      Log.error('ImageFavorites',
+          'Failed to delete favorite image: ${safeNetworkError(error)}\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _removing = false;
+        _failed = true;
+      });
+      return;
+    }
+    if (!mounted) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    if (route.isCurrent) {
+      navigator.pop(true);
+    } else if (route.isActive) {
+      navigator.removeRoute(route, true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_removing,
+      child: AlertDialog(
+        title: Text("确认删除".tl),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("要删除这个图片吗".tl),
+            if (_failed)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text("操作失败".tl,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _removing ? null : () => Navigator.of(context).pop(),
+            child: Text("取消".tl),
+          ),
+          TextButton(
+            onPressed: _removing ? null : () => unawaited(_remove()),
+            child: _removing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text("确认".tl),
+          ),
+        ],
+      ),
+    );
   }
 }
 
