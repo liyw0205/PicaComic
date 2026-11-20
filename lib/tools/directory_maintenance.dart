@@ -570,7 +570,7 @@ Future<void> _finishMigration(
   required bool deleteSource,
 }) async {
   if (deleteSource && await source.exists()) {
-    if (!await _sourceMatches(source, entries)) {
+    if (!await _sourceCanBeCleaned(source, entries)) {
       throw StateError('Source changed before migration cleanup');
     }
     await source.delete(recursive: true);
@@ -587,6 +587,28 @@ Future<bool> _destinationMatches(
 Future<bool> _sourceMatches(Directory source, List<_MigrationEntry> entries,
         {bool requireDigest = true}) =>
     _directoryMatches(source, entries, requireDigest: requireDigest);
+
+Future<bool> _sourceCanBeCleaned(
+    Directory source, List<_MigrationEntry> entries) async {
+  if (await _isSymbolicLink(source.path)) return false;
+  final sourcePath = _absolutePath(source.path);
+  final expected = {for (final entry in entries) entry.relativePath: entry};
+  await for (final entity in source.list(recursive: true, followLinks: false)) {
+    if (entity is Link) return false;
+    if (entity is! File) continue;
+    final absolute = _absolutePath(entity.path);
+    if (!_isWithin(absolute, sourcePath)) return false;
+    final relative = absolute
+        .substring(sourcePath.length + 1)
+        .replaceAll(Platform.pathSeparator, '/');
+    final entry = expected[relative];
+    if (entry == null ||
+        !await _matchesDigest(entity, entry.size, entry.sha256)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 Future<bool> _directoryMatches(
   Directory directory,

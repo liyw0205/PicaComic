@@ -376,6 +376,59 @@ void main() {
     expect(await journal.exists(), isTrue);
   });
 
+  test('committed recovery finishes source cleanup after partial deletion',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('pica-dir-partial-cleanup-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = Directory('${root.path}/source');
+    final destination = Directory('${root.path}/destination');
+    await Directory(source.path).create(recursive: true);
+    await Directory(destination.path).create(recursive: true);
+    const files = <String, String>{
+      'one.txt': 'one',
+      'nested/two.txt': 'two',
+    };
+    for (final entry in files.entries) {
+      final sourceFile = File('${source.path}/${entry.key}');
+      final destinationFile = File('${destination.path}/${entry.key}');
+      await sourceFile.parent.create(recursive: true);
+      await destinationFile.parent.create(recursive: true);
+      await sourceFile.writeAsString(entry.value);
+      await destinationFile.writeAsString(entry.value);
+    }
+    final journal = File('${destination.path}.migration.json');
+    await journal.writeAsString(jsonEncode({
+      'version': 1,
+      'phase': 'committed',
+      'source': File(source.path).absolute.path,
+      'destination': File(destination.path).absolute.path,
+      'staging': '${destination.path}.migration-recovery.tmp',
+      'deleteSource': true,
+      'totalBytes': 6,
+      'files': [
+        for (final entry in files.entries)
+          {
+            'path': entry.key,
+            'size': entry.value.length,
+            'sha256': sha256.convert(utf8.encode(entry.value)).toString(),
+            'done': true,
+          },
+      ],
+    }));
+    await File('${source.path}/one.txt').delete();
+
+    final report = await migrateDirectory(source, destination);
+
+    expect(report.resumed, isTrue);
+    expect(await source.exists(), isFalse);
+    expect(await journal.exists(), isFalse);
+    for (final entry in files.entries) {
+      expect(await File('${destination.path}/${entry.key}').readAsString(),
+          entry.value);
+    }
+  });
+
   test('malformed journal cannot opt into source deletion', () async {
     final root = await Directory.systemTemp.createTemp('pica-dir-journal-');
     addTearDown(() => root.delete(recursive: true));
