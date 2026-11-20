@@ -61,6 +61,7 @@ extension _WidgetExt on Widget {
 
 class _ComicSourceSettingsState extends State<ComicSourceSettings> {
   var url = "";
+  static final _updatingSources = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -214,60 +215,64 @@ class _ComicSourceSettingsState extends State<ComicSourceSettings> {
       showToast(message: "Invalid url config");
       return;
     }
-    final sourceIndex = ComicSource.sources.indexOf(source);
-    ComicSource.sources.remove(source);
-    bool cancel = false;
-    var updated = false;
-    var parseStarted = false;
-    var controller = showLoadingDialog(App.globalContext!,
-        onCancel: () => cancel = true, barrierDismissible: false);
-    try {
-      var res = await logDio().get<String>(source.url,
-          options: Options(responseType: ResponseType.plain));
-      final data = res.data;
-      if (cancel) {
-        // The finally block restores the source in the in-memory list.
-      } else if (data == null) {
-        throw StateError("Comic source response is empty");
-      } else {
-        parseStarted = true;
-        final normalizedData = ComicSourceParser.normalizeSource(data);
-        await ComicSourceParser().parse(normalizedData, source.filePath);
-        await writeTextFileAtomically(
-            File(source.filePath), normalizedData);
-        updated = true;
-      }
-    } catch (e) {
-      if (!cancel) showToast(message: e.toString());
-    } finally {
-      controller.close();
-    }
-    if (!updated || cancel) {
-      if (parseStarted) {
-        try {
-          // Parsing installs a temporary JS source before the file replacement;
-          // reload to discard it when validation or persistence fails.
-          await ComicSource.reload();
-          MyApp.updater?.call();
-          return;
-        } catch (e) {
-          showToast(message: e.toString());
-        }
-      }
-      if (!ComicSource.sources.contains(source)) {
-        final index =
-            sourceIndex < 0 || sourceIndex > ComicSource.sources.length
-                ? ComicSource.sources.length
-                : sourceIndex;
-        ComicSource.sources.insert(index, source);
-      }
+    if (!identical(ComicSource.find(source.key), source) ||
+        !_updatingSources.add(source.key)) {
       return;
     }
+    bool cancel = false;
+    var sourceRemoved = false;
+    var sourceIndex = -1;
+    final cancelToken = CancelToken();
+    final controller = showLoadingDialog(App.globalContext!, onCancel: () {
+      cancel = true;
+      cancelToken.cancel('Comic source update cancelled');
+    }, barrierDismissible: false);
     try {
-      await ComicSource.reload();
-      MyApp.updater?.call();
+      final res = await logDio().get<String>(source.url,
+          cancelToken: cancelToken,
+          options: Options(responseType: ResponseType.plain));
+      if (cancel ||
+          controller.closed ||
+          !identical(ComicSource.find(source.key), source)) {
+        return;
+      }
+      final data = res.data;
+      if (data == null) {
+        throw StateError("Comic source response is empty");
+      }
+      final normalizedData = ComicSourceParser.normalizeSource(data);
+      // Parsing requires the key to be absent; keep the old source available
+      // throughout the network request and only remove it for validation.
+      sourceIndex = ComicSource.sources.indexOf(source);
+      ComicSource.sources.remove(source);
+      sourceRemoved = true;
+      final replacement =
+          await ComicSourceParser().parse(normalizedData, source.filePath);
+      if (replacement.key != source.key) {
+        throw StateError("Comic source update changed its key");
+      }
+      if (!cancel && !controller.closed) {
+        await writeTextFileAtomically(File(source.filePath), normalizedData);
+      }
     } catch (e) {
-      showToast(message: e.toString());
+      if (!cancel && !controller.closed) showToast(message: e.toString());
+    } finally {
+      if (sourceRemoved) {
+        try {
+          // Restore runtime objects from the committed file, including when
+          // cancellation or validation discarded a temporary JS replacement.
+          await ComicSource.reload();
+          MyApp.updater?.call();
+        } catch (e) {
+          if (ComicSource.find(source.key) == null) {
+            final index = sourceIndex.clamp(0, ComicSource.sources.length);
+            ComicSource.sources.insert(index, source);
+          }
+          if (!cancel) showToast(message: e.toString());
+        }
+      }
+      controller.close();
+      _updatingSources.remove(source.key);
     }
   }
 
