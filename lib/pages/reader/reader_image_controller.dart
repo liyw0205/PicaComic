@@ -35,6 +35,7 @@ class ReaderImageController {
   bool _disposed = false;
   BuildContext? _context;
   ReaderImageProviderBuilder? _createProvider;
+  VoidCallback? _onImagesChanged;
 
   int get activePreloads => _active.length;
 
@@ -57,6 +58,7 @@ class ReaderImageController {
     required int visibleCount,
     required int preloadCount,
     required ReaderImageProviderBuilder createProvider,
+    VoidCallback? onImagesChanged,
   }) {
     if (_disposed) return;
     if (requested.length != imageCount) {
@@ -65,6 +67,7 @@ class ReaderImageController {
     }
     _context = context;
     _createProvider = createProvider;
+    _onImagesChanged = onImagesChanged;
     _visibleCount = visibleCount;
     _preloadCount = preloadCount.clamp(0, 20);
     updateWindow(firstVisible);
@@ -344,6 +347,7 @@ class ReaderImageController {
       _queue.insert(0, index);
     }
     _drain();
+    _onImagesChanged?.call();
   }
 
   void _removeListener(
@@ -410,6 +414,7 @@ class ReaderImageController {
     requested = [];
     _context = null;
     _createProvider = null;
+    _onImagesChanged = null;
   }
 
   void dispose() {

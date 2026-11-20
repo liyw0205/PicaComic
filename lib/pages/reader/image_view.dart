@@ -484,6 +484,7 @@ extension ImageExt on ComicReadingPage {
       firstVisible: firstVisible,
       visibleCount: (index - firstVisible).clamp(1, urls.length),
       preloadCount: int.tryParse(appdata.settings[28]) ?? 0,
+      onImagesChanged: logic.update,
       createProvider: (candidate, scope) => logic.data.createImageProvider(
           chapter, candidate, urls[candidate],
           taskScope: scope),

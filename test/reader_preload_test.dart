@@ -788,6 +788,77 @@ void main() {
     await controller.waitForIdle();
   });
 
+  testWidgets('stalled preload replaces the mounted image provider',
+      (tester) async {
+    final providers = <_ControlledImageProvider>[];
+    final scopes = <ImageTaskScope>[];
+    final data = _ReadingData(_ControlledImageProvider(Completer<ImageInfo>()));
+    final logic = ComicReadingPageLogic(1, data, 1, () {})
+      ..urls = ['visible', 'preload'];
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      logic.releaseImageTasks();
+      await logic.readerImages.waitForIdle();
+      logic.pageController.dispose();
+      logic.scrollController.dispose();
+      logic.focusNode.dispose();
+      StateController.remove<ComicReadingPageLogic>();
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: StateBuilder<ComicReadingPageLogic>(
+        init: logic,
+        builder: (value) => Builder(builder: (context) {
+          value.readerImages.configure(
+            context: context,
+            imageCount: value.urls.length,
+            firstVisible: 0,
+            visibleCount: 1,
+            preloadCount: 1,
+            onImagesChanged: value.update,
+            createProvider: (index, scope) {
+              final provider = _ControlledImageProvider(Completer<ImageInfo>());
+              providers.add(provider);
+              scopes.add(scope);
+              return provider;
+            },
+          );
+          return ComicImage(
+            key: const ValueKey('mounted-preload'),
+            image: value.readerImages.imageFor(1),
+            width: 100,
+            height: 120,
+          );
+        }),
+      ),
+    ));
+    expect(providers, hasLength(1));
+    final previousProvider = logic.readerImages.imageFor(1);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pump();
+
+    expect(providers, hasLength(2));
+    expect(providers.first.loads, 1);
+    expect(providers.last.loads, 1);
+    expect(scopes.first.isCancelled, isTrue);
+    expect(scopes.last.isCancelled, isFalse);
+    final currentProvider = logic.readerImages.imageFor(1);
+    expect(currentProvider, isNot(same(previousProvider)));
+    expect(
+      tester
+          .widget<ComicImage>(find.byKey(const ValueKey('mounted-preload')))
+          .image,
+      same(currentProvider),
+      reason: 'the mounted image must switch to the replacement scope',
+    );
+
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    logic.releaseImageTasks();
+    await logic.readerImages.waitForIdle();
+  });
+
   testWidgets('twenty builds schedule three concurrent preloads once',
       (tester) async {
     final controller = ReaderImageController();
