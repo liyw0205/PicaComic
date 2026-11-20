@@ -120,7 +120,8 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(ComicImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.image != oldWidget.image) {
+    // A fresh reader scope can replace cancelled work with the same cache key.
+    if (!identical(widget.image, oldWidget.image)) {
       _resolveImage();
     }
   }
@@ -230,6 +231,7 @@ class _ComicImageState extends State<ComicImage> with WidgetsBindingObserver {
 
     setState(() {
       _loadingProgress = null;
+      _lastException = null;
       _frameNumber = null;
       _wasSynchronouslyLoaded = false;
     });

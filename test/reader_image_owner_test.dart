@@ -264,6 +264,76 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+      'mounted image resumes after leaving and returning before rebuild',
+      (tester) async {
+    final controller = ReaderImageController();
+    final oldSource = StreamController<DownloadProgress>();
+    final newSource = StreamController<DownloadProgress>();
+    var loads = 0;
+    var configured = false;
+    Widget view() => MaterialApp(home: Builder(builder: (context) {
+          if (!configured) {
+            configured = true;
+            controller.configure(
+              context: context,
+              imageCount: 40,
+              firstVisible: 0,
+              visibleCount: 1,
+              preloadCount: 0,
+              createProvider: (index, scope) => StreamImageProvider(
+                () => loads++ == 0 ? oldSource.stream : newSource.stream,
+                'mounted-rapid-return-$index',
+                taskScope: scope,
+              ),
+            );
+          }
+          return ComicImage(
+            image: controller.imageFor(0),
+            width: 100,
+            height: 120,
+          );
+        }));
+    addTearDown(() async {
+      controller.dispose();
+      unawaited(oldSource.close());
+      unawaited(newSource.close());
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      BaseImageProvider.clearCache();
+    });
+    await tester.pumpWidget(view());
+    expect(loads, 1);
+    final originalState = tester.state(find.byType(ComicImage));
+
+    controller.updateWindow(20);
+    controller.updateWindow(0);
+    await tester.pumpWidget(view());
+
+    expect(tester.state(find.byType(ComicImage)), same(originalState));
+    expect(loads, 2,
+        reason: 'the mounted widget must resolve the replacement reader scope');
+    expect(newSource.hasListener, isTrue);
+    final bytes = Uint8List.fromList(
+        image.encodePng(image.Image(width: 100, height: 120)));
+    newSource.add(DownloadProgress(1, 1, '', '', bytes));
+    unawaited(newSource.close());
+    for (var frame = 0;
+        frame < 20 && find.byType(RawImage).evaluate().isEmpty;
+        frame++) {
+      await tester.pump();
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+    }
+    await tester.pumpAndSettle();
+    expect(find.byType(RawImage), findsOneWidget);
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(find.text('Retry'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('late image error after widget disposal is ignored',
       (tester) async {
     final provider = _LateErrorImageProvider();
