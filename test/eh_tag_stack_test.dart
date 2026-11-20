@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/base.dart';
+import 'package:pica_comic/components/components.dart';
 import 'package:pica_comic/comic_source/comic_source.dart';
 import 'package:pica_comic/network/eh_network/tag_settings.dart';
 import 'package:pica_comic/network/eh_network/tag_stack.dart';
+import 'package:pica_comic/pages/settings/settings_page.dart';
 import 'package:pica_comic/pages/search_result_page.dart';
 import 'package:pica_comic/tools/translations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,6 +66,101 @@ void main() {
     final result = ehStackAdd(terms, const EhTagTerm('female', 'one more'));
     expect(result.outcome, EhStackOutcome.limit);
     expect(result.terms, same(terms));
+  });
+
+  group('stack setting persistence', () {
+    late Map<String, dynamic> sourceData;
+    late Map<String, dynamic>? Function() oldDataProvider;
+    late Future<void> Function() oldSaver;
+
+    setUp(() {
+      oldDataProvider = EhTagSettings.dataProvider;
+      oldSaver = EhTagSettings.saver;
+      sourceData = {};
+      EhTagSettings.dataProvider = () => sourceData;
+    });
+
+    tearDown(() {
+      EhTagSettings.dataProvider = oldDataProvider;
+      EhTagSettings.saver = oldSaver;
+    });
+
+    test('failed save restores the prior value and notifies listeners',
+        () async {
+      final previousChanges = EhTagSettings.changes.value;
+      EhTagSettings.saver = () async => throw StateError('write failed');
+
+      await expectLater(
+        EhTagSettings.setStackEnabled(false),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(sourceData, isEmpty);
+      expect(EhTagSettings.stackEnabled, isTrue);
+      expect(EhTagSettings.changes.value, previousChanges + 2);
+    });
+
+    test('overlapping failed saves roll back to the persisted baseline',
+        () async {
+      final firstStarted = Completer<void>();
+      final releaseFirst = Completer<void>();
+      final secondStarted = Completer<void>();
+      var saves = 0;
+      EhTagSettings.saver = () async {
+        saves++;
+        if (saves == 1) {
+          firstStarted.complete();
+          await releaseFirst.future;
+        } else {
+          secondStarted.complete();
+        }
+        throw StateError('write $saves failed');
+      };
+
+      final first = EhTagSettings.setStackEnabled(false);
+      await firstStarted.future;
+      final second = EhTagSettings.setStackEnabled(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(saves, 1, reason: 'writes should be serialized');
+
+      releaseFirst.complete();
+      await expectLater(first, throwsA(isA<StateError>()));
+      await secondStarted.future;
+      await expectLater(second, throwsA(isA<StateError>()));
+
+      expect(sourceData, isEmpty);
+      expect(EhTagSettings.stackEnabled, isTrue);
+      expect(saves, 2);
+    });
+
+    testWidgets('settings switch handles a failed write', (tester) async {
+      EhTagSettings.saver = () async => throw StateError('write failed');
+      await tester.pumpWidget(const MaterialApp(
+        home: OverlayWidget(
+          Scaffold(
+            body: SingleChildScrollView(child: EhSettings(false)),
+          ),
+        ),
+      ));
+
+      final tile = find.ancestor(
+        of: find.text('点标签时叠加到当前标签'),
+        matching: find.byType(ListTile),
+      );
+      final stackSwitch = find.descendant(
+        of: tile,
+        matching: find.byType(Switch),
+      );
+      expect(tester.widget<Switch>(stackSwitch).value, isTrue);
+
+      tester.widget<Switch>(stackSwitch).onChanged!(false);
+      await tester.pump();
+      await tester.pump();
+
+      expect(tester.widget<Switch>(stackSwitch).value, isTrue);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
   });
 
   group('search page integration', () {

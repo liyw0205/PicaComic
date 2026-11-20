@@ -9,6 +9,16 @@ class EhSettings extends StatefulWidget {
 }
 
 class _EhSettingsState extends State<EhSettings> {
+  Future<void> _setTagStackEnabled(bool value) async {
+    try {
+      await EhTagSettings.setStackEnabled(value);
+    } catch (error, stackTrace) {
+      log('Failed to save tag stack setting: $error\n$stackTrace', 'EH',
+          LogLevel.error);
+      if (mounted) showToast(message: '保存失败'.tl);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -56,10 +66,10 @@ class _EhSettingsState extends State<EhSettings> {
                 .tlParams({"n": "$ehTagStackLimit"})),
             trailing: Switch(
               value: EhTagSettings.stackEnabled,
-              onChanged: (value) => EhTagSettings.setStackEnabled(value),
+              onChanged: (value) => unawaited(_setTagStackEnabled(value)),
             ),
             onTap: () =>
-                EhTagSettings.setStackEnabled(!EhTagSettings.stackEnabled),
+                unawaited(_setTagStackEnabled(!EhTagSettings.stackEnabled)),
           ),
         ),
         ListTile(
