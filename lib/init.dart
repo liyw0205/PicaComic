@@ -16,6 +16,7 @@ import 'package:pica_comic/network/cookie_jar.dart';
 import 'package:pica_comic/network/http_proxy.dart';
 import 'package:pica_comic/network/http_client.dart';
 import 'package:pica_comic/network/jm_network/jm_network.dart';
+import 'package:pica_comic/network/nhentai_network/login_flow.dart';
 import 'package:pica_comic/network/network_logging.dart';
 import 'package:pica_comic/network/picacg_network/models.dart';
 import 'package:pica_comic/network/webdav.dart';
@@ -34,7 +35,6 @@ import 'base.dart';
 import 'comic_source/built_in/ehentai.dart';
 import 'comic_source/built_in/ht_manga.dart';
 import 'comic_source/built_in/jm.dart';
-import 'comic_source/built_in/nhentai.dart';
 import 'comic_source/built_in/picacg.dart';
 import 'foundation/app.dart';
 import 'network/nhentai_network/nhentai_main_network.dart';
@@ -63,7 +63,15 @@ final _startup = StartupCoordinator([
   StartupStep('JavaScript engine', () => JsEngine().init(throwOnError: true)),
   const StartupStep('comic sources', ComicSource.init),
   StartupStep('downloads', downloadManager.init),
-  StartupStep('Nhentai', () => NhentaiNetwork().init()),
+  StartupStep('Nhentai', () async {
+    final network = NhentaiNetwork();
+    await network.init();
+    final source = ComicSource.find('nhentai');
+    if (source != null &&
+        syncNhentaiAccountMarker(source.data, network.logged)) {
+      await source.saveData();
+    }
+  }),
   StartupStep('JM', () => JmNetwork().init()),
   StartupStep('favorites', () => LocalFavoritesManager().init()),
   StartupStep('history', () => HistoryManager().init()),
@@ -292,10 +300,5 @@ Future<void> _checkAccountData() async {
       'account': [s.getString('htName'), s.getString('htPwd')],
       'name': s.getString('htName'),
     });
-  }
-  await NhentaiNetwork().init();
-  if (NhentaiNetwork().logged) {
-    nhentai.data['account'] = 'ok';
-    await nhentai.saveData();
   }
 }

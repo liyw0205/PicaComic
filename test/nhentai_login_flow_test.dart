@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pica_comic/comic_source/comic_source.dart';
+import 'package:pica_comic/foundation/app.dart';
 import 'package:pica_comic/network/nhentai_network/login_flow.dart';
 
 void main() {
@@ -19,6 +22,60 @@ void main() {
     }
     expect(hasNhentaiSession({'access_token': 'dummy'}), isTrue);
     expect(hasNhentaiSession({'sessionid': 'dummy'}), isTrue);
+  });
+
+  test('account marker sync preserves other source data', () {
+    final data = <String, dynamic>{
+      'account': null,
+      'tagStack': ['artist:fixture'],
+      'customPreference': 'kept',
+    };
+
+    expect(syncNhentaiAccountMarker(data, true), isTrue);
+    expect(data, {
+      'account': 'ok',
+      'tagStack': ['artist:fixture'],
+      'customPreference': 'kept',
+    });
+    expect(syncNhentaiAccountMarker(data, true), isFalse);
+    expect(syncNhentaiAccountMarker(data, false), isTrue);
+    expect(data['account'], isNull);
+    expect(data['tagStack'], ['artist:fixture']);
+    expect(data['customPreference'], 'kept');
+  });
+
+  test('account marker sync preserves persisted source settings', () async {
+    final root = await Directory.systemTemp.createTemp('nhentai-source-');
+    addTearDown(() => root.delete(recursive: true));
+    App.dataPath = root.path;
+    final sourceDirectory = Directory('${root.path}/comic_source');
+    await sourceDirectory.create(recursive: true);
+    await File('${sourceDirectory.path}/nhentai.data').writeAsString(
+      jsonEncode({
+        'account': null,
+        'tagStack': ['artist:fixture'],
+        'customPreference': 'kept',
+      }),
+    );
+    final source = ComicSource.named(
+      name: 'nhentai',
+      key: 'nhentai',
+      filePath: 'built-in',
+    );
+
+    await source.loadData();
+    expect(syncNhentaiAccountMarker(source.data, true), isTrue);
+    await source.saveData();
+
+    expect(
+      jsonDecode(
+          await File('${sourceDirectory.path}/nhentai.data').readAsString()),
+      {
+        'account': 'ok',
+        'tagStack': ['artist:fixture'],
+        'customPreference': 'kept',
+      },
+    );
   });
 
   test('native and double-encoded JS strings decode safely', () {

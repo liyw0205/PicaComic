@@ -16,6 +16,13 @@ bool hasNhentaiSession(Map<String, String> values) {
   return false;
 }
 
+bool syncNhentaiAccountMarker(Map<String, dynamic> sourceData, bool logged) {
+  final marker = logged ? 'ok' : null;
+  if (sourceData['account'] == marker) return false;
+  sourceData['account'] = marker;
+  return true;
+}
+
 Map<String, String> decodeNhentaiStorage(dynamic result) {
   try {
     dynamic decoded = result is String ? jsonDecode(result) : result;
