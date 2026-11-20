@@ -703,6 +703,56 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('reversing within the same visible window changes preloads',
+      (tester) async {
+    final controller = ReaderImageController(maxConcurrent: 3);
+    final providers = <int, _ControlledImageProvider>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 20,
+      firstVisible: 10,
+      visibleCount: 1,
+      preloadCount: 2,
+      createProvider: (index, _) => providers.putIfAbsent(
+        index,
+        () => _ControlledImageProvider(Completer<ImageInfo>()),
+      ),
+    );
+    expect(providers.keys, orderedEquals([11, 12]));
+
+    controller.setScrolling(true);
+    expect(controller.updateScrollDirection(-24), isTrue);
+    expect(controller.activePreloads, 0,
+        reason: 'opposite-direction preloads must release their slots');
+    expect(providers.keys, orderedEquals([11, 12]));
+
+    controller.setScrolling(false);
+    expect(providers.keys, orderedEquals([11, 12, 9, 8]));
+    expect(controller.activePreloads, 2);
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder).drawColor(Colors.green, BlendMode.src);
+    final picture = recorder.endRecording();
+    final info = ImageInfo(image: picture.toImageSync(1, 1));
+    picture.dispose();
+    for (final provider in providers.values) {
+      provider.result.complete(info.clone());
+    }
+    await tester.pumpAndSettle();
+    info.dispose();
+  });
+
   testWidgets('window reports cancelled providers inside the retained range',
       (tester) async {
     final controller = ReaderImageController();

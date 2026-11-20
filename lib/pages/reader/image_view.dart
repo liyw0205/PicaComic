@@ -403,6 +403,10 @@ extension ImageExt on ComicReadingPage {
               if (logic.readingMethod ==
                   ReadingMethod.topToBottomContinuously) {
                 logic.readerImages.setScrolling(true);
+                if (logic.readerImages
+                    .updateScrollDirection(notification.scrollDelta)) {
+                  logic.update();
+                }
               }
               // update floating button
               var length = logic.data.eps?.length ?? 1;

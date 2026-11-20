@@ -145,6 +145,20 @@ class ReaderImageController {
     return changed;
   }
 
+  bool updateScrollDirection(double? scrollDelta) {
+    if (_disposed ||
+        requested.isEmpty ||
+        scrollDelta == null ||
+        scrollDelta == 0) {
+      return false;
+    }
+    final direction = scrollDelta > 0 ? 1 : -1;
+    if (_scrollDirection == direction) return false;
+    _scrollDirection = direction;
+    if (_isScrolling) _windowMovedWhileScrolling = true;
+    return updateWindow(_firstVisible, visibleCount: _visibleCount);
+  }
+
   ImageProvider imageFor(int index) {
     return _imageFor(index).provider;
   }
