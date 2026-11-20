@@ -303,6 +303,59 @@ void main() {
     }
   });
 
+  test('cancelling a reader waiter for the same URL reports cancellation',
+      () async {
+    final manager = ImageManager();
+    const path = '/page.png';
+    final url = '$origin$path';
+    final blocked = (started: Completer<void>(), release: Completer<void>());
+    blockedResponses[path] = blocked;
+    final activeScope = ImageTaskScope();
+    final activeProvider = StreamImageProvider(
+      () => manager.getImage(url),
+      url,
+      taskScope: activeScope,
+    );
+    final activeDecode = _decode(activeProvider);
+    final waiterScope = ImageTaskScope();
+    final waiterProvider = StreamImageProvider(
+      () => manager.getImage(url),
+      url,
+      taskScope: waiterScope,
+    );
+    final waiterDecode = expectLater(
+      _decode(waiterProvider),
+      throwsA(anyOf(
+        isA<ImageTaskCancelledException>(),
+        isA<DioException>()
+            .having((error) => error.type, 'type', DioExceptionType.cancel),
+      )),
+    );
+
+    try {
+      await blocked.started.future.timeout(const Duration(seconds: 3));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await waiterScope.cancel();
+      await waiterDecode.timeout(const Duration(seconds: 3));
+      await activeScope.cancel();
+      await expectLater(
+        activeDecode,
+        throwsA(anyOf(
+          isA<ImageTaskCancelledException>(),
+          isA<DioException>()
+              .having((error) => error.type, 'type', DioExceptionType.cancel),
+        )),
+      );
+    } finally {
+      blockedResponses.remove(path);
+      if (!blocked.release.isCompleted) blocked.release.complete();
+      await waiterScope.cancel();
+      await activeScope.cancel();
+      await activeProvider.evict();
+      await waiterProvider.evict();
+    }
+  });
+
   testWidgets(
       'reader window release restarts the same URL through ImageManager',
       (tester) async {
@@ -363,5 +416,74 @@ void main() {
     await controller.waitForIdle();
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
+  });
+
+  test('same URL starts a new stream while the cancelled completer is live',
+      () async {
+    const path = '/page.png';
+    final url = '$origin$path';
+    final blocked = (started: Completer<void>(), release: Completer<void>());
+    blockedResponses[path] = blocked;
+    final manager = ImageManager();
+    final oldScope = ImageTaskScope();
+    final oldProvider = StreamImageProvider(
+      () => manager.getImage(url),
+      url,
+      taskScope: oldScope,
+    );
+    final newScope = ImageTaskScope();
+    final newProvider = StreamImageProvider(
+      () => manager.getImage(url),
+      url,
+      taskScope: newScope,
+    );
+    final oldStream = oldProvider.resolve(ImageConfiguration.empty);
+    final newStream = newProvider.resolve(ImageConfiguration.empty);
+    final oldListener = ImageStreamListener(
+      (info, _) => info.dispose(),
+      onError: (_, __) {},
+    );
+    final received = Completer<void>();
+    final newListener = ImageStreamListener(
+      (info, _) {
+        info.dispose();
+        if (!received.isCompleted) received.complete();
+      },
+      onError: (Object error, StackTrace? stack) {
+        if (!received.isCompleted) received.completeError(error, stack);
+      },
+    );
+
+    try {
+      oldStream.addListener(oldListener);
+      await blocked.started.future.timeout(const Duration(seconds: 3));
+
+      final oldRelease = oldScope.cancel();
+      blockedResponses.remove(path);
+      newStream.addListener(newListener);
+      expect(newStream.completer, isNot(same(oldStream.completer)));
+      for (var attempt = 0;
+          attempt < 300 &&
+              requests.where((request) => request == path).length < 2;
+          attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(requests.where((request) => request == path), hasLength(2));
+      await received.future.timeout(const Duration(seconds: 3));
+      await oldRelease.timeout(const Duration(seconds: 3));
+
+      expect(oldProvider, isNot(newProvider));
+      expect(await CacheManager().findCache(url), isNotNull);
+      expect(ImageManager.haveTask, isFalse);
+    } finally {
+      blockedResponses.remove(path);
+      if (!blocked.release.isCompleted) blocked.release.complete();
+      oldStream.removeListener(oldListener);
+      newStream.removeListener(newListener);
+      await oldScope.cancel();
+      await newScope.cancel();
+      await oldProvider.evict();
+      await newProvider.evict();
+    }
   });
 }

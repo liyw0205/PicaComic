@@ -20,6 +20,17 @@ class StreamImageProvider extends BaseImageProvider<StreamImageProvider> {
   final String key;
 
   @override
+  // A replacement reader scope must not inherit a completer owned by a
+  // cancelled load for the same URL.
+  bool operator ==(Object other) =>
+      other is StreamImageProvider &&
+      key == other.key &&
+      identical(taskScope, other.taskScope);
+
+  @override
+  int get hashCode => Object.hash(key, identityHashCode(taskScope));
+
+  @override
   Future<Uint8List> load(StreamController<ImageChunkEvent> chunkEvents) async {
     return _loadFromStream(chunkEvents, null);
   }

@@ -134,7 +134,11 @@ class ImageManager {
     final generation = _taskGeneration;
     while (true) {
       if (owner != null && _cancelledOwners.contains(owner)) {
-        throw StateError('Image task owner cancelled');
+        throw DioException(
+          requestOptions: RequestOptions(path: key),
+          type: DioExceptionType.cancel,
+          message: 'Image task owner cancelled',
+        );
       }
       if (generation != _taskGeneration) {
         throw DioException(
