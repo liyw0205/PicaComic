@@ -14,6 +14,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_ANDROID_CERT_SHA256: F8A7A9C390F7A996FCEC9297E585BA89F99D2A17C258F233DC204FD6EDEDCD24
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,6 +52,47 @@ jobs:
             android/gradle.properties
             android/gradle/wrapper/gradle-wrapper.properties
             android/gradle/wrapper/gradle-wrapper.jar
+      - name: Prepare and verify Android release signing key
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?Existing release keystore secret is required}"
+          : "${ANDROID_STORE_PASSWORD:?Existing store password secret is required}"
+          : "${ANDROID_KEY_ALIAS:?Existing key alias secret is required}"
+          : "${ANDROID_KEY_PASSWORD:?Existing key password secret is required}"
+          keystore="$RUNNER_TEMP/pica-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          keytool -list -keystore "$keystore" \
+            -storepass "$ANDROID_STORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          keytool -certreq -keystore "$keystore" \
+            -storepass "$ANDROID_STORE_PASSWORD" \
+            -keypass "$ANDROID_KEY_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -file "$RUNNER_TEMP/pica-release.csr" >/dev/null
+          expected="$(printf '%s' "$EXPECTED_ANDROID_CERT_SHA256" |
+            tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
+          actual="$(keytool -exportcert -keystore "$keystore" \
+            -storepass "$ANDROID_STORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" |
+            sha256sum | awk '{print toupper($1)}')"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Unexpected release keystore certificate." >&2
+            exit 1
+          fi
+          {
+            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$ANDROID_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+          } > android/key.properties
       - uses: ./.github/actions/setup-flutter
       - run: flutter pub get --enforce-lockfile
       - name: Analyze Dart sources
@@ -79,32 +122,6 @@ jobs:
           sudo apt-get install -y libcurl4-openssl-dev
       - name: Run native curl regression tests
         run: sh test/native_curl/run.sh
-      - name: Prepare Android release signing key
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${ANDROID_KEYSTORE_BASE64:?Existing release keystore secret is required}"
-          : "${ANDROID_STORE_PASSWORD:?Existing store password secret is required}"
-          : "${ANDROID_KEY_ALIAS:?Existing key alias secret is required}"
-          : "${ANDROID_KEY_PASSWORD:?Existing key password secret is required}"
-          keystore="$RUNNER_TEMP/pica-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
-          test -s "$keystore"
-          keytool -list -keystore "$keystore" \
-            -storepass "$ANDROID_STORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null
-          {
-            printf 'storeFile=%s\n' "$keystore"
-            printf 'storePassword=%s\n' "$ANDROID_STORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
-          } > android/key.properties
       - name: Build Android APKs
         shell: bash
         run: |
@@ -135,7 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           # Preserve the signing identity used by the published update channel.
-          expected="F8A7A9C390F7A996FCEC9297E585BA89F99D2A17C258F233DC204FD6EDEDCD24"
+          expected="$EXPECTED_ANDROID_CERT_SHA256"
           expected="$(printf '%s' "$expected" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
