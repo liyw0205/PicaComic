@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pica_comic/network/update.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ReleaseAdapter implements HttpClientAdapter {
   _ReleaseAdapter(this.payload);
@@ -82,5 +83,36 @@ void main() {
 
     expect(await getLatestVersion(client: dio), '4.2.19');
     expect(await getUpdatesInfo(), notes);
+  });
+
+  test('failed update checks can retry while completed checks are throttled',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime(2026, 11, 22, 12);
+    var attempts = 0;
+
+    Future<bool?> check() async {
+      attempts++;
+      return attempts == 1 ? null : false;
+    }
+
+    expect(
+      await checkUpdateWithThrottle(preferences, check, clock: () => now),
+      isNull,
+    );
+    expect(preferences.getInt('lastCheckUpdate'), isNull);
+
+    expect(
+      await checkUpdateWithThrottle(preferences, check, clock: () => now),
+      isFalse,
+    );
+    expect(preferences.getInt('lastCheckUpdate'), now.millisecondsSinceEpoch);
+
+    expect(
+      await checkUpdateWithThrottle(preferences, check, clock: () => now),
+      isNull,
+    );
+    expect(attempts, 2);
   });
 }

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:pica_comic/base.dart';
 import 'package:pica_comic/network/app_dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const updateRepository = 'liyw0205/PicaComic';
 
@@ -26,6 +27,28 @@ Future<bool?> checkUpdate() async {
   } catch (e) {
     return null;
   }
+}
+
+Future<bool?> checkUpdateWithThrottle(
+  SharedPreferences preferences,
+  Future<bool?> Function() check, {
+  DateTime Function()? clock,
+}) async {
+  final now = clock?.call() ?? DateTime.now();
+  final lastCheck = preferences.getInt('lastCheckUpdate');
+  if (lastCheck != null &&
+      now.difference(DateTime.fromMillisecondsSinceEpoch(lastCheck)).inDays <
+          1) {
+    return null;
+  }
+
+  final result = await check();
+  if (result != null) {
+    final checkedAt = clock?.call() ?? DateTime.now();
+    await preferences.setInt(
+        'lastCheckUpdate', checkedAt.millisecondsSinceEpoch);
+  }
+  return result;
 }
 
 bool compareSemVer(String ver1, String ver2) {

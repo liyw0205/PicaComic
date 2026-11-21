@@ -126,20 +126,10 @@ class MainPageState extends State<MainPage> {
 
   Future<void> _checkUpdates() async {
     var s = await SharedPreferences.getInstance();
-    var lastCheck = s.getInt("lastCheckUpdate");
-    if (lastCheck != null) {
-      if (DateTime.now()
-              .difference(DateTime.fromMillisecondsSinceEpoch(lastCheck))
-              .inDays <
-          1) {
-        return;
-      }
-    }
     if (appdata.settings[2] != "1") {
       return;
     }
-    var res = await checkUpdate();
-    await s.setInt("lastCheckUpdate", DateTime.now().millisecondsSinceEpoch);
+    var res = await checkUpdateWithThrottle(s, checkUpdate);
     if (res != true) return;
     var info = await getUpdatesInfo();
     if (info == null) return;
