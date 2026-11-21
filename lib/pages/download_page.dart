@@ -221,6 +221,18 @@ class DownloadPageLogic extends StateController {
     selected = List.generate(length, (index) => false);
     selectedNum = 0;
   }
+
+  void removeDeletedComics(Iterable<String> ids) {
+    final deletedIds = ids.toSet();
+    baseComics.removeWhere((comic) => deletedIds.contains(comic.id));
+    comics = baseComics.toList();
+    searchMode = false;
+    selecting = false;
+    keyword = "";
+    keyword_ = "";
+    resetSelected(comics.length);
+    update();
+  }
 }
 
 /// Runs the font download and turns Dio cancellation into a normal result.
@@ -648,7 +660,7 @@ class DownloadPage extends StatelessWidget {
                               }
                             }
                             await downloadManager.delete(comics);
-                            logic.refresh();
+                            logic.removeDeletedComics(comics);
                           },
                           child: Text("确认".tl)),
                     ],
