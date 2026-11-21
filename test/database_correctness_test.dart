@@ -40,6 +40,96 @@ void main() {
     expect(manager.count(folder), 2);
   });
 
+  test('legacy favorite rows with null tags remain readable', () async {
+    final manager = LocalFavoritesManager.create();
+    final path = '${directory.path}/null-favorite-tags.db';
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('null-tags');
+    await DataMaintenance.waitForIdle();
+    final fixture = sqlite3.open(path);
+    fixture.execute('''
+      insert into "$folder"
+        (target, name, author, type, tags, cover_path, time, display_order)
+      values (?, ?, ?, ?, null, ?, ?, ?);
+    ''', [
+      'null-tags-comic',
+      'Legacy title',
+      'Legacy author',
+      FavoriteType.picacg.key,
+      '',
+      '2000-01-01 00:00:00',
+      0,
+    ]);
+    fixture.dispose();
+
+    try {
+      expect(manager.getAllComics(folder).single.tags, isEmpty);
+    } finally {
+      manager.close();
+    }
+  });
+
+  test('reading progress updates roll back when a compatible row fails',
+      () async {
+    final manager = LocalFavoritesManager.create();
+    final path = '${directory.path}/read-progress-rollback.db';
+    await manager.init(databasePath: path, importLegacy: false);
+    final folder = manager.createFolder('read-progress');
+    const target = 'read-progress-comic';
+    final legacyType = 'picacg'.hashCode;
+    final canonical = favorite(target, FavoriteType.picacg.key)
+      ..time = '2000-01-01 00:00:00';
+    await manager.addComic(folder, canonical, null, false);
+    await DataMaintenance.waitForIdle();
+    final fixture = sqlite3.open(path);
+    fixture.execute('''
+      insert into "$folder"
+        (target, name, author, type, tags, cover_path, time, display_order)
+      values (?, ?, ?, ?, ?, ?, ?, ?);
+    ''', [
+      target,
+      'Legacy duplicate',
+      'An author',
+      legacyType,
+      '',
+      '',
+      '2000-01-01 00:00:00',
+      1,
+    ]);
+    final orderedTypes = fixture
+        .select('select type from "$folder" where target = ? order by type;',
+            [target])
+        .map((row) => row['type'] as int)
+        .toList();
+    expect(orderedTypes, [FavoriteType.picacg.key, legacyType]);
+    fixture.execute('''
+      create trigger reject_legacy_read_update
+      before update on "$folder"
+      when new.type = $legacyType
+      begin
+        select raise(abort, 'injected read progress failure');
+      end;
+    ''');
+    fixture.dispose();
+
+    try {
+      await expectLater(
+        manager.onReadEnd(target, FavoriteType.picacg),
+        throwsA(isA<SqliteException>()),
+      );
+      final raw = sqlite3.open(path, mode: OpenMode.readOnly);
+      final times = raw
+          .select('select time from "$folder" where target = ? order by type;',
+              [target])
+          .map((row) => row['time'] as String)
+          .toList();
+      raw.dispose();
+      expect(times, ['2000-01-01 00:00:00', '2000-01-01 00:00:00']);
+    } finally {
+      manager.close();
+    }
+  });
+
   test('legacy built-in source favorite keys remain readable and writable',
       () async {
     final manager = LocalFavoritesManager.create();

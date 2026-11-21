@@ -257,7 +257,7 @@ class FavoriteItem {
       : name = row["name"],
         author = row["author"],
         type = FavoriteType(row["type"]),
-        tags = (row["tags"] as String).split(","),
+        tags = ((row["tags"] as String?) ?? "").split(","),
         target = row["target"],
         coverPath = row["cover_path"],
         time = row["time"] {
@@ -1358,35 +1358,41 @@ class LocalFavoritesManager {
     }
     _modifiedAfterLastCache = true;
     bool isModified = false;
-    for (final folder in folderNames) {
-      final rows = _matchingRows(folder, target, type);
-      if (rows.isNotEmpty) {
-        isModified = true;
-        var newTime = _nextSyncTime();
-        int? order;
-        if (appdata.settings[54] == "1") {
-          int maxValue = _db.select("""
-            SELECT MAX(display_order) AS max_value
-            FROM ${_identifier(folder)};
-          """).firstOrNull?["max_value"] ?? 0;
-          order = maxValue + 1;
-        } else if (appdata.settings[54] == "2") {
-          int minValue = _db.select("""
-            SELECT MIN(display_order) AS min_value
-            FROM ${_identifier(folder)};
-          """).firstOrNull?["min_value"] ?? 0;
-          order = minValue - 1;
-        }
-        for (final row in rows) {
-          _db.execute("""
+    _transaction(() {
+      for (final folder in folderNames) {
+        final rows = _matchingRows(folder, target, type);
+        if (rows.isNotEmpty) {
+          isModified = true;
+          var newTime = _nextSyncTime();
+          int? order;
+          if (appdata.settings[54] == "1") {
+            int maxValue = _db.select("""
+              SELECT MAX(display_order) AS max_value
+              FROM ${_identifier(folder)};
+            """).firstOrNull?["max_value"] ?? 0;
+            order = maxValue + 1;
+          } else if (appdata.settings[54] == "2") {
+            int minValue = _db.select("""
+              SELECT MIN(display_order) AS min_value
+              FROM ${_identifier(folder)};
+            """).firstOrNull?["min_value"] ?? 0;
+            order = minValue - 1;
+          }
+          for (final row in rows) {
+            _db.execute("""
               UPDATE ${_identifier(folder)}
               SET ${order == null ? '' : 'display_order = ?,'} time = ?
               WHERE target == ? and type == ?;
-            """,
-              [if (order != null) order, newTime, row['target'], row['type']]);
+            """, [
+              if (order != null) order,
+              newTime,
+              row['target'],
+              row['type']
+            ]);
+          }
         }
       }
-    }
+    });
     if (isModified) {
       updateUI();
     }
