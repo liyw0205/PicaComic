@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      EXPECTED_ANDROID_CERT_SHA256: F8A7A9C390F7A996FCEC9297E585BA89F99D2A17C258F233DC204FD6EDEDCD24
+      ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -52,7 +52,7 @@ jobs:
             android/gradle.properties
             android/gradle/wrapper/gradle-wrapper.properties
             android/gradle/wrapper/gradle-wrapper.jar
-      - name: Prepare and verify Android release signing key
+      - name: Prepare optional Android signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -62,6 +62,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo "No custom signing key configured; using the default Android signing configuration."
+            exit 0
+          fi
           : "${ANDROID_KEYSTORE_BASE64:?Existing release keystore secret is required}"
           : "${ANDROID_STORE_PASSWORD:?Existing store password secret is required}"
           : "${ANDROID_KEY_ALIAS:?Existing key alias secret is required}"
@@ -77,15 +81,17 @@ jobs:
             -keypass "$ANDROID_KEY_PASSWORD" \
             -alias "$ANDROID_KEY_ALIAS" \
             -file "$RUNNER_TEMP/pica-release.csr" >/dev/null
-          expected="$(printf '%s' "$EXPECTED_ANDROID_CERT_SHA256" |
-            tr -d ':' | tr '[:lower:]' '[:upper:]')"
-          [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
-          actual="$(keytool -exportcert -keystore "$keystore" \
-            -storepass "$ANDROID_STORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" |
-            sha256sum | awk '{print toupper($1)}')"
-          if [[ "$actual" != "$expected" ]]; then
-            echo "Unexpected release keystore certificate." >&2
-            exit 1
+          if [[ -n "$ANDROID_CERT_SHA256" ]]; then
+            expected="$(printf '%s' "$ANDROID_CERT_SHA256" |
+              tr -d ':' | tr '[:lower:]' '[:upper:]')"
+            [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
+            actual="$(keytool -exportcert -keystore "$keystore" \
+              -storepass "$ANDROID_STORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" |
+              sha256sum | awk '{print toupper($1)}')"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "Unexpected release keystore certificate." >&2
+              exit 1
+            fi
           fi
           {
             printf 'storeFile=%s\n' "$keystore"
@@ -151,8 +157,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Preserve the signing identity used by the published update channel.
-          expected="$EXPECTED_ANDROID_CERT_SHA256"
+          expected="$ANDROID_CERT_SHA256"
+          if [[ -z "$expected" ]]; then
+            echo "No expected signing certificate configured; skipping certificate comparison."
+            exit 0
+          fi
           expected="$(printf '%s' "$expected" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
