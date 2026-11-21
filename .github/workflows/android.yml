@@ -79,7 +79,7 @@ jobs:
           sudo apt-get install -y libcurl4-openssl-dev
       - name: Run native curl regression tests
         run: sh test/native_curl/run.sh
-      - name: Prepare optional Android signing key
+      - name: Prepare Android release signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -89,10 +89,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
-            echo "No custom signing key configured; using the default Android signing configuration."
-            exit 0
-          fi
           : "${ANDROID_KEYSTORE_BASE64:?Existing release keystore secret is required}"
           : "${ANDROID_STORE_PASSWORD:?Existing store password secret is required}"
           : "${ANDROID_KEY_ALIAS:?Existing key alias secret is required}"
@@ -135,16 +131,11 @@ jobs:
           fi
       - name: Verify release APK signer certificate
         if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
         shell: bash
         run: |
           set -euo pipefail
-          expected="$ANDROID_CERT_SHA256"
-          if [[ -z "$expected" ]]; then
-            echo "No expected signing certificate configured; skipping certificate comparison."
-            exit 0
-          fi
+          # Preserve the signing identity used by the published update channel.
+          expected="F8A7A9C390F7A996FCEC9297E585BA89F99D2A17C258F233DC204FD6EDEDCD24"
           expected="$(printf '%s' "$expected" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           [[ "$expected" =~ ^[A-F0-9]{64}$ ]]
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
