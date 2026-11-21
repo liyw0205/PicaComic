@@ -186,10 +186,38 @@ class ComicSource {
       comicPageBuilder;
 
   Future<void> loadData() async {
-    var file = File("${App.dataPath}/comic_source/$key.data");
-    if (await file.exists()) {
-      data = Map.from(jsonDecode(await file.readAsString()));
+    final file = File("${App.dataPath}/comic_source/$key.data");
+    if (!await file.exists()) return;
+
+    final contents = await file.readAsString();
+    Object? decoded;
+    try {
+      decoded = jsonDecode(contents);
+    } on FormatException {
+      await _recoverInvalidData(file, 'invalid JSON');
+      return;
     }
+    if (decoded is! Map) {
+      await _recoverInvalidData(file, 'JSON root is not an object');
+      return;
+    }
+    data = Map<String, dynamic>.from(decoded);
+  }
+
+  Future<void> _recoverInvalidData(File file, String reason) async {
+    var suffix = DateTime.now().microsecondsSinceEpoch;
+    var backup = File('${file.path}.corrupt.$suffix');
+    while (await backup.exists()) {
+      backup = File('${file.path}.corrupt.${++suffix}');
+    }
+    await file.rename(backup.path);
+    data = <String, dynamic>{};
+    log(
+      'Saved source data for $key had $reason; preserved as '
+          '${backup.uri.pathSegments.last} and loaded defaults.',
+      'ComicSource',
+      LogLevel.warning,
+    );
   }
 
   Future<void> _saveTail = Future<void>.value();
