@@ -165,7 +165,14 @@ void _writeComicArchive(
                 data.epNames?.elementAtOrNull(index) ?? "Chapter ${index + 1}");
             walk(entry, '$prefix/$chapter');
           } else if (entry is File) {
-            zipFile.addFile('$prefix/${entry.name}', entry.path);
+            withZipReadablePath(
+              entry.path,
+              (sourcePath) =>
+                  zipFile.addFile('$prefix/${entry.name}', sourcePath),
+              windowsCompatibility: Platform.isWindows,
+              writeBytes: (bytes) =>
+                  zipFile.addFileFromBytes('$prefix/${entry.name}', bytes),
+            );
             files++;
           } else {
             throw FileSystemException('Unsupported archive entry', entry.path);
@@ -178,6 +185,45 @@ void _writeComicArchive(
     if (files == 0) throw StateError('No files to export');
   } finally {
     zipFile.close();
+  }
+}
+
+@visibleForTesting
+void withZipReadablePath(
+  String sourcePath,
+  void Function(String path) write, {
+  bool windowsCompatibility = false,
+  Directory? temporaryRoot,
+  void Function(Uint8List bytes)? writeBytes,
+}) {
+  final hasNonAsciiSource =
+      sourcePath.codeUnits.any((codeUnit) => codeUnit > 0x7f);
+  if (!windowsCompatibility || !hasNonAsciiSource) {
+    write(sourcePath);
+    return;
+  }
+
+  final root = (temporaryRoot ?? Directory.systemTemp).absolute.path;
+  final hasNonAsciiRoot = root.codeUnits.any((codeUnit) => codeUnit > 0x7f);
+  if (hasNonAsciiRoot) {
+    final writeFromBytes = writeBytes;
+    if (writeFromBytes == null) {
+      throw FileSystemException(
+          'No ASCII ZIP source path is available', sourcePath);
+    }
+    writeFromBytes(File(sourcePath).readAsBytesSync());
+    return;
+  }
+
+  final temporaryDirectory =
+      (temporaryRoot ?? Directory.systemTemp).createTempSync('pica_comic_zip_');
+  try {
+    final temporaryPath =
+        '${temporaryDirectory.path}${Platform.pathSeparator}source';
+    File(sourcePath).copySync(temporaryPath);
+    write(temporaryPath);
+  } finally {
+    temporaryDirectory.deleteSync(recursive: true);
   }
 }
 

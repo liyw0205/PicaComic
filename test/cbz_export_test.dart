@@ -15,6 +15,7 @@ import 'package:pica_comic/tools/cbz.dart';
 import 'package:pica_comic/tools/cbz_export.dart';
 import 'package:pica_comic/tools/io_extensions.dart';
 import 'package:pica_comic/tools/io_tools.dart';
+import 'package:zip_flutter/zip_flutter.dart' as zip_flutter;
 import 'package:xml/xml.dart';
 
 void main() {
@@ -412,6 +413,69 @@ void main() {
       expect(await original.readAsString(), 'previous export');
       await expectNoTemporaryFiles();
     }
+  });
+
+  test('Windows ZIP export adapts non-ASCII source paths', () async {
+    final source = await page('漫画/章节一/0.png', 'unicode source path');
+    final output = File('${root.path}/unicode-source.zip');
+    final zip = zip_flutter.ZipFile.open(output.path);
+    String? usedPath;
+    try {
+      withZipReadablePath(
+        source.path,
+        (path) {
+          usedPath = path;
+          expect(path.codeUnits.every((codeUnit) => codeUnit <= 0x7f), isTrue);
+          zip.addFile('漫画/章节一/0.png', path);
+        },
+        windowsCompatibility: true,
+        temporaryRoot: root,
+        writeBytes: (bytes) => zip.addFileFromBytes('漫画/章节一/0.png', bytes),
+      );
+    } finally {
+      zip.close();
+    }
+
+    expect(usedPath, isNot(source.path));
+    expect(await File(usedPath!).exists(), isFalse);
+    expect(await source.exists(), isTrue);
+    expect(readArchive(output).findFile('漫画/章节一/0.png')!.content,
+        await source.readAsBytes());
+    expect(
+        root
+            .listSync()
+            .where((entry) => entry.name.startsWith('pica_comic_zip_')),
+        isEmpty);
+  });
+
+  test('Windows ZIP export uses bytes when the temporary root is non-ASCII',
+      () async {
+    final source = await page('漫画/章节二/1.png', 'unicode temporary root');
+    final temporaryRoot = Directory('${root.path}/临时目录')
+      ..createSync(recursive: true);
+    final output = File('${root.path}/unicode-fallback.zip');
+    final zip = zip_flutter.ZipFile.open(output.path);
+    String? usedPath;
+    try {
+      withZipReadablePath(
+        source.path,
+        (path) {
+          usedPath = path;
+          zip.addFile('漫画/章节二/1.png', path);
+        },
+        windowsCompatibility: true,
+        temporaryRoot: temporaryRoot,
+        writeBytes: (bytes) => zip.addFileFromBytes('漫画/章节二/1.png', bytes),
+      );
+    } finally {
+      zip.close();
+    }
+
+    expect(usedPath, isNull);
+    expect(await source.exists(), isTrue);
+    expect(temporaryRoot.listSync(), isEmpty);
+    expect(readArchive(output).findFile('漫画/章节二/1.png')!.content,
+        await source.readAsBytes());
   });
 
   test('file name truncation preserves complete Unicode code points', () {
