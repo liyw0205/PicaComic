@@ -83,6 +83,14 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
 
   Map<String, String>? folders;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(loadPage());
+    });
+  }
+
   Future<void> loadPage() async {
     if (_loadingRequest) return;
     _loadingRequest = true;
@@ -116,7 +124,9 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
     if (!mounted) return;
     setState(() {
       _loading = true;
+      _errorMessage = null;
     });
+    unawaited(loadPage());
   }
 
   void openFolder(String key, String title) {
@@ -126,7 +136,6 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      unawaited(loadPage());
       return const Center(
         child: CircularProgressIndicator(),
       );
@@ -134,12 +143,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
       return NetworkError(
         message: _errorMessage!,
         withAppbar: false,
-        retry: () {
-          setState(() {
-            _loading = true;
-            _errorMessage = null;
-          });
-        },
+        retry: _reloadFolders,
       );
     } else {
       var length = folders!.length;

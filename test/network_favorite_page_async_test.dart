@@ -58,6 +58,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('synchronous folder loader failure does not set state in build',
+      (tester) async {
+    var requests = 0;
+    final data = FavoriteData(
+      key: 'test',
+      title: 'Test',
+      multiFolder: true,
+      loadComic: (page, [folder]) async => const Res([]),
+      loadFolders: ([_]) {
+        requests++;
+        if (requests == 1) throw StateError('sync loader failure');
+        return Future.value(const Res({'folder': 'Folder'}));
+      },
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(splashFactory: NoSplash.splashFactory),
+      home: NetworkFavoritePage(data),
+    ));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(NetworkError), findsOneWidget);
+    expect(requests, 1);
+
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(requests, 2);
+    expect(find.byType(NetworkError), findsNothing);
+    expect(find.text('Folder'), findsOneWidget);
+  });
+
   testWidgets('network-to-local continue is disabled until a folder is chosen',
       (tester) async {
     final previousSources = ComicSource.sources;
