@@ -45,6 +45,11 @@ Widget buildExploreSettings(BuildContext context, bool popUp) {
               )),
           icon: const Icon(Icons.block)),
       SwitchSetting(
+        title: "屏蔽女性向".tl,
+        settingsIndex: 92,
+        icon: const Icon(Icons.filter_alt_outlined),
+      ),
+      SwitchSetting(
         title: "完全隐藏屏蔽的作品".tl,
         settingsIndex: 83,
         icon: const Icon(Icons.visibility_off),

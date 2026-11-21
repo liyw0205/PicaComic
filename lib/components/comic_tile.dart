@@ -885,10 +885,34 @@ Widget buildComicTile(BuildContext context, BaseComic item, String sourceKey,
 }
 
 final _tagGenderSuffix = RegExp(r'(?: [♀♂])+$');
+const _femaleOrientedTags = {
+  'bl',
+  "boy's love",
+  'boys love',
+  'shounen ai',
+  'shounen-ai',
+  'yaoi',
+  '男同',
+  '女性向',
+  '女性向け',
+  '耽美',
+};
 
 String _tagWithoutNamespace(String tag) {
   final separator = tag.indexOf(':');
   return separator < 0 ? tag : tag.substring(separator + 1);
+}
+
+bool _isFemaleOrientedTag(BaseComic item, String tag) {
+  bool matches(String value) {
+    final normalized = _tagWithoutNamespace(
+      value.replaceFirst(_tagGenderSuffix, ''),
+    ).trim().toLowerCase();
+    return _femaleOrientedTags.contains(normalized);
+  }
+
+  return matches(tag) ||
+      (item.enableTagsTranslation && matches(tag.translateTagsToCN));
 }
 
 /// return the first blocked keyword, or null if not blocked
@@ -919,6 +943,10 @@ String? isBlocked(BaseComic item) {
         return keyword;
       }
     }
+  }
+  if (appdata.appSettings.blockFemaleOrientedWorks &&
+      item.tags.any((tag) => _isFemaleOrientedTag(item, tag))) {
+    return '女性向';
   }
   return null;
 }

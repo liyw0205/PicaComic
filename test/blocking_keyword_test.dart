@@ -76,7 +76,7 @@ void main() {
     directory = await Directory.systemTemp.createTemp('pica-blocking-');
     App.dataPath = directory.path;
     final translations = Uint8List.fromList(utf8.encode(jsonEncode({
-      'male': {'focus': '其他词'},
+      'male': {'focus': '其他词', 'danmei': '耽美'},
       'female': {'focus': '限定词'},
     })));
     binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets',
@@ -105,6 +105,7 @@ void main() {
     previousSettings = List.of(appdata.settings);
     appdata.blockingKeyword = [];
     appdata.settings[45] = '';
+    appdata.appSettings.blockFemaleOrientedWorks = false;
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -173,6 +174,46 @@ void main() {
         isBlocked(const CustomComic(
             'Title', '', '', 'fixture', ['female:focus'], '', 'fixture')),
         isNull);
+  });
+
+  test('female-oriented tag blocking is opt-in and matches known labels', () {
+    expect(isBlocked(const _TranslatedComic(['yaoi'])), isNull);
+
+    appdata.appSettings.blockFemaleOrientedWorks = true;
+    for (final tag in [
+      'Yaoi',
+      'female:shounen ai',
+      "male:boy's love",
+      'BL',
+      '男同',
+      '耽美',
+      '女性向',
+      '女性向け',
+      'male:yaoi ♀',
+    ]) {
+      expect(
+        isBlocked(CustomComic(
+            'Title', '', '', 'fixture', [tag], '', 'fixture')),
+        '女性向',
+        reason: tag,
+      );
+    }
+
+    expect(isBlocked(const _TranslatedComic(['male:danmei'])), '女性向');
+    for (final tag in [
+      'female:focus',
+      'females only',
+      'sole female',
+      'yaoi-inspired',
+      'shounen ai adjacent',
+    ]) {
+      expect(
+        isBlocked(CustomComic(
+            'Title', '', '', 'fixture', [tag], '', 'fixture')),
+        isNull,
+        reason: tag,
+      );
+    }
   });
 
   for (final mode in ['scroll', 'paged', 'sliver']) {

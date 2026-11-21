@@ -64,6 +64,7 @@ class SettingsSchema {
       84,
       88,
       91,
+      92,
     ]) {
       range(i, 0, 1);
     }

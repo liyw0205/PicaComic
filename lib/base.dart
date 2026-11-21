@@ -133,6 +133,7 @@ class Appdata {
     "2.0.26", //89 jm app version
     "", //90 上次手动代理配置
     "0", //91 VPN 自动切换代理
+    "0", //92 屏蔽女性向作品
   ];
 
   /// 隐式数据, 用于存储一些不需要用户设置的数据, 此数据通常为某些组件的状态, 此设置不应当被同步
@@ -613,6 +614,12 @@ class _Settings {
 
   set fullyHideBlockedWorks(bool value) {
     appdata.settings[83] = value ? "1" : "0";
+  }
+
+  bool get blockFemaleOrientedWorks => appdata.settings[92] == "1";
+
+  set blockFemaleOrientedWorks(bool value) {
+    appdata.settings[92] = value ? "1" : "0";
   }
 
   /// cache size limit in MB
