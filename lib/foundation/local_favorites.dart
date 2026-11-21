@@ -348,6 +348,7 @@ class LocalFavoritesManager {
   static LocalFavoritesManager? cache;
 
   late Database _db;
+  late String _deletionsPath;
 
   bool _isOpen = false;
 
@@ -365,6 +366,12 @@ class LocalFavoritesManager {
 
   Future<void> snapshotTo(String path) => DataMaintenance.run(() {
         _db.execute('VACUUM INTO ?;', [path]);
+        final deletions = sqlite3.open(_deletionsPath, mode: OpenMode.readOnly);
+        try {
+          deletions.execute('VACUUM INTO ?;', ['$path.deletions']);
+        } finally {
+          deletions.dispose();
+        }
       });
 
   bool _deferWrite(void Function() operation) {
@@ -378,7 +385,10 @@ class LocalFavoritesManager {
 
   Future<void> init({String? databasePath, bool importLegacy = true}) async {
     close();
-    _db = sqlite3.open(databasePath ?? "${App.dataPath}/local_favorite.db");
+    final path = databasePath ?? "${App.dataPath}/local_favorite.db";
+    _deletionsPath = '$path.deletions';
+    _db = sqlite3.open(path);
+    _db.execute('ATTACH DATABASE ? AS deletions;', [_deletionsPath]);
     _isOpen = true;
     _db.createFunction(
       functionName: 'pica_lower',
@@ -425,6 +435,15 @@ class LocalFavoritesManager {
       );
     """);
       }
+      _db.execute('''
+        create table if not exists deletions.deleted_items (
+          folder_name text,
+          target text,
+          type int,
+          deleted_at text,
+          primary key (folder_name, target, type)
+        );
+      ''');
       tables.remove('folder_sync');
       tables.remove('folder_order');
       for (final table in tables) {
@@ -597,6 +616,7 @@ class LocalFavoritesManager {
   /// Merge an archive into this connection; all database writes commit together.
   Future<void> mergeFrom(String sourcePath) => DataMaintenance.run(() {
         final source = sqlite3.open(sourcePath, mode: OpenMode.readOnly);
+        Database? sourceDeletions;
         try {
           final tables = source
               .select(
@@ -626,13 +646,34 @@ class LocalFavoritesManager {
           }
           final syncRows =
               hasSync ? source.select('select * from folder_sync;') : null;
+          final deletionPath = '$sourcePath.deletions';
+          sourceDeletions = File(deletionPath).existsSync()
+              ? sqlite3.open(deletionPath, mode: OpenMode.readOnly)
+              : null;
           _transaction(() {
+            if (sourceDeletions != null) {
+              for (final row
+                  in sourceDeletions.select('select * from deleted_items;')) {
+                _mergeDeletion(
+                  row['folder_name'] as String,
+                  row['target'] as String,
+                  row['type'] as int,
+                  row['deleted_at'] as String,
+                );
+              }
+            }
             final existingFolders = folderNames.toSet();
             for (final folder in folders.keys) {
+              final entries = folders[folder]!;
+              if (!existingFolders.contains(folder) &&
+                  entries.isNotEmpty &&
+                  !entries.any((entry) => _mayMergeComic(folder, entry.$1))) {
+                continue;
+              }
               final isNewFolder = existingFolders.add(folder);
               if (isNewFolder) createFolder(folder);
-              for (final (comic, displayOrder) in folders[folder]!) {
-                _insertComic(folder, comic,
+              for (final (comic, displayOrder) in entries) {
+                _mergeComic(folder, comic,
                     order: isNewFolder ? displayOrder : null);
               }
               if (isNewFolder && order.containsKey(folder)) {
@@ -654,6 +695,7 @@ class LocalFavoritesManager {
             }
           });
         } finally {
+          sourceDeletions?.dispose();
           source.dispose();
           _modifiedAfterLastCache = true;
         }
@@ -915,6 +957,54 @@ class LocalFavoritesManager {
   }
 
   bool _insertComic(String folder, FavoriteItem comic, {int? order}) {
+    final deletedAt = _deletedAt(folder, comic.target, comic.type.key);
+    if (deletedAt != null) {
+      comic.time = _nextSyncTime(deletedAt);
+      _removeDeletion(folder, comic.target, comic.type.key);
+    }
+    return _insertComicRow(folder, comic, order: order);
+  }
+
+  bool _mergeComic(String folder, FavoriteItem comic, {int? order}) {
+    final deletedAt = _deletedAt(folder, comic.target, comic.type.key);
+    if (deletedAt != null) {
+      if (!_isTimeAfter(comic.time, deletedAt)) return false;
+      _removeDeletion(folder, comic.target, comic.type.key);
+    }
+    final existing = _matchingRows(folder, comic.target, comic.type)
+        .where((row) => row['target'] == comic.target)
+        .toList();
+    if (existing.isNotEmpty) {
+      for (final row in existing) {
+        final existingTime = row['time'] as String;
+        if (_isTimeAfter(comic.time, existingTime)) {
+          _db.execute('''
+            update ${_identifier(folder)}
+            set name = ?, author = ?, tags = ?, cover_path = ?, time = ?
+            where target = ? and type = ?;
+          ''', [
+            comic.name,
+            comic.author,
+            comic.tags.join(','),
+            comic.coverPath,
+            comic.time,
+            row['target'],
+            row['type']
+          ]);
+          _modifiedAfterLastCache = true;
+        }
+      }
+      return false;
+    }
+    return _insertComicRow(folder, comic, order: order);
+  }
+
+  bool _mayMergeComic(String folder, FavoriteItem comic) {
+    final deletedAt = _deletedAt(folder, comic.target, comic.type.key);
+    return deletedAt == null || _isTimeAfter(comic.time, deletedAt);
+  }
+
+  bool _insertComicRow(String folder, FavoriteItem comic, {int? order}) {
     if (!folderNames.contains(folder)) {
       throw Exception("Folder does not exists");
     }
@@ -938,6 +1028,98 @@ class LocalFavoritesManager {
     ]);
     _modifiedAfterLastCache = true;
     return true;
+  }
+
+  int _canonicalType(int type) => FavoriteType(type)._canonicalBuiltInKey;
+
+  String? _deletedAt(String folder, String target, int type) {
+    final rows = _db.select('''
+      select target, deleted_at from deletions.deleted_items
+      where folder_name = ? and type = ?;
+    ''', [folder, _canonicalType(type)]);
+    final favoriteType = FavoriteType(type);
+    final matching = rows
+        .where((row) => _favoriteTargetsMatch(
+            favoriteType, row['target'] as String, target))
+        .map((row) => row['deleted_at'] as String)
+        .toList();
+    if (matching.isEmpty) return null;
+    return matching
+        .reduce((left, right) => _isTimeAfter(left, right) ? left : right);
+  }
+
+  void _removeDeletion(String folder, String target, int type) {
+    final favoriteType = FavoriteType(type);
+    final targets = _db
+        .select('''
+          select target from deletions.deleted_items
+          where folder_name = ? and type = ?;
+        ''', [folder, _canonicalType(type)])
+        .map((row) => row['target'] as String)
+        .where((deletedTarget) =>
+            _favoriteTargetsMatch(favoriteType, deletedTarget, target))
+        .toList();
+    for (final deletedTarget in targets) {
+      _db.execute('''
+        delete from deletions.deleted_items
+        where folder_name = ? and target = ? and type = ?;
+      ''', [folder, deletedTarget, _canonicalType(type)]);
+    }
+  }
+
+  String _nextSyncTime([String? after]) {
+    var time = DateTime.now();
+    final previous = after == null ? null : DateTime.tryParse(after);
+    if (previous != null && !time.isAfter(previous)) {
+      time = previous.add(const Duration(milliseconds: 1));
+    }
+    return time.toIso8601String().replaceFirst('T', ' ');
+  }
+
+  bool _isTimeAfter(String itemTime, String eventTime) {
+    final item = DateTime.tryParse(itemTime);
+    final event = DateTime.tryParse(eventTime);
+    return item != null && event != null && item.isAfter(event);
+  }
+
+  void _recordDeletion(
+      String folder, String target, int type, String deletedAt) {
+    final current = _deletedAt(folder, target, type);
+    final effective = current != null && _isTimeAfter(current, deletedAt)
+        ? current
+        : deletedAt;
+    _db.execute('''
+      insert into deletions.deleted_items(folder_name, target, type, deleted_at)
+      values(?,?,?,?)
+      on conflict(folder_name, target, type) do update set deleted_at = excluded.deleted_at;
+    ''', [folder, target, _canonicalType(type), effective]);
+  }
+
+  void _mergeDeletion(
+      String folder, String target, int type, String deletedAt) {
+    final existing = _deletedAt(folder, target, type);
+    final effective = existing != null && _isTimeAfter(existing, deletedAt)
+        ? existing
+        : deletedAt;
+    var hasNewerFavorite = false;
+    if (folderNames.contains(folder)) {
+      for (final row in _matchingRows(folder, target, FavoriteType(type))) {
+        final rowTime = row['time'] as String;
+        if (_isTimeAfter(rowTime, effective)) {
+          hasNewerFavorite = true;
+        } else {
+          _db.execute('''
+            delete from ${_identifier(folder)}
+            where target = ? and type = ?;
+          ''', [row['target'], row['type']]);
+        }
+      }
+    }
+    if (hasNewerFavorite) {
+      _removeDeletion(folder, target, type);
+    } else {
+      _recordDeletion(folder, target, type, effective);
+    }
   }
 
   Future<void> _cacheCover(FavoriteItem comic) async {
@@ -1000,6 +1182,12 @@ class LocalFavoritesManager {
       throw StateError('Folder does not exist: $name');
     }
     _transaction(() {
+      final deletedAt = _nextSyncTime();
+      for (final row
+          in _db.select('select target, type from ${_identifier(name)};')) {
+        _recordDeletion(
+            name, row['target'] as String, row['type'] as int, deletedAt);
+      }
       _db.execute("""
       delete from folder_sync where folder_name == ?;
     """, [name]);
@@ -1041,7 +1229,8 @@ class LocalFavoritesManager {
       return DataMaintenance.run<void>(() => deleteComic(folder, comic));
     }
     _modifiedAfterLastCache = true;
-    _deleteComicWithTarget(folder, comic.target, comic.type);
+    _transaction(
+        () => _deleteComicWithTarget(folder, comic.target, comic.type));
     await checkAndDeleteCover(comic);
     await saveData();
   }
@@ -1053,12 +1242,15 @@ class LocalFavoritesManager {
           () => deleteComicWithTarget(folder, target, type));
     }
     _modifiedAfterLastCache = true;
-    _deleteComicWithTarget(folder, target, type);
+    _transaction(() => _deleteComicWithTarget(folder, target, type));
     await saveData();
   }
 
   void _deleteComicWithTarget(String folder, String target, FavoriteType type) {
+    final deletedAt = _nextSyncTime();
     for (final row in _matchingRows(folder, target, type)) {
+      _recordDeletion(
+          folder, row['target'] as String, row['type'] as int, deletedAt);
       _db.execute("""
         delete from ${_identifier(folder)}
         where target == ? and type == ?;
@@ -1087,6 +1279,12 @@ class LocalFavoritesManager {
   Future<void> clearAll() => DataMaintenance.run(() async {
         _transaction(() {
           for (final folder in folderNames) {
+            final deletedAt = _nextSyncTime();
+            for (final row in _db
+                .select('select target, type from ${_identifier(folder)};')) {
+              _recordDeletion(folder, row['target'] as String,
+                  row['type'] as int, deletedAt);
+            }
             _db.execute('DROP TABLE ${_identifier(folder)};');
           }
           _db.execute('delete from folder_sync; delete from folder_order;');
@@ -1146,6 +1344,10 @@ class LocalFavoritesManager {
       _db.execute(
           'update folder_order set folder_name = ? where folder_name = ?;',
           [after, before]);
+      _db.execute('''
+        update deletions.deleted_items set folder_name = ?
+        where folder_name = ?;
+      ''', [after, before]);
     });
     await saveData();
   }
@@ -1160,10 +1362,7 @@ class LocalFavoritesManager {
       final rows = _matchingRows(folder, target, type);
       if (rows.isNotEmpty) {
         isModified = true;
-        var newTime = DateTime.now()
-            .toIso8601String()
-            .replaceFirst("T", " ")
-            .substring(0, 19);
+        var newTime = _nextSyncTime();
         int? order;
         if (appdata.settings[54] == "1") {
           int maxValue = _db.select("""

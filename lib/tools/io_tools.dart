@@ -501,6 +501,8 @@ Future<DataImportResult> importDataResult(String? filePath,
           .writeAsString(jsonEncode(appdata.settings), flush: true);
       final replacements = <String, String>{
         '${App.dataPath}/local_favorite.db': mergedFavoritePath,
+        '${App.dataPath}/local_favorite.db.deletions':
+            '$mergedFavoritePath.deletions',
         '${App.dataPath}/history.db': mergedHistoryPath,
         '${App.dataPath}/settings': '${work.path}/settings',
         '${App.dataPath}/settings.bak': '${work.path}/settings.bak',

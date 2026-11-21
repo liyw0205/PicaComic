@@ -704,6 +704,10 @@ Future<Map<String, dynamic>> extractDataBackup(String source, Directory root,
         throw FormatException('Missing ${entry.key}');
       }
     }
+    final favoriteDeletions = File('${root.path}/local_favorite.db.deletions');
+    if (favoriteDeletions.existsSync()) {
+      checkBackupDatabase(favoriteDeletions.path, 'deleted_items');
+    }
     return manifest;
   } catch (_) {
     // The root is a derived extraction, so discard invalid output while the
