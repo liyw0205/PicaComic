@@ -9,6 +9,7 @@ import 'package:pica_comic/base.dart';
 import 'package:pica_comic/foundation/data_maintenance.dart';
 import 'package:pica_comic/foundation/history.dart';
 import 'package:pica_comic/foundation/image_loader/base_image_provider.dart';
+import 'package:pica_comic/foundation/image_loader/image_task_priority.dart';
 import 'package:pica_comic/foundation/image_loader/image_task_scope.dart';
 import 'package:pica_comic/foundation/image_loader/stream_image_provider.dart';
 import 'package:pica_comic/foundation/image_manager.dart';
@@ -751,6 +752,136 @@ void main() {
     }
     await tester.pumpAndSettle();
     info.dispose();
+  });
+
+  testWidgets('promotes an idle preload when its page becomes visible',
+      (tester) async {
+    final controller = ReaderImageController();
+    final scopes = <int, List<ImageTaskScope>>{};
+    final priorities = <int, List<int>>{};
+    final sources = <int, List<StreamController<DownloadProgress>>>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+      for (final sourceList in sources.values) {
+        for (final source in sourceList) {
+          if (!source.isClosed) await source.close();
+        }
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 8,
+      firstVisible: 0,
+      visibleCount: 1,
+      preloadCount: 1,
+      createProvider: (index, scope) {
+        scopes.putIfAbsent(index, () => []).add(scope);
+        return StreamImageProvider(() {
+          priorities
+              .putIfAbsent(index, () => [])
+              .add(Zone.current[imageTaskPriorityZoneKey] as int? ?? 0);
+          final source = StreamController<DownloadProgress>();
+          sources.putIfAbsent(index, () => []).add(source);
+          return source.stream;
+        }, 'visible-priority-$index', taskScope: scope);
+      },
+    );
+    await tester.pump();
+    final previousProvider = controller.imageFor(1);
+    final previousScope = scopes[1]!.single;
+    expect(priorities[1], [1]);
+
+    controller.setScrolling(true);
+    controller.updateWindow(1);
+
+    final visibleProvider = controller.imageFor(1);
+    expect(previousScope.isCancelled, isTrue,
+        reason: 'an idle speculative request must be replaced on promotion');
+    expect(visibleProvider, isNot(same(previousProvider)));
+    expect(
+      (visibleProvider as StreamImageProvider).taskScope!.priority,
+      2,
+    );
+
+    unawaited(precacheImage(visibleProvider, context, onError: (_, __) {}));
+    await tester.pump();
+    expect(priorities[1], [1, 2],
+        reason: 'the replacement request must use visible-page priority');
+
+    final bytes = Uint8List.fromList(
+      image.encodePng(image.Image(width: 1, height: 1)),
+    );
+    sources[1]!
+        .last
+        .add(DownloadProgress(bytes.length, bytes.length, '', '', bytes));
+    await sources[1]!.last.close();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('keeps a progressing preload when its page becomes visible',
+      (tester) async {
+    final controller = ReaderImageController();
+    final scopes = <int, ImageTaskScope>{};
+    final sources = <int, StreamController<DownloadProgress>>{};
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    addTearDown(() async {
+      controller.dispose();
+      await controller.waitForIdle();
+      for (final source in sources.values) {
+        if (!source.isClosed) await source.close();
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    controller.configure(
+      context: context,
+      imageCount: 8,
+      firstVisible: 0,
+      visibleCount: 1,
+      preloadCount: 2,
+      createProvider: (index, scope) {
+        scopes[index] = scope;
+        return StreamImageProvider(() {
+          final source = StreamController<DownloadProgress>();
+          sources[index] = source;
+          return source.stream;
+        }, 'progressing-priority-$index', taskScope: scope);
+      },
+    );
+    await tester.pump();
+    final previousProvider = controller.imageFor(2);
+    final previousScope = scopes[2]!;
+    final source = sources[2]!;
+    source.add(DownloadProgress.inProgress(5, 100, '', ''));
+    await tester.pump();
+
+    controller.setScrolling(true);
+    controller.updateWindow(2);
+
+    expect(controller.imageFor(2), same(previousProvider));
+    expect(previousScope.isCancelled, isFalse);
+    expect(previousScope.priority, 2);
+
+    final bytes = Uint8List.fromList(
+      image.encodePng(image.Image(width: 1, height: 1)),
+    );
+    source.add(DownloadProgress(bytes.length, bytes.length, '', '', bytes));
+    await source.close();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('window reports cancelled providers inside the retained range',

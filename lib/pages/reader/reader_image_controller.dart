@@ -124,8 +124,22 @@ class ReaderImageController {
       for (var i = _firstVisible; i < visibleEnd; i++) i,
     };
     final candidateSet = candidates.toSet();
+    final idlePromotions = <_ReaderImage>{};
+    for (final image in _images.values) {
+      if (visible.contains(image.index)) {
+        if (_active.contains(image) &&
+            image.scope.priority < 2 &&
+            image.lastProgressAt == null) {
+          idlePromotions.add(image);
+        }
+        image.scope.priority = 2;
+      } else {
+        image.scope.priority = 1;
+      }
+    }
     for (final image in _active.toList()) {
-      if (visible.contains(image.index) || candidateSet.contains(image.index)) {
+      if ((visible.contains(image.index) && !idlePromotions.contains(image)) ||
+          candidateSet.contains(image.index)) {
         continue;
       }
       _active.remove(image);
