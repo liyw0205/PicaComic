@@ -210,6 +210,60 @@ void main() {
     expect(gate.tryComplete(), isFalse);
   });
 
+  test('Cloudflare cookies are not accepted before clearance is issued',
+      () async {
+    var challengeChecks = 0;
+
+    final cookies = await verifiedCloudflareCookies(
+      readCookies: () async => {'session': 'fixture'},
+      isVerifiedPage: () async {
+        challengeChecks++;
+        return true;
+      },
+    );
+
+    expect(cookies, isNull);
+    expect(challengeChecks, 0);
+  });
+
+  test('Cloudflare rejects empty clearance cookies', () async {
+    final cookies = await verifiedCloudflareCookies(
+      readCookies: () async => {'cf_clearance': ' '},
+      isVerifiedPage: () async => true,
+    );
+
+    expect(cookies, isNull);
+  });
+
+  test('Cloudflare clearance is not accepted while challenge is still active',
+      () async {
+    final cookies = await verifiedCloudflareCookies(
+      readCookies: () async => {
+        'cf_clearance': 'fixture-clearance',
+        'session': 'fixture-session',
+      },
+      isVerifiedPage: () async => false,
+    );
+
+    expect(cookies, isNull);
+  });
+
+  test('Cloudflare cookies are accepted only after challenge page exits',
+      () async {
+    final cookies = await verifiedCloudflareCookies(
+      readCookies: () async => {
+        'cf_clearance': 'fixture-clearance',
+        'session': 'fixture-session',
+      },
+      isVerifiedPage: () async => true,
+    );
+
+    expect(cookies, {
+      'cf_clearance': 'fixture-clearance',
+      'session': 'fixture-session',
+    });
+  });
+
   test('ordinary 403 responses remain Dio errors', () async {
     final dio = Dio()
       ..httpClientAdapter = _ResponseAdapter(headers: <String, List<String>>{})

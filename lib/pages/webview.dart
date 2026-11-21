@@ -67,6 +67,7 @@ class AppWebview extends StatefulWidget {
       this.onNavigation,
       this.singlePage = false,
       this.onStarted,
+      this.onLoadStop,
       this.onCookieLogin,
       this.onExtractCookie,
       this.onClose,
@@ -80,6 +81,8 @@ class AppWebview extends StatefulWidget {
   final bool Function(String url)? onNavigation;
 
   final void Function(InAppWebViewController controller)? onStarted;
+
+  final void Function(InAppWebViewController controller)? onLoadStop;
 
   final void Function(BuildContext context, InAppWebViewController controller)?
       onCookieLogin;
@@ -252,6 +255,9 @@ class _AppWebviewState extends State<AppWebview> with WidgetsBindingObserver {
       onWebViewCreated: (c) {
         controller = c;
         widget.onStarted?.call(c);
+      },
+      onLoadStop: (c, _) {
+        if (mounted && controller == c) widget.onLoadStop?.call(c);
       },
       onReceivedHttpAuthRequest: (c, challenge) async =>
           _handleHttpAuthRequest(challenge),
