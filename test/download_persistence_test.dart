@@ -1147,4 +1147,34 @@ void main() {
     );
     expect(manager.total, 2);
   });
+
+  test('malformed legacy row does not hide valid downloaded comics', () async {
+    final valid = DownloadedGallery(galleryFixture('10001', const {}), 2);
+    final timestamp = DateTime(2026, 1, 1).millisecondsSinceEpoch;
+    createDownloadDatabase(directory, [
+      [
+        valid.id,
+        valid.name,
+        valid.subTitle,
+        timestamp,
+        'valid-gallery',
+        2,
+        jsonEncode(valid.toJson()),
+      ],
+      [
+        '10002',
+        'Malformed legacy gallery',
+        '',
+        timestamp,
+        'malformed-gallery',
+        0,
+        jsonEncode({'gallery': null, 'size': null}),
+      ],
+    ]);
+
+    await manager.init();
+
+    expect(manager.getAll().map((comic) => comic.id), [valid.id]);
+    expect(manager.total, 2);
+  });
 }

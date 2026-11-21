@@ -1513,8 +1513,9 @@ abstract mixin class _DownloadDb {
     return result
         .map(
           (e) => _getComicFromJson(e['id'], e['json'],
-              DateTime.fromMillisecondsSinceEpoch(e['time']), e['directory'])!,
+              DateTime.fromMillisecondsSinceEpoch(e['time']), e['directory']),
         )
+        .whereType<DownloadedItem>()
         .toList();
   }
 
