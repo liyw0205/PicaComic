@@ -37,6 +37,19 @@ import 'picacg_network/models.dart';
 
 typedef DownloadingCallback = void Function();
 
+@visibleForTesting
+Future<void> ensureNoMediaMarker(String path) async {
+  Future<FileSystemEntityType> type() =>
+      FileSystemEntity.type(path, followLinks: false);
+
+  if (await type() != FileSystemEntityType.notFound) return;
+  try {
+    await File(path).create(exclusive: true);
+  } on PathExistsException {
+    if (await type() == FileSystemEntityType.notFound) rethrow;
+  }
+}
+
 class DownloadManager with _DownloadDb implements Listenable {
   static DownloadManager? cache;
 
@@ -155,10 +168,7 @@ class DownloadManager with _DownloadDb implements Listenable {
       await dir.create(recursive: true);
     }
     if (App.isAndroid) {
-      var file = File("$path/.nomedia");
-      if (!file.existsSync()) {
-        await file.create();
-      }
+      await ensureNoMediaMarker('$path/.nomedia');
     }
   }
 
@@ -1481,7 +1491,9 @@ abstract mixin class _DownloadDb {
   }
 
   int get total {
-    var result = _db!.select('''
+    final db = _db;
+    if (db == null) return 0;
+    var result = db.select('''
       select count(*) from download
     ''');
     return result.first['count(*)'];

@@ -42,6 +42,16 @@ void main() {
   File getQueueFile([String suffix = '']) =>
       File('${directory.path}/newDownload.json$suffix');
 
+  test('existing .nomedia directory does not fail path initialization',
+      () async {
+    final markerDirectory = Directory('${directory.path}/.nomedia');
+    await markerDirectory.create();
+
+    await ensureNoMediaMarker(markerDirectory.path);
+
+    expect(await markerDirectory.exists(), isTrue);
+  });
+
   Map<String, dynamic> committedQueue([
     List<Object?> tasks = const [],
     int generation = 1,
@@ -552,6 +562,7 @@ void main() {
     appdata.settings[22] = invalidPath.path;
 
     await expectLater(manager.init(), throwsA(isA<FileSystemException>()));
+    expect(manager.total, 0);
 
     appdata.settings[22] = directory.path;
     await manager.init();
