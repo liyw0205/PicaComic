@@ -190,10 +190,13 @@ void main() {
       '女性向',
       '女性向け',
       'male:yaoi ♀',
+      'yaoi | males only',
+      'males only | yaoi',
+      'male:danmei|males only',
     ]) {
       expect(
-        isBlocked(CustomComic(
-            'Title', '', '', 'fixture', [tag], '', 'fixture')),
+        isBlocked(
+            CustomComic('Title', '', '', 'fixture', [tag], '', 'fixture')),
         '女性向',
         reason: tag,
       );
@@ -204,12 +207,13 @@ void main() {
       'female:focus',
       'females only',
       'sole female',
+      'males only',
       'yaoi-inspired',
       'shounen ai adjacent',
     ]) {
       expect(
-        isBlocked(CustomComic(
-            'Title', '', '', 'fixture', [tag], '', 'fixture')),
+        isBlocked(
+            CustomComic('Title', '', '', 'fixture', [tag], '', 'fixture')),
         isNull,
         reason: tag,
       );

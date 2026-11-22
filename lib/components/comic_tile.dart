@@ -905,10 +905,12 @@ String _tagWithoutNamespace(String tag) {
 
 bool _isFemaleOrientedTag(BaseComic item, String tag) {
   bool matches(String value) {
-    final normalized = _tagWithoutNamespace(
-      value.replaceFirst(_tagGenderSuffix, ''),
-    ).trim().toLowerCase();
-    return _femaleOrientedTags.contains(normalized);
+    return value.split(RegExp(r'\s*\|\s*')).any((candidate) {
+      final normalized = _tagWithoutNamespace(
+        candidate.replaceFirst(_tagGenderSuffix, ''),
+      ).trim().toLowerCase();
+      return _femaleOrientedTags.contains(normalized);
+    });
   }
 
   return matches(tag) ||
